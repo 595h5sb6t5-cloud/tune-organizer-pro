@@ -108,16 +108,25 @@ Deno.serve(async (req) => {
 
     const body = await req.json().catch(() => ({}));
     const returnPath = sanitizeReturnPath((body as Record<string, unknown>)?.return_path);
+    const clientOrigin = typeof (body as Record<string, unknown>)?.origin === "string" 
+      ? (body as Record<string, unknown>).origin as string 
+      : null;
 
     step = "runtime_config";
     const clientId = Deno.env.get("SPOTIFY_CLIENT_ID")?.trim();
-    const redirectUri = Deno.env.get("SPOTIFY_REDIRECT_URI")?.trim();
     const signingSecret = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")?.trim() || Deno.env.get("LOVABLE_API_KEY")?.trim();
+    
+    // Build redirect URI from client origin if available, otherwise fall back to env var
+    const redirectUri = clientOrigin 
+      ? `${clientOrigin}/spotify-callback`
+      : Deno.env.get("SPOTIFY_REDIRECT_URI")?.trim();
+    
     const diagnostics = {
       has_client_id: Boolean(clientId),
       has_redirect_uri: Boolean(redirectUri),
       has_signing_secret: Boolean(signingSecret),
       redirect_uri: redirectUri ?? null,
+      origin_source: clientOrigin ? "client" : "env",
       return_path: returnPath,
     };
 

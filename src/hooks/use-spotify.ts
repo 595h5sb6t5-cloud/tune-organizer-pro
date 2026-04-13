@@ -236,7 +236,7 @@ export function useSpotify() {
       }
 
       const configRes = await supabase.functions.invoke("spotify-auth-start", {
-        body: { return_path: returnPath },
+        body: { return_path: returnPath, origin: window.location.origin },
       });
 
       if (configRes.error) {
