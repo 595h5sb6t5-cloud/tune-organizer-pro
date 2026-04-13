@@ -525,7 +525,7 @@ const PlaylistDetail = () => {
     } finally {
       setRecsLoading(false);
     }
-  }, [playlist, tracks, vibe, knownTrackIds, isKnown]);
+  }, [playlist, tracks, vibe, knownTrackIds, isKnown, enrich]);
 
   const handleAnalyze = () => {
     if (!playlist) return;
