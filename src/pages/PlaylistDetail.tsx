@@ -8,6 +8,8 @@ import { useAuth } from "@/hooks/use-auth";
 import { usePlaylistVibe, type PlaylistVibeAnalysis, type EmotionalArcSegment, type SonicDna, type TrackHighlight } from "@/hooks/use-playlist-vibe";
 import { supabase } from "@/integrations/supabase/client";
 import { useKnownTracks } from "@/hooks/use-known-tracks";
+import { useSpotifySearch, type SpotifyTrackInfo } from "@/hooks/use-spotify-search";
+import { AudioPreviewButton } from "@/components/app/AudioPreviewButton";
 
 interface PlaylistTrack {
   id: string;
