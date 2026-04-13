@@ -39,19 +39,32 @@ function fail(step: string, error: string, status = 500, details: Record<string,
   return json({ error, step, status, ...details }, status);
 }
 
-async function refreshTokenIfNeeded(supabase: ReturnType<typeof createClient>, userId: string) {
+type SpotifyConnectionRow = {
+  access_token: string;
+  refresh_token: string;
+  expires_at: string;
+};
+
+async function refreshTokenIfNeeded(supabase: any, userId: string): Promise<string> {
   const { data: conn, error } = await supabase
     .from("spotify_connections")
     .select("access_token, refresh_token, expires_at")
     .eq("user_id", userId)
     .single();
 
-  if (error || !conn) {
+  const connection = isRecord(conn)
+    && typeof conn.access_token === "string"
+    && typeof conn.refresh_token === "string"
+    && typeof conn.expires_at === "string"
+    ? (conn as SpotifyConnectionRow)
+    : null;
+
+  if (error || !connection) {
     throw new SpotifyImportError("load_connection", "No Spotify connection found.", 404);
   }
 
-  if (new Date(conn.expires_at) > new Date(Date.now() + 5 * 60 * 1000)) {
-    return conn.access_token;
+  if (new Date(connection.expires_at) > new Date(Date.now() + 5 * 60 * 1000)) {
+    return connection.access_token;
   }
 
   const clientId = Deno.env.get("SPOTIFY_CLIENT_ID");
@@ -66,7 +79,7 @@ async function refreshTokenIfNeeded(supabase: ReturnType<typeof createClient>, u
       "Content-Type": "application/x-www-form-urlencoded",
       Authorization: `Basic ${btoa(`${clientId}:${clientSecret}`)}`,
     },
-    body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: conn.refresh_token }),
+    body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: connection.refresh_token }),
   });
 
   const refreshData = parseJsonText(await refreshRes.text());
@@ -77,7 +90,7 @@ async function refreshTokenIfNeeded(supabase: ReturnType<typeof createClient>, u
   const expires_at = new Date(Date.now() + (refreshData.expires_in as number) * 1000).toISOString();
   await supabase.from("spotify_connections").update({
     access_token: refreshData.access_token,
-    refresh_token: typeof refreshData.refresh_token === "string" ? refreshData.refresh_token : conn.refresh_token,
+    refresh_token: typeof refreshData.refresh_token === "string" ? refreshData.refresh_token : connection.refresh_token,
     expires_at,
   }).eq("user_id", userId);
 
