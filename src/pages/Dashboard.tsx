@@ -335,6 +335,11 @@ const Dashboard = () => {
                 />
                 <StatCard
                   icon={Disc3}
+                  value={stats.totalSavedAlbums}
+                  label="Saved albums"
+                />
+                <StatCard
+                  icon={Disc3}
                   value={stats.totalClusters}
                   label="Sonic clusters"
                 />
