@@ -12,23 +12,15 @@ function json(body: unknown, status = 200) {
   });
 }
 
-/** Attempt to extract and repair JSON from potentially truncated AI output */
 function extractJson(raw: string): any {
   let cleaned = raw.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
-
-  // Find JSON boundaries
   const start = cleaned.search(/[\{\[]/);
   if (start === -1) throw new Error("No JSON found in response");
-
   cleaned = cleaned.substring(start);
-
-  // Try direct parse first
   try { return JSON.parse(cleaned); } catch { /* continue */ }
 
-  // Detect and repair truncation — close unclosed brackets/braces
   const opens = { '{': 0, '[': 0 };
-  let inString = false;
-  let escape = false;
+  let inString = false, escape = false;
   for (const ch of cleaned) {
     if (escape) { escape = false; continue; }
     if (ch === '\\') { escape = true; continue; }
@@ -39,25 +31,16 @@ function extractJson(raw: string): any {
     if (ch === '[') opens['[']++;
     if (ch === ']') opens['[']--;
   }
-
-  // If we're inside a string, close it
   if (inString) cleaned += '"';
-
-  // Remove trailing comma and incomplete key/value
   cleaned = cleaned.replace(/,\s*"[^"]*"?\s*:?\s*"?[^"]*$/, '');
   cleaned = cleaned.replace(/,\s*\{[^}]*$/, '');
   cleaned = cleaned.replace(/,\s*$/, '');
-
-  // Close unclosed structures
   for (let i = 0; i < opens['[']; i++) cleaned += ']';
   for (let i = 0; i < opens['{']; i++) cleaned += '}';
-
-  // Clean control characters and trailing commas
   cleaned = cleaned
     .replace(/[\x00-\x1F\x7F]/g, ' ')
     .replace(/,\s*}/g, '}')
     .replace(/,\s*]/g, ']');
-
   return JSON.parse(cleaned);
 }
 
@@ -83,10 +66,9 @@ Deno.serve(async (req) => {
     const { data: { user }, error: userError } = await supabase.auth.getUser();
     if (userError || !user) return json({ error: "Invalid session" }, 401);
 
-    // Fetch liked songs
     const { data: likedSongs, error: lsError } = await supabase
       .from("liked_songs")
-      .select("id, spotify_track_id, track_name, artist_name, album_name")
+      .select("id, spotify_track_id, track_name, artist_name, album_name, image_url")
       .eq("user_id", user.id)
       .order("added_at", { ascending: false })
       .limit(200);
@@ -98,47 +80,43 @@ Deno.serve(async (req) => {
 
     console.info(`[analyze-liked-songs] Analyzing ${likedSongs.length} songs for user ${user.id}`);
 
-    // Build compact song list
     const songList = likedSongs.map((s, i) =>
       `${i + 1}. "${s.track_name}" – ${s.artist_name}${s.album_name ? ` (${s.album_name})` : ""}`
     ).join("\n");
 
-    const systemPrompt = `You are an elite music intelligence system. Analyze liked songs and organize them into coherent musical clusters based on SONIC IDENTITY, not genre labels.
+    const systemPrompt = `You are Tempo, a premium music curation engine. Your job is to transform a user's liked songs into a set of beautifully curated playlists. Each playlist must feel intentional, coherent, and expressive — like it was hand-crafted by a music-savvy curator.
 
-RULES:
-- 5-10 clusters based on library diversity
-- Cluster by listening moment / sonic identity, NOT genre
-- Every song assigned to exactly one cluster (by its index number)
-- Evocative cluster names like "Midnight Drive Soundtracks", not "Pop Songs"
-- For song analysis, keep values brief — single words or short phrases
-- Return ONLY valid JSON, no markdown`;
+CRITICAL PRINCIPLES:
+1. Group songs by REAL MUSICAL COMPATIBILITY — not genre labels. Two rap songs can belong in completely different playlists based on mood, production, atmosphere, and energy.
+2. Analyze across 15+ dimensions: mood, atmosphere, tempo, rhythmic feel, energy level, emotional tone, production style, instrumentation, language, era, vocal style, darkness vs brightness, polished vs raw, mainstream vs underground, listening context, overall sonic identity.
+3. Each playlist represents a LISTENING MOMENT or SONIC WORLD — not a category.
+4. Every song must be in exactly one playlist.
+5. Create 5-10 playlists depending on library diversity.
 
-    const userPrompt = `Organize these ${likedSongs.length} liked songs into clusters:
+PLAYLIST NAMING — CRITICAL:
+Names must feel musical, aesthetic, and premium. They should evoke a feeling or scene.
+NEVER use generic names like "Pop Mix", "Rap Songs", "Electronic Tracks", "Indie Vibes".
+GOOD examples: "Midnight Drive", "Dark Velvet", "Neon Nights", "Golden Groove", "Soft Horizons", "Velvet Energy", "Sunset Motion", "After Hours", "Electric Pulse", "Ocean Echo", "Silent Heat", "Urban Glow", "Crimson Pulse", "Slow Burn", "Glass Towers"
+
+VIBE DESCRIPTION — CRITICAL:
+Each playlist needs a one-line vibe summary (10-20 words) that instantly communicates the playlist's identity.
+Examples:
+- "Dark atmospheric rap with hypnotic rhythm and late-night energy"
+- "Warm soul and funk with uplifting rhythm and smooth vintage energy"
+- "Modern electronic pulse with polished production and night-city atmosphere"
+- "Calm indie and melodic tracks with warm emotional tone"
+
+AI EXPLANATION:
+For each playlist, write 2-3 sentences explaining the sonic thread that connects its songs. This should read like an expert curator explaining their choices.
+
+Return ONLY valid JSON, no markdown.`;
+
+    const userPrompt = `Transform these ${likedSongs.length} liked songs into curated Tempo playlists:
 
 ${songList}
 
-Return JSON:
-{
-  "clusters": [
-    {
-      "name": "Evocative name",
-      "description": "What connects these songs",
-      "vibe_description": "One sentence feeling",
-      "mood_tags": ["Tag1", "Tag2"],
-      "color_hex": "#hexcolor",
-      "energy_level": "low|medium-low|medium|medium-high|high",
-      "tempo_range": "e.g. 80-100 BPM",
-      "era_range": "e.g. 2000s-2020s",
-      "songs": [
-        {"index": 1, "analysis": {"genre_tags": ["Genre"], "mood": "mood", "energy": "low|medium|high", "tempo_estimate": "slow|mid-tempo|upbeat|fast", "era": "2020s", "atmosphere": "dark|warm|bright", "production_style": "lo-fi|polished|electronic"}}
-      ]
-    }
-  ]
-}
+Return JSON using the save_playlists function.`;
 
-Every song (1 to ${likedSongs.length}) must appear in exactly one cluster.`;
-
-    // Use tool calling for structured output to avoid truncation
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -155,22 +133,22 @@ Every song (1 to ${likedSongs.length}) must appear in exactly one cluster.`;
         tools: [{
           type: "function",
           function: {
-            name: "save_clusters",
-            description: "Save the analyzed song clusters",
+            name: "save_playlists",
+            description: "Save the curated playlists generated from the user's liked songs",
             parameters: {
               type: "object",
               properties: {
-                clusters: {
+                playlists: {
                   type: "array",
                   items: {
                     type: "object",
                     properties: {
-                      name: { type: "string" },
-                      description: { type: "string" },
-                      vibe_description: { type: "string" },
-                      mood_tags: { type: "array", items: { type: "string" } },
-                      color_hex: { type: "string" },
-                      energy_level: { type: "string" },
+                      name: { type: "string", description: "Evocative, aesthetic playlist name (2-3 words)" },
+                      vibe_description: { type: "string", description: "One-line vibe summary, 10-20 words" },
+                      ai_explanation: { type: "string", description: "2-3 sentences explaining the sonic thread connecting these songs" },
+                      mood_tags: { type: "array", items: { type: "string" }, description: "2-4 mood/vibe tags" },
+                      color_hex: { type: "string", description: "Hex color matching the playlist mood" },
+                      energy_level: { type: "string", enum: ["low", "medium-low", "medium", "medium-high", "high"] },
                       tempo_range: { type: "string" },
                       era_range: { type: "string" },
                       songs: {
@@ -178,7 +156,7 @@ Every song (1 to ${likedSongs.length}) must appear in exactly one cluster.`;
                         items: {
                           type: "object",
                           properties: {
-                            index: { type: "number" },
+                            index: { type: "number", description: "1-indexed song number from the input list" },
                             analysis: {
                               type: "object",
                               properties: {
@@ -190,22 +168,21 @@ Every song (1 to ${likedSongs.length}) must appear in exactly one cluster.`;
                                 atmosphere: { type: "string" },
                                 production_style: { type: "string" },
                               },
-                              required: ["mood", "energy"],
                             },
                           },
                           required: ["index"],
                         },
                       },
                     },
-                    required: ["name", "description", "songs"],
+                    required: ["name", "vibe_description", "ai_explanation", "songs"],
                   },
                 },
               },
-              required: ["clusters"],
+              required: ["playlists"],
             },
           },
         }],
-        tool_choice: { type: "function", function: { name: "save_clusters" } },
+        tool_choice: { type: "function", function: { name: "save_playlists" } },
       }),
     });
 
@@ -219,14 +196,12 @@ Every song (1 to ${likedSongs.length}) must appear in exactly one cluster.`;
 
     const aiData = await response.json();
 
-    // Try tool call first, then fall back to content
     let parsed: any;
     const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
     if (toolCall?.function?.arguments) {
       try {
         parsed = JSON.parse(toolCall.function.arguments);
       } catch {
-        console.warn("Tool call JSON parse failed, attempting repair");
         parsed = extractJson(toolCall.function.arguments);
       }
     } else {
@@ -235,33 +210,49 @@ Every song (1 to ${likedSongs.length}) must appear in exactly one cluster.`;
       parsed = extractJson(content);
     }
 
-    if (!parsed.clusters || !Array.isArray(parsed.clusters)) {
+    const clusters = parsed.playlists || parsed.clusters;
+    if (!clusters || !Array.isArray(clusters)) {
       return json({ error: "Invalid AI response structure" }, 500);
     }
 
-    // Clear previous clusters
+    // Clear previous data
     await admin.from("liked_song_cluster_tracks").delete().eq("user_id", user.id);
     await admin.from("liked_song_clusters").delete().eq("user_id", user.id);
 
     let totalAssigned = 0;
 
-    for (let ci = 0; ci < parsed.clusters.length; ci++) {
-      const cluster = parsed.clusters[ci];
+    for (let ci = 0; ci < clusters.length; ci++) {
+      const cluster = clusters[ci];
       const songs = cluster.songs || [];
+
+      // Pick up to 4 cover tracks (songs with images)
+      const coverTracks: { image_url: string; track_name: string }[] = [];
+      for (const song of songs) {
+        if (coverTracks.length >= 4) break;
+        const idx = (song.index || 0) - 1;
+        if (idx >= 0 && idx < likedSongs.length && likedSongs[idx].image_url) {
+          coverTracks.push({
+            image_url: likedSongs[idx].image_url!,
+            track_name: likedSongs[idx].track_name,
+          });
+        }
+      }
 
       const { data: insertedCluster, error: clusterError } = await admin
         .from("liked_song_clusters")
         .insert({
           user_id: user.id,
-          name: cluster.name || `Cluster ${ci + 1}`,
-          description: cluster.description || null,
+          name: cluster.name || `Playlist ${ci + 1}`,
+          description: cluster.ai_explanation || cluster.description || null,
           vibe_description: cluster.vibe_description || null,
+          ai_explanation: cluster.ai_explanation || null,
           mood_tags: cluster.mood_tags || [],
           color_hex: cluster.color_hex || "#6366f1",
           energy_level: cluster.energy_level || "medium",
           tempo_range: cluster.tempo_range || "Mixed",
           era_range: cluster.era_range || "Mixed",
           track_count: songs.length,
+          cover_tracks: coverTracks,
           analysis_model: "google/gemini-2.5-flash",
           sort_order: ci,
         })
@@ -311,11 +302,11 @@ Every song (1 to ${likedSongs.length}) must appear in exactly one cluster.`;
       }
     }
 
-    console.info(`[analyze-liked-songs] Created ${parsed.clusters.length} clusters, assigned ${totalAssigned} tracks`);
+    console.info(`[analyze-liked-songs] Created ${clusters.length} playlists, assigned ${totalAssigned} tracks`);
 
     return json({
       success: true,
-      clusters_created: parsed.clusters.length,
+      clusters_created: clusters.length,
       tracks_analyzed: totalAssigned,
       total_liked_songs: likedSongs.length,
     });

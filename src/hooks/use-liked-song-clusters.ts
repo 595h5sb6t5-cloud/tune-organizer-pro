@@ -7,12 +7,14 @@ export interface LikedSongCluster {
   name: string;
   description: string | null;
   vibe_description: string | null;
+  ai_explanation: string | null;
   mood_tags: string[];
   color_hex: string;
   energy_level: string | null;
   tempo_range: string | null;
   era_range: string | null;
   track_count: number;
+  cover_tracks: { image_url: string; track_name: string }[];
   sort_order: number;
   tracks: ClusterTrack[];
 }
@@ -59,7 +61,7 @@ export function useLikedSongClusters() {
     // Get clusters
     const { data: clusterData } = await supabase
       .from("liked_song_clusters")
-      .select("id, name, description, vibe_description, mood_tags, color_hex, energy_level, tempo_range, era_range, track_count, sort_order")
+      .select("id, name, description, vibe_description, ai_explanation, mood_tags, color_hex, energy_level, tempo_range, era_range, track_count, sort_order, cover_tracks")
       .eq("user_id", user.id)
       .order("sort_order");
 
@@ -117,6 +119,8 @@ export function useLikedSongClusters() {
       return {
         ...c,
         mood_tags: c.mood_tags || [],
+        ai_explanation: c.ai_explanation ?? null,
+        cover_tracks: (Array.isArray(c.cover_tracks) ? c.cover_tracks : []) as { image_url: string; track_name: string }[],
         tracks: clusterTracks,
       };
     });

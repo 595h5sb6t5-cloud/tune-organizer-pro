@@ -100,8 +100,10 @@ export type Database = {
       }
       liked_song_clusters: {
         Row: {
+          ai_explanation: string | null
           analysis_model: string | null
           color_hex: string | null
+          cover_tracks: Json | null
           created_at: string
           description: string | null
           energy_level: string | null
@@ -117,8 +119,10 @@ export type Database = {
           vibe_description: string | null
         }
         Insert: {
+          ai_explanation?: string | null
           analysis_model?: string | null
           color_hex?: string | null
+          cover_tracks?: Json | null
           created_at?: string
           description?: string | null
           energy_level?: string | null
@@ -134,8 +138,10 @@ export type Database = {
           vibe_description?: string | null
         }
         Update: {
+          ai_explanation?: string | null
           analysis_model?: string | null
           color_hex?: string | null
+          cover_tracks?: Json | null
           created_at?: string
           description?: string | null
           energy_level?: string | null

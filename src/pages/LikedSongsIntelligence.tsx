@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { Brain, Heart, Loader2, Music, RefreshCw, Sparkles, Headphones, ChevronDown, ChevronUp } from "lucide-react";
+import { Brain, Heart, Loader2, Music, RefreshCw, Sparkles, Headphones, ChevronLeft, Play } from "lucide-react";
 import AppLayout from "@/components/app/AppLayout";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
@@ -20,11 +20,13 @@ const LikedSongsIntelligence = () => {
     runAnalysis,
   } = useLikedSongClusters();
 
+  const [selectedCluster, setSelectedCluster] = useState<LikedSongCluster | null>(null);
+
   const handleAnalyze = async () => {
-    toast.info("Starting deep analysis…", { description: "This may take 30-60 seconds." });
+    toast.info("Curating your playlists…", { description: "This may take 30-60 seconds." });
     await runAnalysis();
     if (!error) {
-      toast.success("Analysis complete!", { description: `Created ${clusters.length} musical clusters.` });
+      toast.success("Playlists ready!", { description: `Created ${clusters.length} curated playlists.` });
     }
   };
 
@@ -34,13 +36,13 @@ const LikedSongsIntelligence = () => {
         <div className="max-w-5xl">
           <div className="mb-6">
             <h1 className="font-heading text-3xl mb-1">Liked Songs Intelligence</h1>
-            <p className="text-muted-foreground">Deep AI analysis of your musical identity.</p>
+            <p className="text-muted-foreground">AI-curated playlists from your liked songs.</p>
           </div>
           <div className="rounded-2xl bg-surface-elevated border border-border/50 p-12 text-center">
             <Headphones className="w-10 h-10 text-muted-foreground mx-auto mb-4" />
             <h2 className="font-heading text-xl mb-2">Connect Spotify first</h2>
             <p className="text-sm text-muted-foreground max-w-md mx-auto mb-6">
-              Connect Spotify and import your liked songs to unlock deep musical analysis.
+              Connect Spotify and import your liked songs to unlock AI-curated playlists.
             </p>
             <Button variant="hero" asChild>
               <Link to="/settings">Go to Settings</Link>
@@ -57,14 +59,105 @@ const LikedSongsIntelligence = () => {
         <div className="max-w-5xl">
           <div className="mb-6">
             <h1 className="font-heading text-3xl mb-1">Liked Songs Intelligence</h1>
-            <p className="text-muted-foreground">Deep AI analysis of your musical identity.</p>
+            <p className="text-muted-foreground">AI-curated playlists from your liked songs.</p>
           </div>
           <div className="rounded-2xl bg-surface-elevated border border-border/50 p-12 text-center">
             <Heart className="w-10 h-10 text-muted-foreground mx-auto mb-4" />
             <h2 className="font-heading text-xl mb-2">No liked songs yet</h2>
             <p className="text-sm text-muted-foreground max-w-md mx-auto">
-              Your Spotify liked songs need to be imported first. Go to your Library and re-sync.
+              Import your Spotify library first. Go to your Library and re-sync.
             </p>
+          </div>
+        </div>
+      </AppLayout>
+    );
+  }
+
+  // Detail view for a selected playlist
+  if (selectedCluster) {
+    return (
+      <AppLayout>
+        <div className="max-w-4xl">
+          <button
+            onClick={() => setSelectedCluster(null)}
+            className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors mb-6"
+          >
+            <ChevronLeft className="w-4 h-4" />
+            Back to playlists
+          </button>
+
+          {/* Playlist header */}
+          <div className="flex gap-6 mb-8">
+            <PlaylistCover cluster={selectedCluster} size="lg" />
+            <div className="flex-1 min-w-0 flex flex-col justify-end">
+              <p className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Tempo Playlist</p>
+              <h1 className="font-heading text-3xl md:text-4xl mb-2">{selectedCluster.name}</h1>
+              {selectedCluster.vibe_description && (
+                <p className="text-muted-foreground text-sm mb-3">{selectedCluster.vibe_description}</p>
+              )}
+              <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                <span>{selectedCluster.track_count} songs</span>
+                <span>·</span>
+                <span>{selectedCluster.energy_level} energy</span>
+                <span>·</span>
+                <span>{selectedCluster.era_range}</span>
+              </div>
+              <div className="flex gap-1.5 flex-wrap mt-3">
+                {selectedCluster.mood_tags.map((tag) => (
+                  <span
+                    key={tag}
+                    className="px-2.5 py-0.5 rounded-full text-[11px] font-medium"
+                    style={{
+                      backgroundColor: `${selectedCluster.color_hex}15`,
+                      color: selectedCluster.color_hex,
+                    }}
+                  >
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* AI Explanation */}
+          {selectedCluster.ai_explanation && (
+            <div className="rounded-xl bg-surface-elevated border border-border/50 p-5 mb-6">
+              <div className="flex items-center gap-2 mb-2">
+                <Brain className="w-4 h-4 text-accent" />
+                <span className="text-xs font-medium text-accent uppercase tracking-wider">Why these songs belong together</span>
+              </div>
+              <p className="text-sm text-muted-foreground leading-relaxed">{selectedCluster.ai_explanation}</p>
+            </div>
+          )}
+
+          {/* Track list */}
+          <div className="rounded-xl bg-surface-elevated border border-border/50 overflow-hidden">
+            <div className="divide-y divide-border/20">
+              {selectedCluster.tracks.map((track, idx) => (
+                <div key={track.id} className="flex items-center gap-3 px-5 py-3 hover:bg-secondary/20 transition-colors">
+                  <span className="text-xs text-muted-foreground w-6 text-right">{idx + 1}</span>
+                  {track.image_url ? (
+                    <img src={track.image_url} alt="" className="w-10 h-10 rounded-lg object-cover" loading="lazy" />
+                  ) : (
+                    <div className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center">
+                      <Music className="w-4 h-4 text-muted-foreground" />
+                    </div>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium truncate">{track.track_name}</p>
+                    <p className="text-xs text-muted-foreground truncate">{track.artist_name}{track.album_name ? ` · ${track.album_name}` : ""}</p>
+                  </div>
+                  <div className="flex gap-1.5 flex-shrink-0 hidden md:flex">
+                    {track.mood && (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] bg-secondary text-muted-foreground">{track.mood}</span>
+                    )}
+                    {track.energy && (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] bg-secondary text-muted-foreground">{track.energy}</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </AppLayout>
@@ -75,7 +168,7 @@ const LikedSongsIntelligence = () => {
     <AppLayout>
       <div className="max-w-5xl">
         {/* Header */}
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center justify-between mb-8">
           <div>
             <div className="flex items-center gap-2 mb-1">
               <Brain className="w-6 h-6 text-accent" />
@@ -83,8 +176,8 @@ const LikedSongsIntelligence = () => {
             </div>
             <p className="text-muted-foreground">
               {hasAnalyzed
-                ? `${likedCount} songs organized into ${clusters.length} musical clusters`
-                : `${likedCount} liked songs ready for deep analysis`}
+                ? `${likedCount} songs curated into ${clusters.length} playlists`
+                : `${likedCount} liked songs ready for AI curation`}
             </p>
           </div>
           <Button
@@ -97,17 +190,17 @@ const LikedSongsIntelligence = () => {
             {analyzing ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
-                Analyzing…
+                Curating…
               </>
             ) : hasAnalyzed ? (
               <>
                 <RefreshCw className="w-3.5 h-3.5" />
-                Re-analyze
+                Re-generate
               </>
             ) : (
               <>
                 <Sparkles className="w-4 h-4" />
-                Analyze My Music
+                Generate Playlists
               </>
             )}
           </Button>
@@ -119,21 +212,21 @@ const LikedSongsIntelligence = () => {
           </div>
         )}
 
-        {/* Loading state */}
+        {/* Loading */}
         {(loading || analyzing) && !hasAnalyzed && (
           <div className="flex flex-col items-center justify-center py-20 gap-4">
             <div className="relative">
               <Loader2 className="w-10 h-10 animate-spin text-accent" />
-              <Brain className="w-5 h-5 text-accent absolute -top-1 -right-1 animate-pulse" />
+              <Sparkles className="w-5 h-5 text-accent absolute -top-1 -right-1 animate-pulse" />
             </div>
             <div className="text-center">
               <p className="font-heading text-lg mb-1">
-                {analyzing ? "Deep analysis in progress…" : "Loading your clusters…"}
+                {analyzing ? "Curating your playlists…" : "Loading playlists…"}
               </p>
               <p className="text-sm text-muted-foreground max-w-md">
                 {analyzing
-                  ? "Tempo AI is analyzing genre, mood, atmosphere, production style, era, energy, and more across all your liked songs."
-                  : "Loading your musical identity map."}
+                  ? "Tempo AI is analyzing mood, atmosphere, energy, production style, and sonic identity across your liked songs to build perfectly curated playlists."
+                  : "Loading your curated playlists."}
               </p>
             </div>
           </div>
@@ -142,26 +235,30 @@ const LikedSongsIntelligence = () => {
         {/* Not analyzed yet */}
         {!hasAnalyzed && !loading && !analyzing && (
           <div className="rounded-2xl bg-surface-elevated border border-border/50 p-12 text-center">
-            <Brain className="w-12 h-12 text-accent mx-auto mb-4" />
-            <h2 className="font-heading text-2xl mb-3">Discover your musical identity</h2>
+            <Sparkles className="w-12 h-12 text-accent mx-auto mb-4" />
+            <h2 className="font-heading text-2xl mb-3">Transform your liked songs into playlists</h2>
             <p className="text-sm text-muted-foreground max-w-lg mx-auto mb-2">
-              Tempo AI will analyze your {likedCount} liked songs across 15+ musical dimensions — genre, mood, atmosphere, production style, era, energy, and more — to create intelligent clusters that reveal the true shape of your taste.
+              Tempo AI will analyze your {likedCount} liked songs across 15+ musical dimensions and organize them into beautifully curated playlists — each with a clear identity, vibe, and purpose.
             </p>
             <p className="text-xs text-muted-foreground max-w-lg mx-auto mb-6">
-              Great playlists aren't just about genre. Two songs labeled "rap" can feel completely different. Tempo understands that.
+              Songs are grouped by real musical compatibility, not just genre labels.
             </p>
             <Button variant="hero" size="lg" onClick={handleAnalyze} disabled={analyzing}>
               <Sparkles className="w-4 h-4 mr-2" />
-              Analyze My Music
+              Generate Playlists
             </Button>
           </div>
         )}
 
-        {/* Clusters */}
+        {/* Playlist grid */}
         {hasAnalyzed && clusters.length > 0 && (
-          <div className="space-y-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
             {clusters.map((cluster) => (
-              <ClusterCard key={cluster.id} cluster={cluster} />
+              <PlaylistCard
+                key={cluster.id}
+                cluster={cluster}
+                onClick={() => setSelectedCluster(cluster)}
+              />
             ))}
           </div>
         )}
@@ -170,112 +267,72 @@ const LikedSongsIntelligence = () => {
   );
 };
 
-function ClusterCard({ cluster }: { cluster: LikedSongCluster }) {
-  const [expanded, setExpanded] = useState(false);
-  const displayTracks = expanded ? cluster.tracks : cluster.tracks.slice(0, 4);
+function PlaylistCover({ cluster, size = "md" }: { cluster: LikedSongCluster; size?: "md" | "lg" }) {
+  const covers = cluster.cover_tracks || [];
+  const dim = size === "lg" ? "w-40 h-40 md:w-48 md:h-48" : "w-full aspect-square";
+  const rounding = size === "lg" ? "rounded-xl" : "rounded-xl";
+
+  if (covers.length >= 4) {
+    return (
+      <div className={`${dim} ${rounding} overflow-hidden grid grid-cols-2 grid-rows-2 flex-shrink-0`}>
+        {covers.slice(0, 4).map((c, i) => (
+          <img key={i} src={c.image_url} alt="" className="w-full h-full object-cover" loading="lazy" />
+        ))}
+      </div>
+    );
+  }
+
+  if (covers.length >= 1) {
+    return (
+      <div className={`${dim} ${rounding} overflow-hidden flex-shrink-0`}>
+        <img src={covers[0].image_url} alt="" className="w-full h-full object-cover" loading="lazy" />
+      </div>
+    );
+  }
 
   return (
-    <div className="rounded-2xl bg-surface-elevated border border-border/50 overflow-hidden">
-      {/* Header */}
-      <div
-        className="p-5 cursor-pointer hover:bg-secondary/30 transition-colors"
-        onClick={() => setExpanded(!expanded)}
-      >
-        <div className="flex items-start gap-4">
-          {/* Color dot */}
-          <div
-            className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5"
-            style={{ backgroundColor: `${cluster.color_hex}20` }}
-          >
-            <div
-              className="w-5 h-5 rounded-full"
-              style={{ backgroundColor: cluster.color_hex }}
-            />
-          </div>
-
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center justify-between gap-2">
-              <div className="min-w-0">
-                <h3 className="font-heading text-lg truncate">{cluster.name}</h3>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  {cluster.track_count} songs · {cluster.energy_level} energy · {cluster.tempo_range} · {cluster.era_range}
-                </p>
-              </div>
-              <div className="flex items-center gap-2 flex-shrink-0">
-                {expanded ? (
-                  <ChevronUp className="w-4 h-4 text-muted-foreground" />
-                ) : (
-                  <ChevronDown className="w-4 h-4 text-muted-foreground" />
-                )}
-              </div>
-            </div>
-
-            {cluster.vibe_description && (
-              <p className="text-sm text-muted-foreground mt-2 italic">"{cluster.vibe_description}"</p>
-            )}
-
-            {/* Mood tags */}
-            <div className="flex gap-1.5 flex-wrap mt-3">
-              {cluster.mood_tags.map((tag) => (
-                <span
-                  key={tag}
-                  className="px-2.5 py-0.5 rounded-full text-[11px] font-medium"
-                  style={{
-                    backgroundColor: `${cluster.color_hex}15`,
-                    color: cluster.color_hex,
-                  }}
-                >
-                  {tag}
-                </span>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {cluster.description && (
-          <p className="text-sm text-muted-foreground mt-3 ml-16">{cluster.description}</p>
-        )}
-      </div>
-
-      {/* Tracks */}
-      <div className="border-t border-border/30">
-        <div className="divide-y divide-border/20">
-          {displayTracks.map((track, idx) => (
-            <div key={track.id} className="flex items-center gap-3 px-5 py-2.5 hover:bg-secondary/20 transition-colors">
-              <span className="text-xs text-muted-foreground w-5 text-right">{idx + 1}</span>
-              {track.image_url ? (
-                <img src={track.image_url} alt="" className="w-9 h-9 rounded-lg object-cover" loading="lazy" />
-              ) : (
-                <div className="w-9 h-9 rounded-lg bg-secondary flex items-center justify-center">
-                  <Music className="w-3.5 h-3.5 text-muted-foreground" />
-                </div>
-              )}
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium truncate">{track.track_name}</p>
-                <p className="text-xs text-muted-foreground truncate">{track.artist_name}</p>
-              </div>
-              <div className="flex gap-1.5 flex-shrink-0 hidden md:flex">
-                {track.mood && (
-                  <span className="px-2 py-0.5 rounded-full text-[10px] bg-secondary text-muted-foreground">{track.mood}</span>
-                )}
-                {track.atmosphere && (
-                  <span className="px-2 py-0.5 rounded-full text-[10px] bg-secondary text-muted-foreground">{track.atmosphere}</span>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {cluster.tracks.length > 4 && (
-          <button
-            onClick={() => setExpanded(!expanded)}
-            className="w-full py-2.5 text-xs text-accent hover:bg-secondary/20 transition-colors"
-          >
-            {expanded ? "Show less" : `Show all ${cluster.tracks.length} songs`}
-          </button>
-        )}
-      </div>
+    <div
+      className={`${dim} ${rounding} flex items-center justify-center flex-shrink-0`}
+      style={{ backgroundColor: `${cluster.color_hex}20` }}
+    >
+      <Music className="w-8 h-8" style={{ color: cluster.color_hex }} />
     </div>
+  );
+}
+
+function PlaylistCard({ cluster, onClick }: { cluster: LikedSongCluster; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="group text-left rounded-2xl bg-surface-elevated border border-border/50 overflow-hidden hover:border-border transition-all hover:shadow-lg"
+    >
+      {/* Cover */}
+      <div className="relative">
+        <PlaylistCover cluster={cluster} size="md" />
+        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-end p-3">
+          <div className="w-10 h-10 rounded-full bg-accent flex items-center justify-center shadow-lg">
+            <Play className="w-4 h-4 text-accent-foreground ml-0.5" />
+          </div>
+        </div>
+      </div>
+
+      {/* Info */}
+      <div className="p-4">
+        <h3 className="font-heading text-base mb-1 truncate">{cluster.name}</h3>
+        {cluster.vibe_description && (
+          <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed mb-3">
+            {cluster.vibe_description}
+          </p>
+        )}
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] text-muted-foreground">{cluster.track_count} songs</span>
+          <span className="text-[10px] text-muted-foreground/60 flex items-center gap-1">
+            <Sparkles className="w-2.5 h-2.5" />
+            Generated from your liked songs
+          </span>
+        </div>
+      </div>
+    </button>
   );
 }
 
