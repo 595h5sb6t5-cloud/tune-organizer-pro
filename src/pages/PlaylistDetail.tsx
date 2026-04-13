@@ -12,12 +12,14 @@ const PlaylistDetail = () => {
   const allRecs = getRecommendationsForPlaylist(playlist.id).filter((r) => r.status === "pending");
 
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
-  const [acceptedIds, setAcceptedIds] = useState<Set<string>>(new Set());
+  const [acceptedRecs, setAcceptedRecs] = useState<Recommendation[]>([]);
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
   const [syncing, setSyncing] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
 
+  const acceptedIds = new Set(acceptedRecs.map((r) => r.id));
   const visibleRecs = allRecs.filter((r) => !dismissedIds.has(r.id) && !acceptedIds.has(r.id));
+  const allTracks = [...playlist.tracks, ...acceptedRecs.map((r) => r.track)];
 
   const handleSync = () => {
     setSyncing(true);
