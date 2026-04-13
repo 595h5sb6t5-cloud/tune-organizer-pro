@@ -303,18 +303,31 @@ IMPORTANT: You MUST call the save_recommendations function with your results. Do
           ? JSON.parse(toolCall.function.arguments)
           : toolCall.function.arguments;
       } catch {
-        console.error("Failed to parse tool call args:", toolCall.function.arguments);
-        throw new Error("Failed to parse AI tool call response");
+        // Try extracting JSON from malformed tool call
+        try {
+          const raw = toolCall.function.arguments as string;
+          const cleaned = raw.replace(/[\x00-\x1F\x7F]/g, ' ').replace(/,\s*}/g, '}').replace(/,\s*]/g, ']');
+          parsed = JSON.parse(cleaned);
+        } catch {
+          console.error("Failed to parse tool call args:", toolCall.function.arguments);
+          throw new Error("Failed to parse AI tool call response");
+        }
       }
     } else {
-      // Fallback to content parsing
-      const content = data.choices?.[0]?.message?.content;
-      if (!content) throw new Error("No content in AI response");
+      // Fallback: AI returned text instead of tool call — generate empty categories
+      const content = data.choices?.[0]?.message?.content || "";
+      console.warn("AI returned text instead of tool call:", content.slice(0, 200));
+      // Try to extract JSON from the text content
       try {
-        parsed = JSON.parse(content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim());
+        const jsonMatch = content.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          parsed = JSON.parse(jsonMatch[0].replace(/,\s*}/g, '}').replace(/,\s*]/g, ']'));
+        } else {
+          // Return empty categories so the UI can handle gracefully
+          parsed = { categories: [] };
+        }
       } catch {
-        console.error("Failed to parse AI content:", content);
-        throw new Error("Failed to parse AI recommendations");
+        parsed = { categories: [] };
       }
     }
 
