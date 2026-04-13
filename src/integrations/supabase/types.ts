@@ -60,6 +60,7 @@ export type Database = {
           created_at: string
           id: string
           liked_song_id: string
+          position: number
           spotify_track_id: string
           user_id: string
         }
@@ -69,6 +70,7 @@ export type Database = {
           created_at?: string
           id?: string
           liked_song_id: string
+          position?: number
           spotify_track_id: string
           user_id: string
         }
@@ -78,6 +80,7 @@ export type Database = {
           created_at?: string
           id?: string
           liked_song_id?: string
+          position?: number
           spotify_track_id?: string
           user_id?: string
         }
