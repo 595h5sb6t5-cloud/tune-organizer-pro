@@ -33,17 +33,17 @@ const Settings = () => {
                 <div>
                   <p className="text-sm font-medium">Spotify</p>
                   <p className="text-xs text-muted-foreground">
-                    {connections.spotify.connected ? connections.spotify.email : "Not connected"}
+                    {profile?.spotify_connected ? "Connected" : "Not connected"}
                   </p>
                 </div>
               </div>
-              {connections.spotify.connected ? (
-                <Button variant="ghost" size="sm" className="rounded-lg text-destructive" onClick={() => { disconnectSpotify(); toast("Spotify disconnected"); }}>
+              {profile?.spotify_connected ? (
+                <Button variant="ghost" size="sm" className="rounded-lg text-destructive" onClick={async () => { await disconnectSpotifyReal(); disconnectSpotify(); toast("Spotify disconnected"); }}>
                   Disconnect
                 </Button>
               ) : (
-                <Button variant="hero" size="sm" className="rounded-lg" onClick={() => connectSpotify().then(() => toast.success("Spotify connected!"))} disabled={connectingSpotify}>
-                  {connectingSpotify ? "Connecting…" : "Connect"}
+                <Button variant="hero" size="sm" className="rounded-lg" onClick={() => startSpotifyAuth()} disabled={spotifyAuthStatus === "connecting"}>
+                  {spotifyAuthStatus === "connecting" ? <><Loader2 className="h-4 w-4 animate-spin mr-1" /> Connecting…</> : "Connect"}
                 </Button>
               )}
             </div>
