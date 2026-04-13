@@ -130,12 +130,17 @@ async function callAI(
         throw new Error(`AI failed: ${r.status}`);
       }
       const d = await r.json();
+      const finish = d.choices?.[0]?.finish_reason;
       const tc = d.choices?.[0]?.message?.tool_calls?.[0];
       if (tc?.function?.arguments) {
         try { return JSON.parse(tc.function.arguments); } catch { return extractJson(tc.function.arguments); }
       }
       const c = d.choices?.[0]?.message?.content;
-      if (!c) throw new Error("Empty AI response");
+      if (!c) {
+        console.warn(`Empty AI content (finish_reason: ${finish}, attempt ${a})`);
+        if (a < retries) continue;
+        throw new Error("Empty AI response");
+      }
       return extractJson(c);
     } catch (e: any) {
       if (e.message === "RATE_LIMIT" || e.message === "CREDITS_EXHAUSTED") throw e;
