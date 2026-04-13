@@ -44,6 +44,20 @@ function extractJson(raw: string): any {
   return JSON.parse(cleaned);
 }
 
+function formatAudioFeatures(s: any): string {
+  const parts: string[] = [];
+  if (s.audio_tempo != null) parts.push(`BPM:${Math.round(s.audio_tempo)}`);
+  if (s.audio_energy != null) parts.push(`energy:${s.audio_energy.toFixed(2)}`);
+  if (s.audio_valence != null) parts.push(`valence:${s.audio_valence.toFixed(2)}`);
+  if (s.audio_danceability != null) parts.push(`dance:${s.audio_danceability.toFixed(2)}`);
+  if (s.audio_acousticness != null) parts.push(`acoustic:${s.audio_acousticness.toFixed(2)}`);
+  if (s.audio_instrumentalness != null) parts.push(`instr:${s.audio_instrumentalness.toFixed(2)}`);
+  if (s.audio_speechiness != null) parts.push(`speech:${s.audio_speechiness.toFixed(2)}`);
+  if (s.audio_loudness != null) parts.push(`loud:${s.audio_loudness.toFixed(1)}dB`);
+  if (s.audio_liveness != null) parts.push(`live:${s.audio_liveness.toFixed(2)}`);
+  return parts.length > 0 ? ` [${parts.join(", ")}]` : "";
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -68,7 +82,7 @@ Deno.serve(async (req) => {
 
     const { data: likedSongs, error: lsError } = await supabase
       .from("liked_songs")
-      .select("id, spotify_track_id, track_name, artist_name, album_name, image_url")
+      .select("id, spotify_track_id, track_name, artist_name, album_name, image_url, audio_tempo, audio_energy, audio_valence, audio_danceability, audio_acousticness, audio_instrumentalness, audio_speechiness, audio_loudness, audio_liveness")
       .eq("user_id", user.id)
       .order("added_at", { ascending: false })
       .limit(200);
@@ -78,44 +92,52 @@ Deno.serve(async (req) => {
       return json({ error: "No liked songs found. Import your Spotify library first." }, 400);
     }
 
-    console.info(`[analyze-liked-songs] Analyzing ${likedSongs.length} songs for user ${user.id}`);
+    const hasAudioFeatures = likedSongs.filter(s => s.audio_energy != null).length;
+    console.info(`[analyze-liked-songs] Analyzing ${likedSongs.length} songs (${hasAudioFeatures} with audio features) for user ${user.id}`);
 
     const songList = likedSongs.map((s, i) =>
-      `${i + 1}. "${s.track_name}" – ${s.artist_name}${s.album_name ? ` (${s.album_name})` : ""}`
+      `${i + 1}. "${s.track_name}" – ${s.artist_name}${s.album_name ? ` (${s.album_name})` : ""}${formatAudioFeatures(s)}`
     ).join("\n");
 
-    const systemPrompt = `You are Tempo, a premium music curation engine. Your job is to transform a user's liked songs into a set of beautifully curated playlists. Each playlist must feel intentional, coherent, and expressive — like it was hand-crafted by a music-savvy curator.
+    const systemPrompt = `You are Tempo, a premium music intelligence engine that clusters songs based on how they ACTUALLY SOUND, not genre labels.
 
-CRITICAL PRINCIPLES:
-1. Group songs by REAL MUSICAL COMPATIBILITY — not genre labels. Two rap songs can belong in completely different playlists based on mood, production, atmosphere, and energy.
-2. Analyze across 15+ dimensions: mood, atmosphere, tempo, rhythmic feel, energy level, emotional tone, production style, instrumentation, language, era, vocal style, darkness vs brightness, polished vs raw, mainstream vs underground, listening context, overall sonic identity.
-3. Each playlist represents a LISTENING MOMENT or SONIC WORLD — not a category.
-4. Every song must be in exactly one playlist.
-5. Create 5-10 playlists depending on library diversity.
+CRITICAL: You are provided with Spotify audio features for each song. These MUST be your PRIMARY clustering signals:
+- **tempo (BPM)**: Group songs with similar BPM ranges together. Never mix 70 BPM ballads with 140 BPM bangers.
+- **energy (0-1)**: How intense/active the track sounds. 0.9 energy tracks don't belong with 0.2 energy tracks.
+- **valence (0-1)**: Musical positivity. 0.1 = dark/sad, 0.9 = happy/uplifting. Don't mix extremes.
+- **danceability (0-1)**: Rhythmic groove. High = danceable, low = ambient/freeform.
+- **acousticness (0-1)**: Acoustic vs electronic. Don't mix 0.9 acoustic with 0.05 electronic unless vibe matches.
+- **instrumentalness (0-1)**: Vocal vs instrumental focus.
+- **speechiness (0-1)**: Spoken word density.
+- **loudness (dB)**: Overall volume/compression level.
+- **liveness (0-1)**: Live performance feel.
 
-PLAYLIST NAMING — CRITICAL:
-Names must feel musical, aesthetic, and premium. They should evoke a feeling or scene.
-NEVER use generic names like "Pop Mix", "Rap Songs", "Electronic Tracks", "Indie Vibes".
-GOOD examples: "Midnight Drive", "Dark Velvet", "Neon Nights", "Golden Groove", "Soft Horizons", "Velvet Energy", "Sunset Motion", "After Hours", "Electric Pulse", "Ocean Echo", "Silent Heat", "Urban Glow", "Crimson Pulse", "Slow Burn", "Glass Towers"
+CLUSTERING ALGORITHM:
+1. First, sort songs by energy + valence to find natural groupings.
+2. Then refine by tempo similarity (±15 BPM within a cluster).
+3. Then validate by acousticness/danceability compatibility.
+4. Genre is ONLY a weak tiebreaker — never the primary signal.
 
-VIBE DESCRIPTION — CRITICAL:
-Each playlist needs a one-line vibe summary (10-20 words) that instantly communicates the playlist's identity.
-Examples:
-- "Dark atmospheric rap with hypnotic rhythm and late-night energy"
-- "Warm soul and funk with uplifting rhythm and smooth vintage energy"
-- "Modern electronic pulse with polished production and night-city atmosphere"
-- "Calm indie and melodic tracks with warm emotional tone"
+COHERENCE RULES:
+- Energy variance within a cluster must be < 0.35 (e.g., 0.4-0.75 OK, 0.2-0.9 NOT OK)
+- Valence variance within a cluster must be < 0.4
+- Tempo range within a cluster should be < 30 BPM (unless the vibe clearly works across tempos)
+- If a cluster violates these, split it into smaller playlists
 
-AI EXPLANATION:
-For each playlist, write 2-3 sentences explaining the sonic thread that connects its songs. This should read like an expert curator explaining their choices.
+PLAYLIST NAMING:
+Names must be evocative, aesthetic, 2-3 words. Reflect the SONIC CHARACTER, not genre.
+GOOD: "Midnight Drive", "Dark Velvet", "Golden Groove", "Soft Horizon", "Electric Pulse", "After Hours", "Neon Nights"
+BAD: "Pop Mix", "Rap Songs", "Rock Playlist", "Electronic Tracks"
 
-Return ONLY valid JSON, no markdown.`;
+Create 5-12 playlists. Every song must appear in exactly one playlist.
 
-    const userPrompt = `Transform these ${likedSongs.length} liked songs into curated Tempo playlists:
+Return ONLY valid JSON via the save_playlists function.`;
+
+    const userPrompt = `Cluster these ${likedSongs.length} liked songs into coherent vibe-based playlists using their audio features as PRIMARY signals:
 
 ${songList}
 
-Return JSON using the save_playlists function.`;
+Use the save_playlists function to return your clustering result.`;
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -129,12 +151,12 @@ Return JSON using the save_playlists function.`;
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
         ],
-        temperature: 0.8,
+        temperature: 0.7,
         tools: [{
           type: "function",
           function: {
             name: "save_playlists",
-            description: "Save the curated playlists generated from the user's liked songs",
+            description: "Save the curated playlists generated from audio-feature-based clustering",
             parameters: {
               type: "object",
               properties: {
@@ -144,13 +166,16 @@ Return JSON using the save_playlists function.`;
                     type: "object",
                     properties: {
                       name: { type: "string", description: "Evocative, aesthetic playlist name (2-3 words)" },
-                      vibe_description: { type: "string", description: "One-line vibe summary, 10-20 words" },
-                      ai_explanation: { type: "string", description: "2-3 sentences explaining the sonic thread connecting these songs" },
+                      vibe_description: { type: "string", description: "One-line vibe summary reflecting audio character, 10-20 words" },
+                      ai_explanation: { type: "string", description: "2-3 sentences explaining the sonic thread. Reference specific audio features (tempo, energy, valence)." },
                       mood_tags: { type: "array", items: { type: "string" }, description: "2-4 mood/vibe tags" },
                       color_hex: { type: "string", description: "Hex color matching the playlist mood" },
                       energy_level: { type: "string", enum: ["low", "medium-low", "medium", "medium-high", "high"] },
-                      tempo_range: { type: "string" },
+                      tempo_range: { type: "string", description: "e.g. '85-100 BPM'" },
                       era_range: { type: "string" },
+                      avg_energy: { type: "number", description: "Average energy value of songs in this cluster" },
+                      avg_valence: { type: "number", description: "Average valence value of songs in this cluster" },
+                      avg_tempo: { type: "number", description: "Average BPM of songs in this cluster" },
                       songs: {
                         type: "array",
                         items: {
@@ -225,7 +250,6 @@ Return JSON using the save_playlists function.`;
       const cluster = clusters[ci];
       const songs = cluster.songs || [];
 
-      // Pick up to 4 cover tracks (songs with images)
       const coverTracks: { image_url: string; track_name: string }[] = [];
       for (const song of songs) {
         if (coverTracks.length >= 4) break;
@@ -253,7 +277,7 @@ Return JSON using the save_playlists function.`;
           era_range: cluster.era_range || "Mixed",
           track_count: songs.length,
           cover_tracks: coverTracks,
-          analysis_model: "google/gemini-2.5-flash",
+          analysis_model: "google/gemini-2.5-flash+audio-features",
           sort_order: ci,
         })
         .select("id")
@@ -302,12 +326,13 @@ Return JSON using the save_playlists function.`;
       }
     }
 
-    console.info(`[analyze-liked-songs] Created ${clusters.length} playlists, assigned ${totalAssigned} tracks`);
+    console.info(`[analyze-liked-songs] Created ${clusters.length} playlists, assigned ${totalAssigned} tracks (${hasAudioFeatures} had audio features)`);
 
     return json({
       success: true,
       clusters_created: clusters.length,
       tracks_analyzed: totalAssigned,
+      tracks_with_audio_features: hasAudioFeatures,
       total_liked_songs: likedSongs.length,
     });
   } catch (e) {
