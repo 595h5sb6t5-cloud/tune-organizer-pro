@@ -1,4 +1,7 @@
-import { corsHeaders } from "https://esm.sh/@supabase/supabase-js@2.49.1/cors";
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -7,7 +10,6 @@ Deno.serve(async (req) => {
 
   return new Response(JSON.stringify({
     client_id: Deno.env.get("SPOTIFY_CLIENT_ID"),
-    redirect_uri: Deno.env.get("SPOTIFY_REDIRECT_URI"),
   }), {
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
