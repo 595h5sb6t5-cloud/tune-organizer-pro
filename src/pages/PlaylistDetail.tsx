@@ -46,7 +46,7 @@ const PlaylistDetail = () => {
   };
 
   const handleAddRec = (rec: Recommendation) => {
-    setAcceptedIds((prev) => new Set(prev).add(rec.id));
+    setAcceptedRecs((prev) => [...prev, rec]);
     toast.success(`Added "${rec.track.title}" to ${playlist.name}`);
   };
 
