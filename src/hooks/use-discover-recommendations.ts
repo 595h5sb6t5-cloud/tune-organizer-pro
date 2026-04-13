@@ -224,7 +224,7 @@ export function useDiscoverRecommendations() {
   ) => {
     if (!user) return;
     try {
-      await supabase.from("recommendation_history").insert({
+      await supabase.from("recommendation_history").insert([{
         user_id: user.id,
         track_title: track.title,
         track_artist: track.artist,
@@ -235,25 +235,28 @@ export function useDiscoverRecommendations() {
         mood_tags: rec?.moodTags || null,
         compatibility_score: rec?.matchScore || null,
         popularity_tier: rec?.popularityTier || null,
-        compatibility_breakdown: rec?.compatibilityBreakdown || null,
-      });
+        compatibility_breakdown: rec?.compatibilityBreakdown as any || null,
+      }]);
 
       // Update taste profile counters
-      const field = status === "accepted" ? "accepted_count" : "dismissed_count";
+      const isAccepted = status === "accepted";
       const { data: existing } = await supabase
         .from("user_taste_profile")
         .select("id, accepted_count, dismissed_count")
         .eq("user_id", user.id)
         .maybeSingle();
       if (existing) {
-        await supabase.from("user_taste_profile").update({
-          [field]: (existing[field] || 0) + 1,
-        }).eq("id", existing.id);
+        await supabase.from("user_taste_profile").update(
+          isAccepted
+            ? { accepted_count: (existing.accepted_count || 0) + 1 }
+            : { dismissed_count: (existing.dismissed_count || 0) + 1 }
+        ).eq("id", existing.id);
       } else {
-        await supabase.from("user_taste_profile").insert({
-          user_id: user.id,
-          [field]: 1,
-        });
+        await supabase.from("user_taste_profile").insert([
+          isAccepted
+            ? { user_id: user.id, accepted_count: 1 }
+            : { user_id: user.id, dismissed_count: 1 }
+        ]);
       }
     } catch (e) {
       console.error("Failed to record feedback:", e);
