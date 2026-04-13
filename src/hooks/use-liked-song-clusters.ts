@@ -119,6 +119,8 @@ export function useLikedSongClusters() {
       return {
         ...c,
         mood_tags: c.mood_tags || [],
+        ai_explanation: c.ai_explanation ?? null,
+        cover_tracks: (Array.isArray(c.cover_tracks) ? c.cover_tracks : []) as { image_url: string; track_name: string }[],
         tracks: clusterTracks,
       };
     });
