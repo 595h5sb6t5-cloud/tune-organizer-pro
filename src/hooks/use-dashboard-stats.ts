@@ -179,6 +179,7 @@ export function useDashboardStats() {
       const [
         likedCountRes,
         playlistCountRes,
+        albumCountRes,
         followedArtistCountRes,
         analyzedCountRes,
         clusterCountRes,
@@ -196,6 +197,7 @@ export function useDashboardStats() {
       ] = await Promise.all([
         supabase.from("liked_songs").select("id", { count: "exact", head: true }).eq("user_id", user.id),
         supabase.from("spotify_playlists").select("id", { count: "exact", head: true }).eq("user_id", user.id),
+        supabase.from("spotify_saved_albums").select("id", { count: "exact", head: true }).eq("user_id", user.id),
         supabase.from("spotify_followed_artists").select("id", { count: "exact", head: true }).eq("user_id", user.id),
         supabase.from("liked_songs").select("id", { count: "exact", head: true }).eq("user_id", user.id).not("analyzed_at", "is", null),
         supabase.from("liked_song_clusters").select("id", { count: "exact", head: true }).eq("user_id", user.id),
