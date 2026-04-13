@@ -88,9 +88,28 @@ async function spotifyGet(url: string, token: string) {
   const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
   if (!res.ok) {
     const body = parseJsonText(await res.text());
-    throw new SpotifyImportError("spotify_api", `Spotify API error: ${res.status}`, res.status, { body });
+    throw new SpotifyImportError("spotify_api", `Spotify API error: ${res.status}`, res.status, { body, url });
   }
   return await res.json();
+}
+
+function getSpotifyErrorMessage(body: unknown) {
+  if (!isRecord(body)) return null;
+  if (typeof body.message === "string") return body.message;
+
+  const nestedError = body.error;
+  if (isRecord(nestedError) && typeof nestedError.message === "string") {
+    return nestedError.message;
+  }
+
+  if (typeof nestedError === "string") return nestedError;
+  return null;
+}
+
+function isInsufficientClientScopeError(error: unknown) {
+  if (!(error instanceof SpotifyImportError) || error.status !== 403) return false;
+  const message = getSpotifyErrorMessage(error.details.body);
+  return typeof message === "string" && message.toLowerCase().includes("insufficient client scope");
 }
 
 type TrackRow = {
@@ -273,31 +292,46 @@ Deno.serve(async (req) => {
     const playlists: PlaylistMeta[] = [];
     offset = 0;
     total = Infinity;
+    let playlistImportWarning: string | null = null;
 
     // Fetch ALL user playlists (owned, saved, collaborative) with full pagination
-    while (offset < total) {
-      const data = await spotifyGet(`https://api.spotify.com/v1/me/playlists?limit=50&offset=${offset}`, accessToken);
-      total = data.total ?? 0;
-      for (const pl of data.items || []) {
-        if (!pl || !pl.id) continue;
-        playlists.push({
-          id: pl.id,
-          name: pl.name || "Untitled",
-          description: pl.description || null,
-          image_url: pl.images?.[0]?.url || null,
-          track_count: pl.tracks?.total || 0,
-          owner_id: pl.owner?.id || "",
-          owner_display_name: pl.owner?.display_name || null,
-          is_owned: pl.owner?.id === spotifyUserId,
-          is_collaborative: pl.collaborative === true,
-          snapshot_id: pl.snapshot_id || null,
-        });
+    try {
+      while (offset < total) {
+        const data = await spotifyGet(`https://api.spotify.com/v1/me/playlists?limit=50&offset=${offset}`, accessToken);
+        total = data.total ?? 0;
+        for (const pl of data.items || []) {
+          if (!pl || !pl.id) continue;
+          playlists.push({
+            id: pl.id,
+            name: pl.name || "Untitled",
+            description: pl.description || null,
+            image_url: pl.images?.[0]?.url || null,
+            track_count: pl.tracks?.total || 0,
+            owner_id: pl.owner?.id || "",
+            owner_display_name: pl.owner?.display_name || null,
+            is_owned: pl.owner?.id === spotifyUserId,
+            is_collaborative: pl.collaborative === true,
+            snapshot_id: pl.snapshot_id || null,
+          });
+        }
+        offset += 50;
+        if (!data.items || data.items.length === 0) break;
       }
-      offset += 50;
-      if (!data.items || data.items.length === 0) break;
+    } catch (e) {
+      if (isInsufficientClientScopeError(e)) {
+        playlistImportWarning = "Spotify connection is missing playlist read access. Reconnect Spotify to sync playlists.";
+        console.warn("[spotify-import-tracks] playlist import skipped due to missing scope", {
+          warning: playlistImportWarning,
+        });
+      } else {
+        throw e;
+      }
     }
 
-    console.info("[spotify-import-tracks] playlists_fetched", { count: playlists.length });
+    console.info("[spotify-import-tracks] playlists_fetched", {
+      count: playlists.length,
+      skipped: Boolean(playlistImportWarning),
+    });
 
     const playlistRows = playlists.map(pl => ({
       user_id: user.id,
@@ -391,6 +425,8 @@ Deno.serve(async (req) => {
 
     console.info("[spotify-import-tracks] playlist_tracks_imported", { count: totalPlaylistTracks });
 
+    const warnings = [playlistImportWarning].filter((warning): warning is string => Boolean(warning));
+
     return json({
       success: true,
       step: "complete",
@@ -399,6 +435,8 @@ Deno.serve(async (req) => {
       playlists: playlists.length,
       playlist_tracks: totalPlaylistTracks,
       imported: likedSongs.length,
+      partial_success: warnings.length > 0,
+      warnings,
     });
   } catch (e) {
     if (e instanceof SpotifyImportError) return fail(e.step, e.message, e.status, e.details);
