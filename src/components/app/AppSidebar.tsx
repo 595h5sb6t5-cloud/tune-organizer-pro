@@ -1,6 +1,8 @@
 import { Music2, LayoutDashboard, ListMusic, Settings, Upload, LogOut, Sparkles, History } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import { useAuth } from "@/hooks/use-auth";
+import { supabase } from "@/integrations/supabase/client";
 
 const navItems = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/dashboard" },
@@ -14,16 +16,23 @@ const navItems = [
 const AppSidebar = () => {
   const location = useLocation();
   const navigate = useNavigate();
+  const { profile, signOut } = useAuth();
 
-  const handleLogout = () => {
+  const initials = profile
+    ? `${(profile.first_name || "")[0] || ""}${(profile.last_name || "")[0] || ""}`.toUpperCase() || "?"
+    : "?";
+  const displayName = profile?.full_name || profile?.first_name || profile?.email || "User";
+
+  const handleLogout = async () => {
+    await signOut();
     toast.success("Logged out successfully");
-    navigate("/");
+    navigate("/auth", { replace: true });
   };
 
   return (
     <aside className="fixed left-0 top-0 bottom-0 w-60 bg-surface-elevated border-r border-border flex flex-col z-40">
       <div className="p-5 border-b border-border">
-        <Link to="/" className="flex items-center gap-2">
+        <Link to="/dashboard" className="flex items-center gap-2">
           <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
             <Music2 className="w-4 h-4 text-primary-foreground" />
           </div>
@@ -54,11 +63,10 @@ const AppSidebar = () => {
       <div className="p-3 border-t border-border">
         <div className="flex items-center gap-3 px-3 py-2">
           <div className="w-8 h-8 rounded-full bg-accent/20 flex items-center justify-center text-xs font-medium text-accent">
-            JD
+            {initials}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium truncate">Jordan D.</p>
-            <p className="text-xs text-muted-foreground">Premium</p>
+            <p className="text-sm font-medium truncate">{displayName}</p>
           </div>
           <button
             onClick={handleLogout}

@@ -23,7 +23,7 @@ function getSpotifyStatusCopy(status: SpotifyStatus) {
     case "importing":
       return { button: "Importing songs…", helper: "Syncing your saved Spotify tracks." };
     case "complete":
-      return { button: "Spotify Connected", helper: "Import complete. You can continue onboarding." };
+      return { button: "Spotify Connected", helper: "Import complete. You can continue." };
     case "error":
       return { button: "Try again", helper: "Spotify connection failed. Review the message below and retry." };
     default:
@@ -47,12 +47,10 @@ const Auth = () => {
     if (pendingRaw) {
       try {
         const pending = JSON.parse(pendingRaw) as { code: string; state: string; savedAt: number };
-        // Only resume if saved less than 10 minutes ago (Spotify codes expire quickly)
         const ageMs = Date.now() - (pending.savedAt || 0);
         if (pending.code && ageMs < 10 * 60 * 1000) {
           console.info("[Auth] Resuming pending Spotify callback", { ageMs, has_code: true });
           localStorage.removeItem(SPOTIFY_PENDING_CALLBACK_KEY);
-          // Navigate back to spotify-callback with the saved params
           const url = `/spotify-callback?code=${encodeURIComponent(pending.code)}${pending.state ? `&state=${encodeURIComponent(pending.state)}` : ""}`;
           navigate(url, { replace: true });
           return;
@@ -65,7 +63,6 @@ const Auth = () => {
       }
     }
 
-    // Handle explicit redirect param
     if (redirectAfterLogin) {
       navigate(redirectAfterLogin, { replace: true });
       return;
@@ -74,7 +71,6 @@ const Auth = () => {
 
   useEffect(() => {
     if (user && profile?.onboarding_completed) {
-      // Don't redirect away if we have a pending Spotify callback
       const hasPending = localStorage.getItem(SPOTIFY_PENDING_CALLBACK_KEY);
       if (!hasPending) {
         navigate("/dashboard", { replace: true });
@@ -285,50 +281,23 @@ function SignUpForm({ onSuccess }: { onSuccess: () => void }) {
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-2">
           <Label htmlFor="first-name">First name</Label>
-          <Input
-            id="first-name"
-            placeholder="Jordan"
-            value={firstName}
-            onChange={(e) => setFirstName(e.target.value)}
-            autoComplete="given-name"
-          />
+          <Input id="first-name" placeholder="Jordan" value={firstName} onChange={(e) => setFirstName(e.target.value)} autoComplete="given-name" />
         </div>
         <div className="space-y-2">
           <Label htmlFor="last-name">Last name</Label>
-          <Input
-            id="last-name"
-            placeholder="Doe"
-            value={lastName}
-            onChange={(e) => setLastName(e.target.value)}
-            autoComplete="family-name"
-          />
+          <Input id="last-name" placeholder="Doe" value={lastName} onChange={(e) => setLastName(e.target.value)} autoComplete="family-name" />
         </div>
       </div>
       <div className="space-y-2">
         <Label htmlFor="signup-contact">Email or phone number</Label>
-        <Input
-          id="signup-contact"
-          placeholder="you@email.com or +1234567890"
-          value={contact}
-          onChange={(e) => setContact(e.target.value)}
-          autoComplete="username"
-        />
+        <Input id="signup-contact" placeholder="you@email.com or +1234567890" value={contact} onChange={(e) => setContact(e.target.value)} autoComplete="username" />
         <p className="text-xs text-muted-foreground">
-          {contact && !isEmail
-            ? "Phone auth may require additional setup. Email is recommended."
-            : "At least one is required."}
+          {contact && !isEmail ? "Phone auth may require additional setup. Email is recommended." : "At least one is required."}
         </p>
       </div>
       <div className="space-y-2">
         <Label htmlFor="signup-password">Password</Label>
-        <Input
-          id="signup-password"
-          type="password"
-          placeholder="••••••••"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          autoComplete="new-password"
-        />
+        <Input id="signup-password" type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />
       </div>
       {error && (
         <div className="flex items-center gap-2 text-destructive text-sm">
@@ -344,10 +313,8 @@ function SignUpForm({ onSuccess }: { onSuccess: () => void }) {
 }
 
 function ConnectCard({ onComplete }: { onComplete: () => void | Promise<void> }) {
-  const { updateProfile, profile } = useAuth();
+  const { profile } = useAuth();
   const { startAuth: startSpotify, status: spotifyStatus, error: spotifyError } = useSpotify();
-  const [connectingApple, setConnectingApple] = useState(false);
-  const [appleDone, setAppleDone] = useState(false);
 
   const spotifyDone = profile?.spotify_connected || spotifyStatus === "connected" || spotifyStatus === "complete";
   const spotifyBusy = useMemo(
@@ -360,22 +327,13 @@ function ConnectCard({ onComplete }: { onComplete: () => void | Promise<void> })
     await startSpotify("/auth");
   };
 
-  const handleApple = async () => {
-    setConnectingApple(true);
-    await new Promise((r) => setTimeout(r, 1500));
-    await updateProfile({ apple_music_connected: true });
-    setAppleDone(true);
-    setConnectingApple(false);
-    toast({ title: "Apple Music connected!" });
-  };
-
   return (
     <Card className="w-full max-w-md border-border/60 shadow-lg">
       <CardContent className="p-6 space-y-6">
         <div className="text-center space-y-2">
           <h2 className="font-instrument-serif text-2xl text-foreground">Connect your music</h2>
           <p className="text-sm text-muted-foreground">
-            Link a streaming platform to get personalized recommendations.
+            Link Spotify to get personalized recommendations.
           </p>
         </div>
 
@@ -395,24 +353,6 @@ function ConnectCard({ onComplete }: { onComplete: () => void | Promise<void> })
             )}
             <span className="flex-1 text-left">{spotifyDone ? "Spotify Connected" : spotifyCopy.button}</span>
           </Button>
-
-          <Button
-            variant="outline"
-            className="w-full justify-start gap-3 h-14"
-            onClick={handleApple}
-            disabled={connectingApple || appleDone}
-          >
-            {connectingApple ? (
-              <Loader2 className="h-5 w-5 animate-spin text-accent" />
-            ) : appleDone ? (
-              <CheckCircle2 className="h-5 w-5 text-accent" />
-            ) : (
-              <div className="h-5 w-5 rounded-full bg-foreground" />
-            )}
-            <span className="flex-1 text-left">
-              {appleDone ? "Apple Music Connected" : "Continue with Apple Music"}
-            </span>
-          </Button>
         </div>
 
         <div className="space-y-1">
@@ -429,7 +369,7 @@ function ConnectCard({ onComplete }: { onComplete: () => void | Promise<void> })
           Skip for now
         </Button>
 
-        {(spotifyDone || appleDone) && (
+        {spotifyDone && (
           <Button variant="hero" className="w-full" onClick={onComplete}>
             Continue
           </Button>

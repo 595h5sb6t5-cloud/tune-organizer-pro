@@ -3,7 +3,6 @@ import { CheckCircle2, Loader2, AlertCircle } from "lucide-react";
 import AppLayout from "@/components/app/AppLayout";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import { useConnections } from "@/hooks/use-connections";
 import { useSpotify, type SpotifyStatus } from "@/hooks/use-spotify";
 import { useAuth } from "@/hooks/use-auth";
 
@@ -27,7 +26,6 @@ function getSpotifyStatusCopy(status: SpotifyStatus) {
 }
 
 const Settings = () => {
-  const { connections, connectApple, disconnectApple, connectingApple } = useConnections();
   const { startAuth: startSpotifyAuth, disconnect: disconnectSpotify, status: spotifyStatus, error: spotifyError } = useSpotify();
   const { profile } = useAuth();
   const [overlapMode, setOverlapMode] = useState(false);
@@ -105,27 +103,6 @@ const Settings = () => {
                   <AlertCircle className="h-3.5 w-3.5 shrink-0" />
                   <span>{spotifyError}</span>
                 </p>
-              )}
-            </div>
-
-            <div className="flex items-center justify-between p-4 rounded-xl bg-secondary/50 mt-3">
-              <div className="flex items-center gap-3">
-                <span className="text-xl">🍎</span>
-                <div>
-                  <p className="text-sm font-medium">Apple Music</p>
-                  <p className="text-xs text-muted-foreground">
-                    {connections.apple.connected ? connections.apple.email : "Not connected"}
-                  </p>
-                </div>
-              </div>
-              {connections.apple.connected ? (
-                <Button variant="ghost" size="sm" className="rounded-lg text-destructive" onClick={() => { disconnectApple(); toast("Apple Music disconnected"); }}>
-                  Disconnect
-                </Button>
-              ) : (
-                <Button variant="hero" size="sm" className="rounded-lg" onClick={() => connectApple().then(() => toast.success("Apple Music connected!"))} disabled={connectingApple}>
-                  {connectingApple ? "Connecting…" : "Connect"}
-                </Button>
               )}
             </div>
           </div>

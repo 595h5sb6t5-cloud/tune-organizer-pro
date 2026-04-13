@@ -2,7 +2,7 @@ import AppLayout from "@/components/app/AppLayout";
 import { samplePlaylists, sampleTracks } from "@/lib/sample-data";
 import { Music, Disc3, Headphones, Activity, TrendingUp, CheckCircle2, AlertCircle } from "lucide-react";
 import { Link } from "react-router-dom";
-import { useConnections } from "@/hooks/use-connections";
+import { useAuth } from "@/hooks/use-auth";
 
 const genreData = [
   { name: "Indie", pct: 28, color: "bg-accent" },
@@ -23,27 +23,25 @@ const moodData = [
 ];
 
 const Dashboard = () => {
-  const { connections } = useConnections();
+  const { profile } = useAuth();
+  const firstName = profile?.first_name || "there";
 
   const stats = [
     { label: "Imported Tracks", value: "1,247", icon: Music, change: "+38 this week", ok: true },
     { label: "AI Playlists", value: String(samplePlaylists.length), icon: Disc3, change: `${samplePlaylists.filter(p => p.syncStatus === "synced").length} synced`, ok: true },
     { label: "Avg Cohesion", value: "91%", icon: Activity, change: "+3% vs last gen", ok: true },
-    { label: "Spotify", value: connections.spotify.connected ? "Connected" : "Off", icon: Headphones, change: connections.spotify.connected ? connections.spotify.email : "Not connected", ok: connections.spotify.connected },
-    { label: "Apple Music", value: connections.apple.connected ? "Connected" : "Off", icon: Headphones, change: connections.apple.connected ? connections.apple.email : "Not connected", ok: connections.apple.connected },
+    { label: "Spotify", value: profile?.spotify_connected ? "Connected" : "Off", icon: Headphones, change: profile?.spotify_connected ? (profile.email || "Connected") : "Not connected", ok: !!profile?.spotify_connected },
   ];
 
   return (
     <AppLayout>
       <div className="max-w-6xl">
-        {/* Header */}
         <div className="mb-8">
-          <h1 className="font-heading text-3xl mb-1">Welcome back, Jordan</h1>
+          <h1 className="font-heading text-3xl mb-1">Welcome back, {firstName}</h1>
           <p className="text-muted-foreground">Your music library at a glance.</p>
         </div>
 
-        {/* Stats */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 mb-8">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
           {stats.map((stat) => (
             <div key={stat.label} className="p-4 rounded-2xl bg-surface-elevated border border-border/50">
               <div className="flex items-center justify-between mb-2">
@@ -66,7 +64,6 @@ const Dashboard = () => {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-          {/* Genre distribution */}
           <div className="col-span-1 p-6 rounded-2xl bg-surface-elevated border border-border/50">
             <h3 className="font-heading text-lg mb-4">Genre Distribution</h3>
             <div className="space-y-3">
@@ -84,7 +81,6 @@ const Dashboard = () => {
             </div>
           </div>
 
-          {/* Mood distribution */}
           <div className="col-span-1 p-6 rounded-2xl bg-surface-elevated border border-border/50">
             <h3 className="font-heading text-lg mb-4">Mood Map</h3>
             <div className="grid grid-cols-2 gap-3">
@@ -97,7 +93,6 @@ const Dashboard = () => {
             </div>
           </div>
 
-          {/* AI Profile */}
           <div className="col-span-1 p-6 rounded-2xl bg-primary text-primary-foreground">
             <h3 className="font-heading text-lg mb-3">Your AI Music Profile</h3>
             <p className="text-sm leading-relaxed opacity-80 mb-4">
@@ -120,7 +115,6 @@ const Dashboard = () => {
           </div>
         </div>
 
-        {/* Recent playlists */}
         <div>
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-heading text-lg">Recent Playlists</h3>
