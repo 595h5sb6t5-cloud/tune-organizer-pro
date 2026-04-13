@@ -46,6 +46,7 @@ export interface DashboardStats {
   // Library overview
   totalLikedSongs: number;
   totalPlaylists: number;
+  totalSavedAlbums: number;
   totalFollowedArtists: number;
   totalAnalyzedSongs: number;
   totalClusters: number;
@@ -93,6 +94,7 @@ export interface DashboardStats {
 const EMPTY_STATS: DashboardStats = {
   totalLikedSongs: 0,
   totalPlaylists: 0,
+  totalSavedAlbums: 0,
   totalFollowedArtists: 0,
   totalAnalyzedSongs: 0,
   totalClusters: 0,
@@ -177,6 +179,7 @@ export function useDashboardStats() {
       const [
         likedCountRes,
         playlistCountRes,
+        albumCountRes,
         followedArtistCountRes,
         analyzedCountRes,
         clusterCountRes,
@@ -194,6 +197,7 @@ export function useDashboardStats() {
       ] = await Promise.all([
         supabase.from("liked_songs").select("id", { count: "exact", head: true }).eq("user_id", user.id),
         supabase.from("spotify_playlists").select("id", { count: "exact", head: true }).eq("user_id", user.id),
+        supabase.from("spotify_saved_albums").select("id", { count: "exact", head: true }).eq("user_id", user.id),
         supabase.from("spotify_followed_artists").select("id", { count: "exact", head: true }).eq("user_id", user.id),
         supabase.from("liked_songs").select("id", { count: "exact", head: true }).eq("user_id", user.id).not("analyzed_at", "is", null),
         supabase.from("liked_song_clusters").select("id", { count: "exact", head: true }).eq("user_id", user.id),
@@ -311,6 +315,7 @@ export function useDashboardStats() {
       setStats({
         totalLikedSongs: likedCountRes.count ?? 0,
         totalPlaylists: playlistCountRes.count ?? 0,
+        totalSavedAlbums: albumCountRes.count ?? 0,
         totalFollowedArtists: followedArtistCountRes.count ?? 0,
         totalAnalyzedSongs: analyzedCountRes.count ?? 0,
         totalClusters: clusterCountRes.count ?? 0,

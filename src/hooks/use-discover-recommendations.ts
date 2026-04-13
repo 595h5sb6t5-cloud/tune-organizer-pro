@@ -26,6 +26,7 @@ export function useDiscoverRecommendations() {
       const [
         importedRes, likedRes, playlistsRes, playlistTracksRes,
         historyRes, clustersRes, vibeRes, tasteRes,
+        albumsRes, albumTracksRes,
       ] = await Promise.all([
         supabase.from("imported_tracks").select("track_name, artist_name, album_name").eq("user_id", user.id),
         supabase.from("liked_songs").select("track_name, artist_name, album_name, genre_tags, mood, atmosphere, energy, production_style, era, audio_tempo, audio_energy, audio_valence, audio_danceability, audio_acousticness, audio_instrumentalness, audio_speechiness, audio_loudness, groove_feel, vocal_style, sonic_brightness, spatial_quality, rhythmic_identity, listening_context, sonic_texture, intimacy_scale, tension_level").eq("user_id", user.id),
@@ -35,6 +36,8 @@ export function useDiscoverRecommendations() {
         supabase.from("liked_song_clusters").select("name, vibe_description, mood_tags, energy_level, tempo_range, era_range, track_count").eq("user_id", user.id),
         supabase.from("playlist_vibe_analysis").select("primary_vibe, secondary_vibes, mood_summary, energy_summary, tempo_summary, production_summary, listening_context, emotional_keywords, genre_blend").eq("user_id", user.id),
         supabase.from("user_taste_profile").select("*").eq("user_id", user.id).maybeSingle(),
+        supabase.from("spotify_saved_albums").select("album_name, artist_name, genres, album_type, release_date").eq("user_id", user.id),
+        supabase.from("spotify_album_tracks").select("track_name, artist_name").eq("user_id", user.id).limit(2000),
       ]);
 
       const importedTracks = importedRes.data ?? [];
@@ -47,11 +50,12 @@ export function useDiscoverRecommendations() {
         return;
       }
 
-      // Build comprehensive known songs set
+      // Build comprehensive known songs set (all sources)
       const knownSet = new Set<string>();
       for (const t of importedTracks) knownSet.add(`${t.track_name}|||${t.artist_name}`.toLowerCase());
       for (const t of likedSongs) knownSet.add(`${t.track_name}|||${t.artist_name}`.toLowerCase());
       for (const t of playlistTracksRes.data ?? []) knownSet.add(`${t.track_name}|||${t.artist_name}`.toLowerCase());
+      for (const t of albumTracksRes.data ?? []) knownSet.add(`${t.track_name}|||${t.artist_name}`.toLowerCase());
       for (const t of historyRes.data ?? []) knownSet.add(`${t.track_title}|||${t.track_artist}`.toLowerCase());
 
       const knownSongs = [...knownSet].slice(0, 600).map(k => {
@@ -114,6 +118,17 @@ export function useDiscoverRecommendations() {
         artistCounts[t.artist_name] = (artistCounts[t.artist_name] || 0) + 1;
       }
 
+      // Include saved album artists and genres in taste signals
+      const savedAlbums = albumsRes.data ?? [];
+      for (const a of savedAlbums) {
+        artistCounts[a.artist_name] = (artistCounts[a.artist_name] || 0) + 2; // albums = stronger signal
+        for (const g of a.genres || []) genreTagCounts[g] = (genreTagCounts[g] || 0) + 1;
+        if (a.release_date) {
+          const decade = a.release_date.slice(0, 3) + "0s";
+          eraCounts[decade] = (eraCounts[decade] || 0) + 1;
+        }
+      }
+
       const topN = (obj: Record<string, number>, n: number) =>
         Object.entries(obj).sort((a, b) => b[1] - a[1]).slice(0, n).map(e => e[0]);
 
@@ -130,11 +145,21 @@ export function useDiscoverRecommendations() {
         trackCount: pl.track_count,
       }));
 
+      // Build saved albums summary for AI context
+      const albumsSummary = savedAlbums.slice(0, 30).map(a => ({
+        name: a.album_name,
+        artist: a.artist_name,
+        type: a.album_type,
+        genres: a.genres || [],
+        year: a.release_date?.slice(0, 4) || null,
+      }));
+
       const { data, error } = await supabase.functions.invoke("discover-recommendations", {
         body: {
           discoveryMode,
           knownSongs,
           playlists,
+          savedAlbums: albumsSummary,
           audioProfile,
           tasteSignals: {
             topGenres: topN(genreTagCounts, 10),
