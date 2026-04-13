@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   GripVertical, X, Plus, Search, Sparkles, Save, Loader2,
-  Music, ArrowLeft, Pencil, Check, ChevronDown, ChevronUp
+  Music, ArrowLeft, ChevronDown, ChevronUp, Heart, ListMusic, Disc, Library
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
@@ -16,7 +16,9 @@ interface PlaylistEditorProps {
   onSaved: () => void;
 }
 
-interface LikedSongOption {
+type SongSource = "liked" | "playlist" | "album" | "imported";
+
+interface SongOption {
   id: string;
   spotify_track_id: string;
   track_name: string;
@@ -25,7 +27,16 @@ interface LikedSongOption {
   image_url: string | null;
   mood: string | null;
   energy: string | null;
+  source: SongSource;
+  source_name?: string; // e.g. playlist name
 }
+
+const SOURCE_LABELS: Record<SongSource, { label: string; icon: typeof Heart; className: string }> = {
+  liked: { label: "Liked Songs", icon: Heart, className: "text-pink-400 bg-pink-400/10" },
+  playlist: { label: "Playlist", icon: ListMusic, className: "text-blue-400 bg-blue-400/10" },
+  album: { label: "Album", icon: Disc, className: "text-amber-400 bg-amber-400/10" },
+  imported: { label: "Imported", icon: Library, className: "text-emerald-400 bg-emerald-400/10" },
+};
 
 export default function PlaylistEditor({ cluster, onClose, onSaved }: PlaylistEditorProps) {
   const { user } = useAuth();
@@ -33,29 +44,102 @@ export default function PlaylistEditor({ cluster, onClose, onSaved }: PlaylistEd
   const [tracks, setTracks] = useState<ClusterTrack[]>([...cluster.tracks]);
   const [saving, setSaving] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<LikedSongOption[]>([]);
+  const [searchResults, setSearchResults] = useState<SongOption[]>([]);
   const [searching, setSearching] = useState(false);
   const [showAddPanel, setShowAddPanel] = useState(false);
-  const [suggestions, setSuggestions] = useState<LikedSongOption[]>([]);
+  const [suggestions, setSuggestions] = useState<SongOption[]>([]);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
   const searchTimeout = useRef<ReturnType<typeof setTimeout>>();
+  // Cache playlist names for source labels
+  const playlistNameCache = useRef<Map<string, string>>(new Map());
 
   const existingIds = new Set(tracks.map(t => t.spotify_track_id));
 
-  // Debounced search through liked songs
+  // Search across ALL sources
   const handleSearch = useCallback(async (q: string) => {
     if (!user || q.trim().length < 2) { setSearchResults([]); return; }
     setSearching(true);
     try {
-      const { data } = await supabase
-        .from("liked_songs")
-        .select("id, spotify_track_id, track_name, artist_name, album_name, image_url, mood, energy")
-        .eq("user_id", user.id)
-        .or(`track_name.ilike.%${q}%,artist_name.ilike.%${q}%,album_name.ilike.%${q}%`)
-        .limit(30);
-      setSearchResults((data || []).filter(s => !existingIds.has(s.spotify_track_id)));
+      const likeQ = `%${q}%`;
+
+      const [likedRes, playlistTracksRes, importedRes, albumTracksRes] = await Promise.all([
+        supabase
+          .from("liked_songs")
+          .select("id, spotify_track_id, track_name, artist_name, album_name, image_url, mood, energy")
+          .eq("user_id", user.id)
+          .or(`track_name.ilike.${likeQ},artist_name.ilike.${likeQ},album_name.ilike.${likeQ}`)
+          .limit(20),
+        supabase
+          .from("spotify_playlist_tracks")
+          .select("id, spotify_track_id, track_name, artist_name, album_name, image_url, playlist_id")
+          .eq("user_id", user.id)
+          .or(`track_name.ilike.${likeQ},artist_name.ilike.${likeQ},album_name.ilike.${likeQ}`)
+          .limit(20),
+        supabase
+          .from("imported_tracks")
+          .select("id, spotify_track_id, track_name, artist_name, album_name, image_url")
+          .eq("user_id", user.id)
+          .or(`track_name.ilike.${likeQ},artist_name.ilike.${likeQ},album_name.ilike.${likeQ}`)
+          .limit(15),
+        supabase
+          .from("spotify_album_tracks")
+          .select("id, spotify_track_id, track_name, artist_name, album_id")
+          .eq("user_id", user.id)
+          .or(`track_name.ilike.${likeQ},artist_name.ilike.${likeQ}`)
+          .limit(15),
+      ]);
+
+      // Fetch playlist names for labeling
+      const plIds = new Set((playlistTracksRes.data || []).map(t => t.playlist_id).filter(Boolean));
+      const unknownPlIds = [...plIds].filter(id => !playlistNameCache.current.has(id));
+      if (unknownPlIds.length > 0) {
+        const { data: plData } = await supabase
+          .from("spotify_playlists")
+          .select("id, name, is_owned_by_user, is_collaborative")
+          .in("id", unknownPlIds);
+        for (const pl of plData || []) {
+          const suffix = pl.is_collaborative ? " (collab)" : pl.is_owned_by_user ? " (yours)" : "";
+          playlistNameCache.current.set(pl.id, pl.name + suffix);
+        }
+      }
+
+      // Deduplicate by spotify_track_id, prioritizing liked > playlist > imported > album
+      const seen = new Set<string>();
+      const results: SongOption[] = [];
+
+      for (const s of likedRes.data || []) {
+        if (existingIds.has(s.spotify_track_id) || seen.has(s.spotify_track_id)) continue;
+        seen.add(s.spotify_track_id);
+        results.push({ ...s, source: "liked" });
+      }
+      for (const s of playlistTracksRes.data || []) {
+        if (existingIds.has(s.spotify_track_id) || seen.has(s.spotify_track_id)) continue;
+        seen.add(s.spotify_track_id);
+        results.push({
+          id: s.id, spotify_track_id: s.spotify_track_id, track_name: s.track_name,
+          artist_name: s.artist_name, album_name: s.album_name, image_url: s.image_url,
+          mood: null, energy: null, source: "playlist",
+          source_name: playlistNameCache.current.get(s.playlist_id) || "Playlist",
+        });
+      }
+      for (const s of importedRes.data || []) {
+        if (existingIds.has(s.spotify_track_id) || seen.has(s.spotify_track_id)) continue;
+        seen.add(s.spotify_track_id);
+        results.push({ ...s, mood: null, energy: null, source: "imported" });
+      }
+      for (const s of albumTracksRes.data || []) {
+        if (existingIds.has(s.spotify_track_id) || seen.has(s.spotify_track_id)) continue;
+        seen.add(s.spotify_track_id);
+        results.push({
+          id: s.id, spotify_track_id: s.spotify_track_id, track_name: s.track_name,
+          artist_name: s.artist_name, album_name: null, image_url: null,
+          mood: null, energy: null, source: "album",
+        });
+      }
+
+      setSearchResults(results);
     } catch {
       setSearchResults([]);
     } finally {
@@ -73,52 +157,89 @@ export default function PlaylistEditor({ cluster, onClose, onSaved }: PlaylistEd
     return () => clearTimeout(searchTimeout.current);
   }, [searchQuery]);
 
-  // Load suggested matches for short playlists
+  // Load smart suggestions based on playlist characteristics
   const loadSuggestions = useCallback(async () => {
     if (!user || tracks.length === 0) return;
     setLoadingSuggestions(true);
     try {
-      // Get mood/energy from existing tracks to find similar songs
-      const moods = tracks.map(t => t.mood).filter(Boolean);
-      const energies = tracks.map(t => t.energy).filter(Boolean);
-      const topMood = moods.length > 0 ? mostFrequent(moods as string[]) : null;
-      const topEnergy = energies.length > 0 ? mostFrequent(energies as string[]) : null;
+      const moods = tracks.map(t => t.mood).filter(Boolean) as string[];
+      const energies = tracks.map(t => t.energy).filter(Boolean) as string[];
+      const topMood = moods.length > 0 ? mostFrequent(moods) : null;
+      const topEnergy = energies.length > 0 ? mostFrequent(energies) : null;
+      const artistSet = new Set(tracks.map(t => t.artist_name.toLowerCase()));
 
-      let query = supabase
-        .from("liked_songs")
-        .select("id, spotify_track_id, track_name, artist_name, album_name, image_url, mood, energy")
-        .eq("user_id", user.id)
-        .not("spotify_track_id", "in", `(${[...existingIds].join(",")})`)
-        .limit(20);
-
-      if (topMood) query = query.eq("mood", topMood);
-      if (topEnergy) query = query.eq("energy", topEnergy);
-
-      const { data } = await query;
-
-      // If mood/energy filter returned too few, fetch without filters
-      if (!data || data.length < 5) {
-        const { data: fallback } = await supabase
+      // Fetch from all sources in parallel
+      const [likedRes, playlistTracksRes, importedRes] = await Promise.all([
+        supabase
           .from("liked_songs")
           .select("id, spotify_track_id, track_name, artist_name, album_name, image_url, mood, energy")
           .eq("user_id", user.id)
-          .limit(50);
+          .limit(200),
+        supabase
+          .from("spotify_playlist_tracks")
+          .select("id, spotify_track_id, track_name, artist_name, album_name, image_url, playlist_id")
+          .eq("user_id", user.id)
+          .limit(200),
+        supabase
+          .from("imported_tracks")
+          .select("id, spotify_track_id, track_name, artist_name, album_name, image_url")
+          .eq("user_id", user.id)
+          .limit(100),
+      ]);
 
-        const filtered = (fallback || []).filter(s => !existingIds.has(s.spotify_track_id));
-        // Score by matching artists, mood, energy
-        const artistSet = new Set(tracks.map(t => t.artist_name.toLowerCase()));
-        const scored = filtered.map(s => {
-          let score = 0;
-          if (artistSet.has(s.artist_name.toLowerCase())) score += 3;
-          if (topMood && s.mood === topMood) score += 2;
-          if (topEnergy && s.energy === topEnergy) score += 1;
-          return { ...s, score };
-        }).sort((a, b) => b.score - a.score);
-
-        setSuggestions(scored.slice(0, 15));
-      } else {
-        setSuggestions(data.filter(s => !existingIds.has(s.spotify_track_id)));
+      // Fetch playlist names for new IDs
+      const plIds = new Set((playlistTracksRes.data || []).map(t => t.playlist_id));
+      const unknownPlIds = [...plIds].filter(id => !playlistNameCache.current.has(id));
+      if (unknownPlIds.length > 0) {
+        const { data: plData } = await supabase
+          .from("spotify_playlists")
+          .select("id, name, is_owned_by_user, is_collaborative")
+          .in("id", unknownPlIds.slice(0, 50));
+        for (const pl of plData || []) {
+          const suffix = pl.is_collaborative ? " (collab)" : pl.is_owned_by_user ? " (yours)" : "";
+          playlistNameCache.current.set(pl.id, pl.name + suffix);
+        }
       }
+
+      // Deduplicate and score all candidates
+      const seen = new Set<string>();
+      const candidates: (SongOption & { score: number })[] = [];
+
+      const score = (s: { artist_name: string; mood?: string | null; energy?: string | null }) => {
+        let sc = 0;
+        if (artistSet.has(s.artist_name.toLowerCase())) sc += 5;
+        if (topMood && s.mood === topMood) sc += 3;
+        if (topEnergy && s.energy === topEnergy) sc += 2;
+        return sc;
+      };
+
+      for (const s of likedRes.data || []) {
+        if (existingIds.has(s.spotify_track_id) || seen.has(s.spotify_track_id)) continue;
+        seen.add(s.spotify_track_id);
+        candidates.push({ ...s, source: "liked", score: score(s) });
+      }
+      for (const s of playlistTracksRes.data || []) {
+        if (existingIds.has(s.spotify_track_id) || seen.has(s.spotify_track_id)) continue;
+        seen.add(s.spotify_track_id);
+        candidates.push({
+          id: s.id, spotify_track_id: s.spotify_track_id, track_name: s.track_name,
+          artist_name: s.artist_name, album_name: s.album_name, image_url: s.image_url,
+          mood: null, energy: null, source: "playlist",
+          source_name: playlistNameCache.current.get(s.playlist_id) || "Playlist",
+          score: score({ artist_name: s.artist_name }),
+        });
+      }
+      for (const s of importedRes.data || []) {
+        if (existingIds.has(s.spotify_track_id) || seen.has(s.spotify_track_id)) continue;
+        seen.add(s.spotify_track_id);
+        candidates.push({
+          ...s, mood: null, energy: null, source: "imported",
+          score: score({ artist_name: s.artist_name }),
+        });
+      }
+
+      candidates.sort((a, b) => b.score - a.score);
+      setSuggestions(candidates.slice(0, 20));
     } catch {
       setSuggestions([]);
     } finally {
@@ -127,7 +248,7 @@ export default function PlaylistEditor({ cluster, onClose, onSaved }: PlaylistEd
   }, [user, tracks, existingIds]);
 
   // Add track to playlist
-  const addTrack = (song: LikedSongOption) => {
+  const addTrack = (song: SongOption) => {
     const newTrack: ClusterTrack = {
       id: `new-${Date.now()}-${Math.random()}`,
       liked_song_id: song.id,
@@ -145,12 +266,10 @@ export default function PlaylistEditor({ cluster, onClose, onSaved }: PlaylistEd
     setSuggestions(prev => prev.filter(s => s.spotify_track_id !== song.spotify_track_id));
   };
 
-  // Remove track
   const removeTrack = (idx: number) => {
     setTracks(prev => prev.filter((_, i) => i !== idx));
   };
 
-  // Drag reorder
   const handleDragStart = (idx: number) => setDragIdx(idx);
   const handleDragOver = (e: React.DragEvent, idx: number) => {
     e.preventDefault();
@@ -168,7 +287,6 @@ export default function PlaylistEditor({ cluster, onClose, onSaved }: PlaylistEd
     setDragOverIdx(null);
   };
 
-  // Move up/down (mobile-friendly alternative)
   const moveTrack = (from: number, to: number) => {
     if (to < 0 || to >= tracks.length) return;
     setTracks(prev => {
@@ -179,24 +297,20 @@ export default function PlaylistEditor({ cluster, onClose, onSaved }: PlaylistEd
     });
   };
 
-  // Save all changes
   const handleSave = async () => {
     if (!user) return;
     setSaving(true);
     try {
-      // 1. Update cluster name and track_count
       await supabase
         .from("liked_song_clusters")
         .update({ name, track_count: tracks.length })
         .eq("id", cluster.id);
 
-      // 2. Delete all existing cluster tracks
       await supabase
         .from("liked_song_cluster_tracks")
         .delete()
         .eq("cluster_id", cluster.id);
 
-      // 3. Re-insert with positions
       if (tracks.length > 0) {
         const rows = tracks.map((t, i) => ({
           user_id: user.id,
@@ -211,7 +325,6 @@ export default function PlaylistEditor({ cluster, onClose, onSaved }: PlaylistEd
         }
       }
 
-      // 4. Update cover_tracks
       const coverTracks = tracks
         .filter(t => t.image_url)
         .slice(0, 4)
@@ -290,27 +403,27 @@ export default function PlaylistEditor({ cluster, onClose, onSaved }: PlaylistEd
       {/* Add songs panel */}
       {showAddPanel && (
         <div className="rounded-xl bg-surface-elevated border border-border/50 p-4 mb-6 space-y-4">
-          {/* Search */}
+          {/* Search across all sources */}
           <div>
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input
-                placeholder="Search your liked songs by title, artist, or album…"
+                placeholder="Search all your Spotify music — liked songs, playlists, albums…"
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 className="pl-9"
               />
             </div>
-            {searching && <p className="text-xs text-muted-foreground mt-2">Searching…</p>}
+            {searching && <p className="text-xs text-muted-foreground mt-2">Searching across all sources…</p>}
             {searchResults.length > 0 && (
-              <div className="mt-2 max-h-60 overflow-y-auto divide-y divide-border/20 rounded-lg border border-border/30">
+              <div className="mt-2 max-h-72 overflow-y-auto divide-y divide-border/20 rounded-lg border border-border/30">
                 {searchResults.map(song => (
-                  <SongRow key={song.id} song={song} onAdd={() => addTrack(song)} />
+                  <SongRow key={`${song.source}-${song.id}`} song={song} onAdd={() => addTrack(song)} />
                 ))}
               </div>
             )}
             {searchQuery.length >= 2 && !searching && searchResults.length === 0 && (
-              <p className="text-xs text-muted-foreground mt-2">No matching songs found.</p>
+              <p className="text-xs text-muted-foreground mt-2">No matching songs found across any source.</p>
             )}
           </div>
 
@@ -325,16 +438,18 @@ export default function PlaylistEditor({ cluster, onClose, onSaved }: PlaylistEd
                 {loadingSuggestions ? <Loader2 className="w-3 h-3 animate-spin" /> : "Refresh"}
               </Button>
             </div>
-            <p className="text-[11px] text-muted-foreground mb-2">Songs from your library that match this playlist's mood, energy, and style.</p>
+            <p className="text-[11px] text-muted-foreground mb-2">
+              Songs from your full library that match this playlist's mood, energy, artists, and style.
+            </p>
             {loadingSuggestions ? (
               <div className="flex items-center gap-2 py-4 justify-center">
                 <Loader2 className="w-4 h-4 animate-spin text-accent" />
-                <span className="text-xs text-muted-foreground">Finding matching songs…</span>
+                <span className="text-xs text-muted-foreground">Finding matches across all sources…</span>
               </div>
             ) : suggestions.length > 0 ? (
-              <div className="max-h-60 overflow-y-auto divide-y divide-border/20 rounded-lg border border-border/30">
+              <div className="max-h-72 overflow-y-auto divide-y divide-border/20 rounded-lg border border-border/30">
                 {suggestions.map(song => (
-                  <SongRow key={song.id} song={song} onAdd={() => addTrack(song)} />
+                  <SongRow key={`${song.source}-${song.id}`} song={song} onAdd={() => addTrack(song)} />
                 ))}
               </div>
             ) : (
@@ -344,7 +459,7 @@ export default function PlaylistEditor({ cluster, onClose, onSaved }: PlaylistEd
         </div>
       )}
 
-      {/* Track list - editable */}
+      {/* Track list */}
       <div className="rounded-xl bg-surface-elevated border border-border/50 overflow-hidden">
         {tracks.length === 0 ? (
           <div className="py-12 text-center">
@@ -365,13 +480,8 @@ export default function PlaylistEditor({ cluster, onClose, onSaved }: PlaylistEd
                   dragOverIdx === idx ? "bg-accent/10" : "hover:bg-secondary/20"
                 } ${dragIdx === idx ? "opacity-40" : ""}`}
               >
-                {/* Drag handle */}
                 <GripVertical className="w-4 h-4 text-muted-foreground/40 cursor-grab flex-shrink-0" />
-
-                {/* Position */}
                 <span className="text-xs text-muted-foreground w-5 text-right flex-shrink-0">{idx + 1}</span>
-
-                {/* Artwork */}
                 {track.image_url ? (
                   <img src={track.image_url} alt="" className="w-9 h-9 rounded-md object-cover flex-shrink-0" loading="lazy" />
                 ) : (
@@ -379,14 +489,10 @@ export default function PlaylistEditor({ cluster, onClose, onSaved }: PlaylistEd
                     <Music className="w-3.5 h-3.5 text-muted-foreground" />
                   </div>
                 )}
-
-                {/* Info */}
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium truncate">{track.track_name}</p>
                   <p className="text-xs text-muted-foreground truncate">{track.artist_name}</p>
                 </div>
-
-                {/* Mobile reorder buttons */}
                 <div className="flex flex-col gap-0.5 md:hidden flex-shrink-0">
                   <button onClick={() => moveTrack(idx, idx - 1)} disabled={idx === 0} className="p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-20">
                     <ChevronUp className="w-3.5 h-3.5" />
@@ -395,8 +501,6 @@ export default function PlaylistEditor({ cluster, onClose, onSaved }: PlaylistEd
                     <ChevronDown className="w-3.5 h-3.5" />
                   </button>
                 </div>
-
-                {/* Remove */}
                 <button
                   onClick={() => removeTrack(idx)}
                   className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors flex-shrink-0 opacity-0 group-hover:opacity-100"
@@ -422,7 +526,10 @@ export default function PlaylistEditor({ cluster, onClose, onSaved }: PlaylistEd
   );
 }
 
-function SongRow({ song, onAdd }: { song: LikedSongOption; onAdd: () => void }) {
+function SongRow({ song, onAdd }: { song: SongOption; onAdd: () => void }) {
+  const sourceInfo = SOURCE_LABELS[song.source];
+  const Icon = sourceInfo.icon;
+
   return (
     <div className="flex items-center gap-3 px-3 py-2.5 hover:bg-secondary/20 transition-colors">
       {song.image_url ? (
@@ -434,11 +541,18 @@ function SongRow({ song, onAdd }: { song: LikedSongOption; onAdd: () => void }) 
       )}
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium truncate">{song.track_name}</p>
-        <p className="text-xs text-muted-foreground truncate">{song.artist_name}{song.album_name ? ` · ${song.album_name}` : ""}</p>
+        <p className="text-xs text-muted-foreground truncate">
+          {song.artist_name}{song.album_name ? ` · ${song.album_name}` : ""}
+        </p>
       </div>
-      <div className="flex gap-1.5 flex-shrink-0 hidden md:flex">
-        {song.mood && <span className="px-2 py-0.5 rounded-full text-[10px] bg-secondary text-muted-foreground">{song.mood}</span>}
-        {song.energy && <span className="px-2 py-0.5 rounded-full text-[10px] bg-secondary text-muted-foreground">{song.energy}</span>}
+      <div className="flex gap-1.5 flex-shrink-0 items-center">
+        {/* Source badge */}
+        <span className={`hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium ${sourceInfo.className}`}>
+          <Icon className="w-2.5 h-2.5" />
+          {song.source_name || sourceInfo.label}
+        </span>
+        {song.mood && <span className="hidden md:inline px-2 py-0.5 rounded-full text-[10px] bg-secondary text-muted-foreground">{song.mood}</span>}
+        {song.energy && <span className="hidden md:inline px-2 py-0.5 rounded-full text-[10px] bg-secondary text-muted-foreground">{song.energy}</span>}
       </div>
       <Button variant="ghost" size="sm" className="h-7 w-7 p-0 rounded-lg flex-shrink-0" onClick={onAdd}>
         <Plus className="w-4 h-4 text-accent" />
