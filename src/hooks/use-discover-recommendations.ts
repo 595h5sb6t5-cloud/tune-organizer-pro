@@ -143,6 +143,12 @@ export function useDiscoverRecommendations() {
             topProductionStyles: topN(prodStyleCounts, 5),
             topEras: topN(eraCounts, 4),
             topArtists: topN(artistCounts, 15),
+            topGrooveFeels: topN(grooveFeelCounts, 6),
+            topVocalStyles: topN(vocalStyleCounts, 5),
+            topSonicBrightness: topN(sonicBrightnessCounts, 3),
+            topSpatialQualities: topN(spatialQualityCounts, 5),
+            topRhythmicIdentities: topN(rhythmicIdentityCounts, 5),
+            topSonicTextures: topN(sonicTextureCounts, 5),
           },
           clusters: (clustersRes.data ?? []).map(c => ({
             name: c.name,
