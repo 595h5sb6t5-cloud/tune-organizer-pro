@@ -58,6 +58,19 @@ const INITIAL_PROGRESS: AnalysisProgress = {
   worldsCount: 0, assignedCount: 0, statusMessage: "",
 };
 
+async function fetchAllFromTable(table: "liked_song_clusters" | "liked_song_cluster_tracks" | "liked_songs", userId: string, columns: string) {
+  const all: any[] = [];
+  let from = 0;
+  while (true) {
+    const { data } = await (supabase.from(table) as any).select(columns).eq("user_id", userId).range(from, from + 999);
+    const rows = data || [];
+    all.push(...rows);
+    if (rows.length < 1000) break;
+    from += 1000;
+  }
+  return all;
+}
+
 export function useLikedSongClusters() {
   const { user, profile } = useAuth();
   const spotifyConnected = profile?.spotify_connected ?? false;
@@ -83,27 +96,30 @@ export function useLikedSongClusters() {
     setLikedCount(totalSongs);
     setProgress(prev => ({ ...prev, totalAnalyzed, totalSongs }));
 
-    const { data: clusterData } = await supabase
-      .from("liked_song_clusters")
-      .select("id, name, description, vibe_description, ai_explanation, mood_tags, color_hex, energy_level, tempo_range, era_range, track_count, sort_order, cover_tracks, spotify_playlist_id, spotify_exported_at, spotify_playlist_url")
-      .eq("user_id", user.id)
-      .order("sort_order");
+    const clusterData = await fetchAllFromTable("liked_song_clusters", user.id,
+      "id, name, description, vibe_description, ai_explanation, mood_tags, color_hex, energy_level, tempo_range, era_range, track_count, sort_order, cover_tracks, spotify_playlist_id, spotify_exported_at, spotify_playlist_url");
 
-    if (!clusterData || clusterData.length === 0) {
+    if (!clusterData.length) {
       setClusters([]); setHasAnalyzed(false); setLoading(false); return;
     }
 
     const clusterIds = clusterData.map(c => c.id);
-    const { data: trackData } = await supabase
-      .from("liked_song_cluster_tracks")
-      .select("id, cluster_id, liked_song_id, spotify_track_id")
-      .eq("user_id", user.id)
-      .in("cluster_id", clusterIds);
+    // Fetch all cluster tracks in batches
+    const allTrackData: any[] = [];
+    for (let i = 0; i < clusterIds.length; i += 50) {
+      const batch = clusterIds.slice(i, i + 50);
+      const { data } = await supabase
+        .from("liked_song_cluster_tracks")
+        .select("id, cluster_id, liked_song_id, spotify_track_id")
+        .eq("user_id", user.id)
+        .in("cluster_id", batch);
+      allTrackData.push(...(data || []));
+    }
 
-    const likedSongIds = [...new Set((trackData || []).map(t => t.liked_song_id))];
+    const likedSongIds = [...new Set(allTrackData.map(t => t.liked_song_id))];
     const songMap = new Map<string, any>();
-    for (let i = 0; i < likedSongIds.length; i += 100) {
-      const batch = likedSongIds.slice(i, i + 100);
+    for (let i = 0; i < likedSongIds.length; i += 500) {
+      const batch = likedSongIds.slice(i, i + 500);
       const { data: songs } = await supabase
         .from("liked_songs")
         .select("id, track_name, artist_name, album_name, image_url, mood, energy, atmosphere")
@@ -112,7 +128,7 @@ export function useLikedSongClusters() {
     }
 
     const enriched: LikedSongCluster[] = clusterData.map(c => {
-      const clusterTracks = (trackData || [])
+      const clusterTracks = allTrackData
         .filter(t => t.cluster_id === c.id)
         .map(t => {
           const song = songMap.get(t.liked_song_id);
@@ -127,9 +143,9 @@ export function useLikedSongClusters() {
         ...c, mood_tags: c.mood_tags || [],
         ai_explanation: c.ai_explanation ?? null,
         cover_tracks: (Array.isArray(c.cover_tracks) ? c.cover_tracks : []) as { image_url: string; track_name: string }[],
-        spotify_playlist_id: (c as any).spotify_playlist_id ?? null,
-        spotify_exported_at: (c as any).spotify_exported_at ?? null,
-        spotify_playlist_url: (c as any).spotify_playlist_url ?? null,
+        spotify_playlist_id: c.spotify_playlist_id ?? null,
+        spotify_exported_at: c.spotify_exported_at ?? null,
+        spotify_playlist_url: c.spotify_playlist_url ?? null,
         tracks: clusterTracks,
       };
     });
@@ -156,9 +172,8 @@ export function useLikedSongClusters() {
 
       let tagDone = false;
       let batchNum = 0;
-      const maxTagBatches = 80;
 
-      while (!tagDone && batchNum < maxTagBatches) {
+      while (!tagDone && batchNum < 80) {
         batchNum++;
         const tagRes = await supabase.functions.invoke("analyze-liked-songs", {
           body: {
@@ -182,10 +197,10 @@ export function useLikedSongClusters() {
         }));
       }
 
-      // ═══ PHASE 2: Define sonic worlds ═══
+      // ═══ PHASE 2: Define sonic worlds from full ecosystem ═══
       setProgress(prev => ({
         ...prev, phase: "defining_worlds",
-        statusMessage: "Analyzing your Spotify ecosystem — playlists, albums, artists…",
+        statusMessage: "Studying your full Spotify ecosystem — playlists, albums, artists…",
       }));
 
       const worldRes = await supabase.functions.invoke("analyze-liked-songs", {
@@ -197,30 +212,24 @@ export function useLikedSongClusters() {
       }
 
       const worlds = worldRes.data?.worlds || [];
-      console.log(`[rebuild] Defined ${worlds.length} sonic worlds`);
+      console.log(`[rebuild] Defined ${worlds.length} sonic worlds from ${worldRes.data?.playlists_analyzed ?? 0} playlists`);
 
       setProgress(prev => ({
         ...prev, worldsCount: worlds.length,
         statusMessage: `Discovered ${worlds.length} sonic worlds in your library`,
       }));
 
-      // ═══ PHASE 3: Assign all songs to worlds in batches ═══
+      // ═══ PHASE 3: Assign all songs to worlds ═══
       setProgress(prev => ({ ...prev, phase: "assigning", statusMessage: "Assigning songs to sonic worlds…" }));
 
       const totalSongs = worldRes.data?.total_songs || likedCount;
-      const assignBatchSize = 150;
       let offset = 0;
       let assignDone = false;
       const allAssignments: { song_id: string; spotify_track_id: string; world_id: string; confidence: number }[] = [];
 
       while (!assignDone) {
         const assignRes = await supabase.functions.invoke("analyze-liked-songs", {
-          body: {
-            mode: "assign_batch",
-            world_definitions: worlds,
-            offset,
-            batch_size: assignBatchSize,
-          },
+          body: { mode: "assign_batch", world_definitions: worlds, offset, batch_size: 150 },
         });
 
         if (assignRes.error || assignRes.data?.error) {
@@ -228,14 +237,12 @@ export function useLikedSongClusters() {
           break;
         }
 
-        const assignments = assignRes.data?.assignments || [];
-        allAssignments.push(...assignments);
+        allAssignments.push(...(assignRes.data?.assignments || []));
         assignDone = assignRes.data?.done ?? true;
-        offset += assignBatchSize;
+        offset += 150;
 
         setProgress(prev => ({
-          ...prev,
-          assignedCount: allAssignments.length,
+          ...prev, assignedCount: allAssignments.length,
           statusMessage: `${allAssignments.length} of ${totalSongs} songs assigned to worlds…`,
         }));
       }
@@ -244,128 +251,95 @@ export function useLikedSongClusters() {
       setProgress(prev => ({ ...prev, phase: "saving", statusMessage: "Building playlists from sonic worlds…" }));
 
       // Clear old clusters
-      const { data: existingClusters } = await supabase
-        .from("liked_song_clusters").select("id").eq("user_id", user.id);
-      if (existingClusters?.length) {
+      const existingClusters = await fetchAllFromTable("liked_song_clusters", user.id, "id");
+      if (existingClusters.length) {
         const ids = existingClusters.map(c => c.id);
-        // Delete in batches to avoid issues
         for (let i = 0; i < ids.length; i += 50) {
-          const batch = ids.slice(i, i + 50);
-          await supabase.from("liked_song_cluster_tracks").delete().in("cluster_id", batch);
+          await supabase.from("liked_song_cluster_tracks").delete().in("cluster_id", ids.slice(i, i + 50));
         }
         await supabase.from("liked_song_clusters").delete().eq("user_id", user.id);
       }
 
-      // Group assignments by world
-      const worldAssignments = new Map<string, typeof allAssignments>();
+      // Group by world
+      const worldMap = new Map<string, typeof allAssignments>();
       for (const a of allAssignments) {
         if (a.world_id === "__unassigned__") continue;
-        if (!worldAssignments.has(a.world_id)) worldAssignments.set(a.world_id, []);
-        worldAssignments.get(a.world_id)!.push(a);
+        if (!worldMap.has(a.world_id)) worldMap.set(a.world_id, []);
+        worldMap.get(a.world_id)!.push(a);
       }
 
-      // Fetch liked songs for cover art
+      // Fetch song metadata for covers
       const songIds = allAssignments.map(a => a.song_id);
       const songMap = new Map<string, any>();
       for (let i = 0; i < songIds.length; i += 500) {
-        const batch = songIds.slice(i, i + 500);
-        const { data: songs } = await supabase
-          .from("liked_songs")
-          .select("id, track_name, image_url, spotify_track_id")
-          .in("id", batch);
+        const { data: songs } = await supabase.from("liked_songs")
+          .select("id, track_name, image_url").in("id", songIds.slice(i, i + 500));
         for (const s of songs || []) songMap.set(s.id, s);
       }
 
-      // Create clusters
       let sortOrder = 0;
       for (const world of worlds) {
-        const assignments = worldAssignments.get(world.world_id);
-        if (!assignments || assignments.length < 2) continue; // Skip worlds with < 2 songs
+        const assignments = worldMap.get(world.world_id);
+        if (!assignments || assignments.length < 2) continue;
 
-        // Build cover tracks
         const coverTracks: { image_url: string; track_name: string }[] = [];
         for (const a of assignments) {
           if (coverTracks.length >= 4) break;
           const song = songMap.get(a.song_id);
-          if (song?.image_url) {
-            coverTracks.push({ image_url: song.image_url, track_name: song.track_name });
-          }
+          if (song?.image_url) coverTracks.push({ image_url: song.image_url, track_name: song.track_name });
         }
 
         const { data: inserted, error: insertErr } = await supabase
           .from("liked_song_clusters")
           .insert({
-            user_id: user.id,
-            name: world.name,
+            user_id: user.id, name: world.name,
             description: world.ai_explanation || null,
             vibe_description: world.vibe_description || null,
             ai_explanation: world.ai_explanation || null,
             mood_tags: world.mood_tags || [],
             color_hex: world.color_hex || "#6366f1",
             energy_level: world.energy_level || "medium",
-            tempo_range: "Mixed",
-            era_range: "Mixed",
+            tempo_range: "Mixed", era_range: "Mixed",
             track_count: assignments.length,
             cover_tracks: coverTracks,
-            analysis_model: "multi-phase-sonic-worlds-v2",
+            analysis_model: "deep-sonic-worlds-v3",
             sort_order: sortOrder++,
           })
-          .select("id")
-          .single();
+          .select("id").single();
 
-        if (insertErr || !inserted) {
-          console.error("Cluster insert error:", insertErr);
-          continue;
-        }
+        if (insertErr || !inserted) { console.error("Insert err:", insertErr); continue; }
 
-        // Insert track assignments in batches
-        const trackRows = assignments.map(a => ({
-          user_id: user.id,
-          cluster_id: inserted.id,
-          liked_song_id: a.song_id,
-          spotify_track_id: a.spotify_track_id,
+        const rows = assignments.map(a => ({
+          user_id: user.id, cluster_id: inserted.id,
+          liked_song_id: a.song_id, spotify_track_id: a.spotify_track_id,
           confidence_score: a.confidence,
         }));
-
-        for (let i = 0; i < trackRows.length; i += 100) {
-          const batch = trackRows.slice(i, i + 100);
-          await supabase.from("liked_song_cluster_tracks").insert(batch);
+        for (let i = 0; i < rows.length; i += 100) {
+          await supabase.from("liked_song_cluster_tracks").insert(rows.slice(i, i + 100));
         }
       }
 
-      // Handle unassigned songs — create an "Uncategorized" cluster if there are enough
+      // Uncategorized bucket
       const unassigned = allAssignments.filter(a => a.world_id === "__unassigned__");
       if (unassigned.length >= 3) {
-        const coverTracks: { image_url: string; track_name: string }[] = [];
+        const covers: { image_url: string; track_name: string }[] = [];
         for (const a of unassigned.slice(0, 4)) {
-          const song = songMap.get(a.song_id);
-          if (song?.image_url) coverTracks.push({ image_url: song.image_url, track_name: song.track_name });
+          const s = songMap.get(a.song_id);
+          if (s?.image_url) covers.push({ image_url: s.image_url, track_name: s.track_name });
         }
-
-        const { data: uncatCluster } = await supabase
-          .from("liked_song_clusters")
+        const { data: uc } = await supabase.from("liked_song_clusters")
           .insert({
-            user_id: user.id,
-            name: "Uncategorized",
-            description: "Songs that didn't strongly match any sonic world. These may form new worlds as your library grows.",
+            user_id: user.id, name: "Uncategorized",
+            description: "Songs that didn't strongly match any sonic world.",
             vibe_description: "Diverse tracks awaiting deeper classification",
-            mood_tags: ["eclectic"],
-            color_hex: "#71717a",
-            energy_level: "medium",
-            track_count: unassigned.length,
-            cover_tracks: coverTracks,
-            analysis_model: "multi-phase-sonic-worlds-v2",
-            sort_order: sortOrder++,
-          })
-          .select("id")
-          .single();
-
-        if (uncatCluster) {
+            mood_tags: ["eclectic"], color_hex: "#71717a", energy_level: "medium",
+            track_count: unassigned.length, cover_tracks: covers,
+            analysis_model: "deep-sonic-worlds-v3", sort_order: sortOrder++,
+          }).select("id").single();
+        if (uc) {
           const rows = unassigned.map(a => ({
-            user_id: user.id,
-            cluster_id: uncatCluster.id,
-            liked_song_id: a.song_id,
-            spotify_track_id: a.spotify_track_id,
+            user_id: user.id, cluster_id: uc.id,
+            liked_song_id: a.song_id, spotify_track_id: a.spotify_track_id,
             confidence_score: a.confidence,
           }));
           for (let i = 0; i < rows.length; i += 100) {
@@ -374,7 +348,22 @@ export function useLikedSongClusters() {
         }
       }
 
-      // ═══ PHASE 5: Done ═══
+      // ═══ PHASE 5: Refine — remove outliers, merge small clusters ═══
+      setProgress(prev => ({ ...prev, phase: "refining", statusMessage: "Running final coherence check…" }));
+
+      try {
+        const refineRes = await supabase.functions.invoke("analyze-liked-songs", {
+          body: { mode: "refine" },
+        });
+        if (refineRes.data) {
+          const { removals = 0, merges = 0, deletions = 0 } = refineRes.data;
+          console.log(`[rebuild] Refined: ${removals} removals, ${merges} merges, ${deletions} deletions`);
+        }
+      } catch (e) {
+        console.warn("Refine phase skipped:", e);
+      }
+
+      // ═══ DONE ═══
       setProgress(prev => ({ ...prev, phase: "done", statusMessage: "Playlists ready!" }));
       await loadClusters();
 

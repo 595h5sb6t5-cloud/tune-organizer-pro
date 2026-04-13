@@ -2,7 +2,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
 function json(body: unknown, status = 200) {
@@ -18,160 +19,178 @@ function extractJson(raw: string): any {
   if (start === -1) throw new Error("No JSON found in response");
   cleaned = cleaned.substring(start);
   try { return JSON.parse(cleaned); } catch { /* continue */ }
-
-  const opens = { '{': 0, '[': 0 };
+  const opens = { "{": 0, "[": 0 };
   let inString = false, escape = false;
   for (const ch of cleaned) {
     if (escape) { escape = false; continue; }
-    if (ch === '\\') { escape = true; continue; }
+    if (ch === "\\") { escape = true; continue; }
     if (ch === '"') { inString = !inString; continue; }
     if (inString) continue;
-    if (ch === '{') opens['{']++;
-    if (ch === '}') opens['{']--;
-    if (ch === '[') opens['[']++;
-    if (ch === ']') opens['[']--;
+    if (ch === "{") opens["{"]++;
+    if (ch === "}") opens["{"]--;
+    if (ch === "[") opens["["]++;
+    if (ch === "]") opens["["]--;
   }
   if (inString) cleaned += '"';
-  cleaned = cleaned.replace(/,\s*"[^"]*"?\s*:?\s*"?[^"]*$/, '');
-  cleaned = cleaned.replace(/,\s*\{[^}]*$/, '');
-  cleaned = cleaned.replace(/,\s*$/, '');
-  for (let i = 0; i < opens['[']; i++) cleaned += ']';
-  for (let i = 0; i < opens['{']; i++) cleaned += '}';
+  cleaned = cleaned.replace(/,\s*"[^"]*"?\s*:?\s*"?[^"]*$/, "");
+  cleaned = cleaned.replace(/,\s*\{[^}]*$/, "");
+  cleaned = cleaned.replace(/,\s*$/, "");
+  for (let i = 0; i < opens["["]; i++) cleaned += "]";
+  for (let i = 0; i < opens["{"]; i++) cleaned += "}";
   cleaned = cleaned
-    .replace(/[\x00-\x1F\x7F]/g, ' ')
-    .replace(/,\s*}/g, '}')
-    .replace(/,\s*]/g, ']');
+    .replace(/[\x00-\x1F\x7F]/g, " ")
+    .replace(/,\s*}/g, "}")
+    .replace(/,\s*]/g, "]");
   return JSON.parse(cleaned);
 }
 
-function formatAudioFeatures(s: any): string {
-  const parts: string[] = [];
-  if (s.audio_tempo != null) parts.push(`BPM:${Math.round(s.audio_tempo)}`);
-  if (s.audio_energy != null) parts.push(`energy:${s.audio_energy.toFixed(2)}`);
-  if (s.audio_valence != null) parts.push(`valence:${s.audio_valence.toFixed(2)}`);
-  if (s.audio_danceability != null) parts.push(`dance:${s.audio_danceability.toFixed(2)}`);
-  if (s.audio_acousticness != null) parts.push(`acoustic:${s.audio_acousticness.toFixed(2)}`);
-  if (s.audio_instrumentalness != null) parts.push(`instr:${s.audio_instrumentalness.toFixed(2)}`);
-  if (s.audio_speechiness != null) parts.push(`speech:${s.audio_speechiness.toFixed(2)}`);
-  if (s.audio_loudness != null) parts.push(`loud:${s.audio_loudness.toFixed(1)}dB`);
-  return parts.length > 0 ? ` [${parts.join(", ")}]` : "";
+function fmtAudio(s: any): string {
+  const p: string[] = [];
+  if (s.audio_tempo != null) p.push(`BPM:${Math.round(s.audio_tempo)}`);
+  if (s.audio_energy != null) p.push(`e:${s.audio_energy.toFixed(2)}`);
+  if (s.audio_valence != null) p.push(`v:${s.audio_valence.toFixed(2)}`);
+  if (s.audio_danceability != null) p.push(`d:${s.audio_danceability.toFixed(2)}`);
+  if (s.audio_acousticness != null) p.push(`ac:${s.audio_acousticness.toFixed(2)}`);
+  if (s.audio_instrumentalness != null) p.push(`in:${s.audio_instrumentalness.toFixed(2)}`);
+  if (s.audio_speechiness != null) p.push(`sp:${s.audio_speechiness.toFixed(2)}`);
+  if (s.audio_loudness != null) p.push(`L:${s.audio_loudness.toFixed(1)}`);
+  return p.length > 0 ? ` [${p.join(",")}]` : "";
 }
 
-function formatDeepTags(s: any): string {
-  const tags: string[] = [];
-  if (s.mood) tags.push(`mood:"${s.mood}"`);
-  if (s.groove_feel) tags.push(`groove:"${s.groove_feel}"`);
-  if (s.sonic_brightness) tags.push(`brightness:${s.sonic_brightness}`);
-  if (s.spatial_quality) tags.push(`space:"${s.spatial_quality}"`);
-  if (s.rhythmic_identity) tags.push(`rhythm:"${s.rhythmic_identity}"`);
-  if (s.production_style) tags.push(`prod:"${s.production_style}"`);
-  if (s.vocal_style) tags.push(`vocal:"${s.vocal_style}"`);
-  if (s.sonic_texture) tags.push(`texture:"${s.sonic_texture}"`);
-  if (s.atmosphere) tags.push(`atm:"${s.atmosphere}"`);
-  if (s.listening_context) tags.push(`context:"${s.listening_context}"`);
-  if (s.intimacy_scale) tags.push(`scale:"${s.intimacy_scale}"`);
-  if (s.tension_level) tags.push(`tension:"${s.tension_level}"`);
-  if (s.energy) tags.push(`energy_cat:${s.energy}`);
-  if (s.genre_tags?.length) tags.push(`genres:[${s.genre_tags.join(", ")}]`);
-  return tags.length > 0 ? ` {${tags.join(", ")}}` : "";
+function fmtTags(s: any): string {
+  const t: string[] = [];
+  if (s.mood) t.push(`mood:"${s.mood}"`);
+  if (s.groove_feel) t.push(`grv:"${s.groove_feel}"`);
+  if (s.sonic_brightness) t.push(`brt:${s.sonic_brightness}`);
+  if (s.spatial_quality) t.push(`spc:"${s.spatial_quality}"`);
+  if (s.rhythmic_identity) t.push(`rhy:"${s.rhythmic_identity}"`);
+  if (s.production_style) t.push(`prd:"${s.production_style}"`);
+  if (s.vocal_style) t.push(`voc:"${s.vocal_style}"`);
+  if (s.sonic_texture) t.push(`tex:"${s.sonic_texture}"`);
+  if (s.atmosphere) t.push(`atm:"${s.atmosphere}"`);
+  if (s.listening_context) t.push(`ctx:"${s.listening_context}"`);
+  if (s.intimacy_scale) t.push(`scl:"${s.intimacy_scale}"`);
+  if (s.tension_level) t.push(`ten:"${s.tension_level}"`);
+  if (s.energy) t.push(`E:${s.energy}`);
+  if (s.genre_tags?.length) t.push(`g:[${s.genre_tags.join(",")}]`);
+  return t.length > 0 ? ` {${t.join(", ")}}` : "";
 }
 
-function formatSongLine(s: any, i: number): string {
-  let line = `${i + 1}. "${s.track_name}" – ${s.artist_name}`;
-  if (s.album_name) line += ` (${s.album_name})`;
-  line += formatAudioFeatures(s);
-  line += formatDeepTags(s);
-  return line;
+function fmtSong(s: any, i: number): string {
+  let l = `${i + 1}. "${s.track_name}" – ${s.artist_name}`;
+  if (s.album_name) l += ` (${s.album_name})`;
+  l += fmtAudio(s);
+  l += fmtTags(s);
+  return l;
 }
 
-async function fetchAllRows(client: any, table: string, userId: string, columns: string): Promise<any[]> {
-  const allRows: any[] = [];
-  const pageSize = 1000;
+async function fetchAll(client: any, table: string, userId: string, columns: string, extra?: { col: string; val: any }): Promise<any[]> {
+  const all: any[] = [];
   let from = 0;
   while (true) {
-    const { data, error } = await client
-      .from(table)
-      .select(columns)
-      .eq("user_id", userId)
-      .range(from, from + pageSize - 1);
+    let q = client.from(table).select(columns).eq("user_id", userId);
+    if (extra) q = q.eq(extra.col, extra.val);
+    const { data, error } = await q.range(from, from + 999);
     if (error) throw error;
     const rows = data || [];
-    allRows.push(...rows);
-    if (rows.length < pageSize) break;
-    from += pageSize;
+    all.push(...rows);
+    if (rows.length < 1000) break;
+    from += 1000;
   }
-  return allRows;
+  return all;
 }
 
-async function callAI(apiKey: string, model: string, systemPrompt: string, userPrompt: string, tools?: any[], toolChoice?: any, temperature = 0.3): Promise<any> {
+async function callAI(
+  apiKey: string, model: string, sys: string, usr: string,
+  tools?: any[], toolChoice?: any, temp = 0.3, retries = 2,
+): Promise<any> {
   const body: any = {
     model,
-    messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userPrompt },
-    ],
-    temperature,
+    messages: [{ role: "system", content: sys }, { role: "user", content: usr }],
+    temperature: temp,
   };
   if (tools) body.tools = tools;
   if (toolChoice) body.tool_choice = toolChoice;
 
-  const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    console.error("AI gateway error:", response.status, text);
-    if (response.status === 429) throw new Error("RATE_LIMIT");
-    if (response.status === 402) throw new Error("CREDITS_EXHAUSTED");
-    throw new Error(`AI request failed: ${response.status}`);
+  for (let a = 0; a <= retries; a++) {
+    try {
+      const r = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) {
+        const t = await r.text();
+        console.error(`AI err (${a}):`, r.status, t);
+        if (r.status === 429) {
+          if (a < retries) { await new Promise(w => setTimeout(w, 5000 * (a + 1))); continue; }
+          throw new Error("RATE_LIMIT");
+        }
+        if (r.status === 402) throw new Error("CREDITS_EXHAUSTED");
+        throw new Error(`AI failed: ${r.status}`);
+      }
+      const d = await r.json();
+      const tc = d.choices?.[0]?.message?.tool_calls?.[0];
+      if (tc?.function?.arguments) {
+        try { return JSON.parse(tc.function.arguments); } catch { return extractJson(tc.function.arguments); }
+      }
+      const c = d.choices?.[0]?.message?.content;
+      if (!c) throw new Error("Empty AI response");
+      return extractJson(c);
+    } catch (e: any) {
+      if (e.message === "RATE_LIMIT" || e.message === "CREDITS_EXHAUSTED") throw e;
+      if (a < retries) { console.warn(`AI retry ${a + 1}:`, e.message); continue; }
+      throw e;
+    }
   }
-
-  const data = await response.json();
-  const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
-  if (toolCall?.function?.arguments) {
-    try { return JSON.parse(toolCall.function.arguments); } catch { return extractJson(toolCall.function.arguments); }
-  }
-  const content = data.choices?.[0]?.message?.content;
-  if (!content) throw new Error("Empty AI response");
-  return extractJson(content);
+  throw new Error("AI failed after retries");
 }
 
-const TAG_SYSTEM_PROMPT = `You are Tempo — a world-class music analyst with the ear of a mastering engineer, the soul of a DJ, and the vocabulary of a musicologist.
+function stratSample(songs: any[], max: number): any[] {
+  if (songs.length <= max) return [...songs];
+  const bk = new Map<string, any[]>();
+  for (const s of songs) {
+    const k = [s.sonic_brightness || "?", s.energy || "?", s.spatial_quality || "?", (s.genre_tags?.[0] || "?").substring(0, 10)].join("|");
+    if (!bk.has(k)) bk.set(k, []);
+    bk.get(k)!.push(s);
+  }
+  const out: any[] = [];
+  const ks = [...bk.keys()];
+  let r = 0;
+  while (out.length < max) {
+    let added = false;
+    for (const k of ks) { const b = bk.get(k)!; if (r < b.length && out.length < max) { out.push(b[r]); added = true; } }
+    if (!added) break;
+    r++;
+  }
+  return out;
+}
 
-Your job is to analyze each song across DEEP musical dimensions that go far beyond genre and BPM.
+/* ═══ PROMPTS & TOOLS ═══ */
 
-For each song, you must determine:
+const TAG_SYS = `You are Tempo — a world-class music analyst with the ear of a mastering engineer, the soul of a DJ, and the vocabulary of a musicologist.
 
-1. **mood** — The specific emotional shade (not just "happy/sad" — be precise: "wistful nostalgia", "defiant confidence", "melancholic euphoria")
+Analyze each song across 17 DEEP musical dimensions:
+
+1. **mood** — Precise emotional shade ("wistful nostalgia", not "happy")
 2. **energy** — Overall energy level
-3. **genre_tags** — 2-4 specific subgenre tags (e.g. "neo-soul", "trap-influenced R&B", "shoegaze-adjacent dream pop")
+3. **genre_tags** — 2-4 specific subgenre tags
 4. **tempo_estimate** — Rhythmic speed category
-5. **era** — Sonic era influence (not just release year — what era does it SOUND like?)
-6. **atmosphere** — The spatial/environmental quality ("cavernous reverb cathedral", "tight dry studio", "open-air festival")
-7. **production_style** — Production philosophy ("lo-fi tape-saturated", "hyper-polished maximalist", "organic analog warmth")
-8. **groove_feel** — How the rhythm FEELS ("laid-back swing", "driving four-on-the-floor", "syncopated bounce", "freeform rubato", "trap hi-hat stutter")
-9. **vocal_style** — Vocal character ("breathy intimate whisper", "powerful belt", "nasal indie drawl", "auto-tuned melodic rap", "no vocals/instrumental")
-10. **sonic_brightness** — Dark-to-bright spectrum ("very dark", "dark", "neutral", "bright", "very bright")
-11. **spatial_quality** — Mix space ("intimate/close", "wide/spacious", "layered/dense", "sparse/minimal", "cavernous/reverberant")
-12. **rhythmic_identity** — The groove DNA ("straight rigid", "swung lazy", "polyrhythmic complex", "halftime heavy", "broken/glitchy", "organic human")
-13. **listening_context** — Best listening scenario ("late night alone", "driving highway", "morning coffee", "workout intensity", "dinner party background", "deep focus work")
-14. **sonic_texture** — The tactile quality ("warm analog", "cold digital", "gritty distorted", "crystalline clean", "fuzzy saturated", "airy ethereal")
-15. **intimacy_scale** — Scale of the sound ("whisper-close intimate", "bedroom personal", "club communal", "arena massive", "stadium epic")
-16. **tension_level** — Tension vs release ("deeply relaxed", "gently flowing", "building tension", "high tension", "cathartic release")
-17. **language** — The language of the lyrics ("english", "spanish", "french", "instrumental", etc.)
+5. **era** — Sonic era influence
+6. **atmosphere** — Spatial/environmental quality
+7. **production_style** — Production philosophy
+8. **groove_feel** — How the rhythm FEELS
+9. **vocal_style** — Vocal character
+10. **sonic_brightness** — Dark-to-bright spectrum
+11. **spatial_quality** — Mix space
+12. **rhythmic_identity** — Groove DNA
+13. **listening_context** — Best listening scenario
+14. **sonic_texture** — Tactile quality
+15. **intimacy_scale** — Scale of sound
+16. **tension_level** — Tension vs release
+17. **language** — Language of lyrics
 
-RULES:
-- Be SPECIFIC. "Chill" is not a mood. "Hazy 3am contentment with a tinge of loneliness" is.
-- Reference actual sonic qualities you can hear, not marketing buzzwords.
-- Two songs in the same genre can have completely different groove_feel, spatial_quality, and tension — capture those differences.
-- Each tag must be precise enough that songs with the SAME tag would genuinely sound right next to each other.
-- ALWAYS detect the language of the lyrics accurately.`;
+Be SPECIFIC. Each tag must be precise enough that songs sharing it would genuinely sound right next to each other.`;
 
 const TAG_TOOL = {
   type: "function" as const,
@@ -186,23 +205,17 @@ const TAG_TOOL = {
           items: {
             type: "object",
             properties: {
-              index: { type: "number", description: "1-indexed song number" },
+              index: { type: "number" },
               genre_tags: { type: "array", items: { type: "string" } },
               mood: { type: "string" },
               energy: { type: "string", enum: ["low", "medium-low", "medium", "medium-high", "high"] },
-              tempo_estimate: { type: "string" },
-              era: { type: "string" },
-              atmosphere: { type: "string" },
-              production_style: { type: "string" },
-              groove_feel: { type: "string" },
-              vocal_style: { type: "string" },
+              tempo_estimate: { type: "string" }, era: { type: "string" },
+              atmosphere: { type: "string" }, production_style: { type: "string" },
+              groove_feel: { type: "string" }, vocal_style: { type: "string" },
               sonic_brightness: { type: "string", enum: ["very dark", "dark", "neutral", "bright", "very bright"] },
-              spatial_quality: { type: "string" },
-              rhythmic_identity: { type: "string" },
-              listening_context: { type: "string" },
-              sonic_texture: { type: "string" },
-              intimacy_scale: { type: "string" },
-              tension_level: { type: "string" },
+              spatial_quality: { type: "string" }, rhythmic_identity: { type: "string" },
+              listening_context: { type: "string" }, sonic_texture: { type: "string" },
+              intimacy_scale: { type: "string" }, tension_level: { type: "string" },
               language: { type: "string" },
             },
             required: ["index", "mood", "energy", "groove_feel", "vocal_style", "sonic_brightness", "spatial_quality", "rhythmic_identity", "listening_context", "sonic_texture", "intimacy_scale", "tension_level", "language"],
@@ -214,42 +227,31 @@ const TAG_TOOL = {
   },
 };
 
-const DEFINE_WORLDS_SYSTEM = `You are Tempo — a world-class music curator. Your mission is to define the SONIC WORLDS that exist in a user's music library.
+const WORLDS_SYS = `You are Tempo — building sonic worlds from a user's ENTIRE Spotify library.
 
-A "sonic world" is a cluster of songs that share:
-- Compatible groove and rhythmic identity
-- Compatible atmosphere and spatial quality
-- Compatible production philosophy
-- Compatible emotional direction
-- Compatible listening purpose
-- Compatible vocal texture and brightness
+A "sonic world" is a tight cluster of songs that makes a perfect playlist — every song transitions naturally into the next.
 
-You are given:
-1. A SAMPLE of the user's tagged songs (with deep analysis tags)
-2. The user's EXISTING Spotify playlists (showing how they already group music)
-3. Information about their followed artists and saved albums
+You receive the user's FULL ecosystem:
+1. ALL their Spotify playlists with tracklists — the STRONGEST signal showing how they group music
+2. ALL followed artists with genres
+3. ALL saved albums
+4. A large sample of tagged liked songs with 17-dimension deep analysis
 
-From this data, you must define the distinct sonic worlds that exist in this library.
+YOUR JOB:
+- Study existing playlists DEEPLY — they are your PRIMARY BLUEPRINT
+- If a playlist mixes two different sonic identities, define TWO separate worlds
+- Define as many worlds as the music naturally requires (typically 10-30+ for large libraries)
+- Each world MUST be narrow: "Late-night lo-fi bedroom R&B with breathy vocals" IS a world; "Chill vibes" is NOT
+- Include "what_belongs" and "what_breaks_it" for each world — critical for assignment
+- DO NOT create catch-all or miscellaneous worlds
+- DO NOT create worlds around a single artist — focus on sonic qualities
+- Language matters: keep English and Spanish songs separate unless sonic identity overrides`;
 
-CRITICAL RULES:
-- Create as many worlds as the music naturally requires (typically 8-25 for a large library)
-- Each world must be SPECIFIC and NARROW — it's better to have many precise worlds than few broad ones
-- Genre and BPM are WEAK signals — two songs in the same genre can belong to completely different worlds
-- Language is IMPORTANT: by default, keep English and Spanish songs in separate worlds unless the sonic world is so unified that language is irrelevant
-- Use the user's existing playlists as reference for their natural grouping tendencies
-- Each world definition must be specific enough that you could reliably assign new songs to it
-- DO NOT create catch-all or "miscellaneous" worlds
-
-For each world, provide:
-- A clear identity definition covering groove, atmosphere, production, mood, vocals, brightness, spatial quality
-- The listening context (when/where this world lives)
-- 2-4 example songs from the sample that exemplify this world`;
-
-const DEFINE_WORLDS_TOOL = {
+const WORLDS_TOOL = {
   type: "function" as const,
   function: {
     name: "define_sonic_worlds",
-    description: "Define the sonic worlds found in the user's library",
+    description: "Define sonic worlds in the user's library",
     parameters: {
       type: "object",
       properties: {
@@ -258,24 +260,27 @@ const DEFINE_WORLDS_TOOL = {
           items: {
             type: "object",
             properties: {
-              world_id: { type: "string", description: "Short snake_case identifier" },
-              name: { type: "string", description: "Evocative 2-4 word playlist name" },
-              vibe_description: { type: "string", description: "One-line vibe (15-25 words)" },
-              ai_explanation: { type: "string", description: "3-4 sentences: sonic thread, groove, production, mood, what belongs" },
-              mood_tags: { type: "array", items: { type: "string" }, description: "2-4 specific mood tags" },
+              world_id: { type: "string" },
+              name: { type: "string" },
+              vibe_description: { type: "string" },
+              ai_explanation: { type: "string" },
+              mood_tags: { type: "array", items: { type: "string" } },
               color_hex: { type: "string" },
               energy_level: { type: "string", enum: ["low", "medium-low", "medium", "medium-high", "high"] },
               primary_language: { type: "string" },
-              groove_identity: { type: "string", description: "The rhythmic DNA" },
+              groove_identity: { type: "string" },
               sonic_brightness: { type: "string" },
               spatial_quality: { type: "string" },
               production_identity: { type: "string" },
               atmosphere: { type: "string" },
               listening_context: { type: "string" },
               vocal_character: { type: "string" },
-              example_song_indices: { type: "array", items: { type: "number" }, description: "1-indexed song numbers from the sample" },
+              what_belongs: { type: "string" },
+              what_breaks_it: { type: "string" },
+              reference_playlist_names: { type: "array", items: { type: "string" } },
+              example_song_indices: { type: "array", items: { type: "number" } },
             },
-            required: ["world_id", "name", "vibe_description", "ai_explanation", "mood_tags", "color_hex", "energy_level", "primary_language", "groove_identity"],
+            required: ["world_id", "name", "vibe_description", "ai_explanation", "mood_tags", "color_hex", "energy_level", "primary_language", "groove_identity", "what_belongs", "what_breaks_it"],
           },
         },
       },
@@ -284,35 +289,34 @@ const DEFINE_WORLDS_TOOL = {
   },
 };
 
-const ASSIGN_SYSTEM = `You are Tempo — a strict music curator assigning songs to pre-defined sonic worlds.
+const ASSIGN_SYS = `You are Tempo — a strict curator assigning songs to sonic worlds.
 
-You are given:
-1. A list of SONIC WORLD definitions (each with identity, groove, mood, production, atmosphere)
-2. A batch of songs with deep analysis tags
+For EACH song, run this 10-point checklist against every world. Need 7+/10 to assign:
 
-For EACH song, assign it to the BEST matching world. A song MUST pass at least 7 of these 10 compatibility checks to belong:
-✓ Same sonic world (reverb space, tonal warmth, frequency balance)
-✓ Compatible groove feel (swing, bounce, pocket weight)
-✓ Same emotional shade (specific, not broad)
-✓ Compatible production philosophy (lo-fi/hi-fi, analog/digital, raw/polished)
-✓ Compatible vocal texture
-✓ Same darkness/brightness spectrum
-✓ Same spatial scale (intimate vs massive)
-✓ Compatible tension behavior
-✓ Same listening context
-✓ Language compatibility (English with English, Spanish with Spanish by default)
+1. ✓ Same sonic texture (reverb, warmth, frequency balance)
+2. ✓ Compatible groove feel (swing, bounce, rhythmic identity)
+3. ✓ Same emotional shade (specific mood)
+4. ✓ Compatible production philosophy
+5. ✓ Compatible vocal texture
+6. ✓ Same brightness spectrum
+7. ✓ Same spatial scale
+8. ✓ Compatible tension behavior
+9. ✓ Same listening context
+10. ✓ Language compatibility
 
-If a song does not strongly match ANY world (fewer than 7 checks pass), assign it to "__unassigned__".
-
-Be STRICT. It is better to leave a song unassigned than to pollute a good world.
-
-IMPORTANT: Do NOT assign all songs to just 2-3 worlds. Distribute properly across all available worlds based on actual sonic compatibility.`;
+RULES:
+- Be STRICT. Polluted worlds are worse than missing songs.
+- If 7+ pass for multiple worlds, pick highest compatibility.
+- If <7 for ALL worlds, assign "__unassigned__".
+- DISTRIBUTE across all worlds — don't pile into 3.
+- Pay attention to "what_breaks_it".
+- Genre alone is NOT enough — groove and texture matter more.`;
 
 const ASSIGN_TOOL = {
   type: "function" as const,
   function: {
     name: "assign_songs",
-    description: "Assign each song to a sonic world",
+    description: "Assign songs to sonic worlds",
     parameters: {
       type: "object",
       properties: {
@@ -321,11 +325,11 @@ const ASSIGN_TOOL = {
           items: {
             type: "object",
             properties: {
-              index: { type: "number", description: "1-indexed song number from the batch" },
-              world_id: { type: "string", description: "The world_id to assign to, or '__unassigned__'" },
-              confidence: { type: "number", description: "0-1 confidence score" },
+              index: { type: "number" },
+              world_id: { type: "string" },
+              confidence: { type: "number" },
             },
-            required: ["index", "world_id"],
+            required: ["index", "world_id", "confidence"],
           },
         },
       },
@@ -334,22 +338,22 @@ const ASSIGN_TOOL = {
   },
 };
 
-const REFINE_SYSTEM = `You are Tempo — a strict music curator doing a final quality pass on playlists.
+const REFINE_SYS = `You are Tempo — final strict quality pass on playlists.
 
-You are given playlists (sonic worlds) with their assigned songs. For each playlist:
+For each playlist:
+1. COHERENCE: Would every song transition smoothly? Remove outliers aggressively.
+2. SIZE: <3 songs → merge or delete.
+3. LANGUAGE: Flag inappropriate mixing.
+4. SPLIT: If two distinct sub-groups exist, recommend splitting.
+5. OVERLAP: If two playlists are too similar, merge them.
 
-1. CHECK COHERENCE: Do all songs truly belong? Remove any that break the sonic unity.
-2. CHECK SIZE: If a playlist has fewer than 3 songs, mark it for merging or deletion.
-3. CHECK LANGUAGE: Flag if languages are mixed inappropriately.
-4. SPLIT IF NEEDED: If a playlist has distinct sub-groups (e.g., 15 dark songs that split into "dark ambient electronic" vs "dark acoustic folk"), recommend splitting.
-
-Return the refined playlist assignments.`;
+A tight 12-song playlist beats a loose 20-song playlist.`;
 
 const REFINE_TOOL = {
   type: "function" as const,
   function: {
     name: "refine_playlists",
-    description: "Refine playlist assignments after coherence check",
+    description: "Refine playlist assignments",
     parameters: {
       type: "object",
       properties: {
@@ -358,25 +362,11 @@ const REFINE_TOOL = {
           items: {
             type: "object",
             properties: {
-              action: { type: "string", enum: ["keep", "remove", "move", "split", "merge", "delete_world"] },
+              action: { type: "string", enum: ["keep", "remove", "move", "merge", "delete_world"] },
               world_id: { type: "string" },
-              song_index: { type: "number", description: "For remove/move actions" },
-              target_world_id: { type: "string", description: "For move actions" },
-              new_world: {
-                type: "object",
-                description: "For split actions — define the new world",
-                properties: {
-                  world_id: { type: "string" },
-                  name: { type: "string" },
-                  vibe_description: { type: "string" },
-                  ai_explanation: { type: "string" },
-                  mood_tags: { type: "array", items: { type: "string" } },
-                  color_hex: { type: "string" },
-                  energy_level: { type: "string" },
-                  primary_language: { type: "string" },
-                  song_indices: { type: "array", items: { type: "number" } },
-                },
-              },
+              song_indices: { type: "array", items: { type: "number" } },
+              target_world_id: { type: "string" },
+              reason: { type: "string" },
             },
             required: ["action", "world_id"],
           },
@@ -387,376 +377,277 @@ const REFINE_TOOL = {
   },
 };
 
+/* ═══ MAIN ═══ */
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
+    const API_KEY = Deno.env.get("LOVABLE_API_KEY");
+    if (!API_KEY) throw new Error("LOVABLE_API_KEY not configured");
 
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) return json({ error: "Not authenticated" }, 401);
+    const auth = req.headers.get("Authorization");
+    if (!auth) return json({ error: "Not authenticated" }, 401);
 
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseKey = Deno.env.get("SUPABASE_ANON_KEY")!;
-    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const url = Deno.env.get("SUPABASE_URL")!;
+    const anon = Deno.env.get("SUPABASE_ANON_KEY")!;
+    const svc = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-    const supabase = createClient(supabaseUrl, supabaseKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
-    const admin = createClient(supabaseUrl, serviceKey);
+    const sb = createClient(url, anon, { global: { headers: { Authorization: auth } } });
+    const adm = createClient(url, svc);
 
-    const { data: { user }, error: userError } = await supabase.auth.getUser();
-    if (userError || !user) return json({ error: "Invalid session" }, 401);
+    const { data: { user }, error: ue } = await sb.auth.getUser();
+    if (ue || !user) return json({ error: "Invalid session" }, 401);
 
-    let mode: "tag_only" | "define_worlds" | "assign_batch" | "refine" | "full_rebuild" = "full_rebuild";
+    let mode = "tag_only";
     let batchSize = 150;
     let forceRetag = false;
     let worldDefs: any[] = [];
-    let batchOffset = 0;
+    let offset = 0;
 
     try {
-      const body = await req.json();
-      if (body?.mode) mode = body.mode;
-      if (typeof body?.batch_size === "number") batchSize = Math.min(body.batch_size, 200);
-      if (body?.force_retag === true) forceRetag = true;
-      if (body?.world_definitions) worldDefs = body.world_definitions;
-      if (typeof body?.offset === "number") batchOffset = body.offset;
+      const b = await req.json();
+      if (b?.mode) mode = b.mode;
+      if (typeof b?.batch_size === "number") batchSize = Math.min(b.batch_size, 200);
+      if (b?.force_retag) forceRetag = true;
+      if (b?.world_definitions) worldDefs = b.world_definitions;
+      if (typeof b?.offset === "number") offset = b.offset;
     } catch { /* no body */ }
 
-    const SONG_COLUMNS = "id, spotify_track_id, track_name, artist_name, album_name, image_url, audio_tempo, audio_energy, audio_valence, audio_danceability, audio_acousticness, audio_instrumentalness, audio_speechiness, audio_loudness, audio_liveness, mood, energy, atmosphere, production_style, groove_feel, vocal_style, sonic_brightness, spatial_quality, rhythmic_identity, listening_context, sonic_texture, intimacy_scale, tension_level, genre_tags, era, tempo_estimate";
+    const COLS = "id, spotify_track_id, track_name, artist_name, album_name, image_url, audio_tempo, audio_energy, audio_valence, audio_danceability, audio_acousticness, audio_instrumentalness, audio_speechiness, audio_loudness, audio_liveness, mood, energy, atmosphere, production_style, groove_feel, vocal_style, sonic_brightness, spatial_quality, rhythmic_identity, listening_context, sonic_texture, intimacy_scale, tension_level, genre_tags, era, tempo_estimate";
 
-    if (forceRetag && mode === "tag_only") {
-      console.info(`[analyze] FORCE RETAG: clearing all data for user ${user.id}`);
-      await admin.from("liked_songs").update({
-        analyzed_at: null,
-        groove_feel: null, vocal_style: null, sonic_brightness: null,
-        spatial_quality: null, rhythmic_identity: null, listening_context: null,
-        sonic_texture: null, intimacy_scale: null, tension_level: null,
-      }).eq("user_id", user.id);
-
-      const { data: existingClusters } = await admin
-        .from("liked_song_clusters").select("id").eq("user_id", user.id);
-      if (existingClusters?.length) {
-        const ids = existingClusters.map(c => c.id);
-        await admin.from("liked_song_cluster_tracks").delete().in("cluster_id", ids);
-        await admin.from("liked_song_clusters").delete().eq("user_id", user.id);
-      }
-    }
-
-    const { count: totalLikedSongs } = await supabase
-      .from("liked_songs").select("id", { count: "exact", head: true }).eq("user_id", user.id);
-    const total = totalLikedSongs ?? 0;
-    if (total === 0 && mode !== "refine") {
-      return json({ error: "No liked songs found. Import your Spotify library first." }, 400);
-    }
-
+    /* ═══ TAG ═══ */
     if (mode === "tag_only") {
-      const { data: unanalyzed } = await supabase
-        .from("liked_songs")
-        .select("id, spotify_track_id, track_name, artist_name, album_name, image_url, audio_tempo, audio_energy, audio_valence, audio_danceability, audio_acousticness, audio_instrumentalness, audio_speechiness, audio_loudness, audio_liveness")
-        .eq("user_id", user.id)
-        .is("analyzed_at", null)
-        .order("added_at", { ascending: false })
-        .limit(batchSize);
+      if (forceRetag) {
+        console.info("[tag] force retag");
+        await adm.from("liked_songs").update({
+          analyzed_at: null, groove_feel: null, vocal_style: null,
+          sonic_brightness: null, spatial_quality: null, rhythmic_identity: null,
+          listening_context: null, sonic_texture: null, intimacy_scale: null,
+          tension_level: null, mood: null, energy: null, atmosphere: null,
+          production_style: null, era: null, tempo_estimate: null, genre_tags: [],
+        }).eq("user_id", user.id);
 
-      const songs = unanalyzed || [];
-
-      if (songs.length === 0) {
-        const { count: analyzedCount } = await supabase
-          .from("liked_songs").select("id", { count: "exact", head: true })
-          .eq("user_id", user.id).not("analyzed_at", "is", null);
-        return json({ success: true, done: true, tracks_analyzed_this_batch: 0, total_analyzed: analyzedCount ?? 0, total_liked_songs: total });
+        const { data: ec } = await adm.from("liked_song_clusters").select("id").eq("user_id", user.id);
+        if (ec?.length) {
+          await adm.from("liked_song_cluster_tracks").delete().in("cluster_id", ec.map((c: any) => c.id));
+          await adm.from("liked_song_clusters").delete().eq("user_id", user.id);
+        }
       }
 
-      console.info(`[analyze] tag_only: ${songs.length} songs for user ${user.id}`);
+      const { count: total } = await sb.from("liked_songs").select("id", { count: "exact", head: true }).eq("user_id", user.id);
+      const t = total ?? 0;
+      if (t === 0) return json({ error: "No liked songs. Import library first." }, 400);
 
-      const songList = songs.map((s, i) =>
-        `${i + 1}. "${s.track_name}" – ${s.artist_name}${s.album_name ? ` (${s.album_name})` : ""}${formatAudioFeatures(s)}`
+      const { data: unan } = await sb.from("liked_songs")
+        .select("id, spotify_track_id, track_name, artist_name, album_name, image_url, audio_tempo, audio_energy, audio_valence, audio_danceability, audio_acousticness, audio_instrumentalness, audio_speechiness, audio_loudness, audio_liveness")
+        .eq("user_id", user.id).is("analyzed_at", null)
+        .order("added_at", { ascending: false }).limit(batchSize);
+
+      const songs = unan || [];
+      if (songs.length === 0) {
+        const { count: ac } = await sb.from("liked_songs").select("id", { count: "exact", head: true })
+          .eq("user_id", user.id).not("analyzed_at", "is", null);
+        return json({ success: true, done: true, tracks_analyzed_this_batch: 0, total_analyzed: ac ?? 0, total_liked_songs: t });
+      }
+
+      console.info(`[tag] ${songs.length}/${t} songs`);
+      const list = songs.map((s: any, i: number) =>
+        `${i + 1}. "${s.track_name}" – ${s.artist_name}${s.album_name ? ` (${s.album_name})` : ""}${fmtAudio(s)}`
       ).join("\n");
 
-      const parsed = await callAI(
-        LOVABLE_API_KEY, "google/gemini-2.5-flash", TAG_SYSTEM_PROMPT,
-        `Analyze these ${songs.length} songs with DEEP musical analysis. For each song, provide ALL dimensions including language detection.\n\n${songList}\n\nUse the tag_songs function.`,
-        [TAG_TOOL], { type: "function", function: { name: "tag_songs" } }
-      );
+      const p = await callAI(API_KEY, "google/gemini-2.5-flash", TAG_SYS,
+        `Analyze these ${songs.length} songs across all 17 dimensions.\n\n${list}\n\nUse tag_songs.`,
+        [TAG_TOOL], { type: "function", function: { name: "tag_songs" } });
 
-      const taggedSongs = parsed.songs || [];
-      const nowIso = new Date().toISOString();
-
-      for (const tagged of taggedSongs) {
-        const idx = (tagged.index || 0) - 1;
+      const ts = p.songs || [];
+      const now = new Date().toISOString();
+      for (const tg of ts) {
+        const idx = (tg.index || 0) - 1;
         if (idx < 0 || idx >= songs.length) continue;
-        await admin.from("liked_songs").update({
-          genre_tags: tagged.genre_tags || [],
-          mood: tagged.mood || null,
-          energy: tagged.energy || null,
-          tempo_estimate: tagged.tempo_estimate || null,
-          era: tagged.era || null,
-          atmosphere: tagged.atmosphere || null,
-          production_style: tagged.production_style || null,
-          groove_feel: tagged.groove_feel || null,
-          vocal_style: tagged.vocal_style || null,
-          sonic_brightness: tagged.sonic_brightness || null,
-          spatial_quality: tagged.spatial_quality || null,
-          rhythmic_identity: tagged.rhythmic_identity || null,
-          listening_context: tagged.listening_context || null,
-          sonic_texture: tagged.sonic_texture || null,
-          intimacy_scale: tagged.intimacy_scale || null,
-          tension_level: tagged.tension_level || null,
-          analyzed_at: nowIso,
+        await adm.from("liked_songs").update({
+          genre_tags: tg.genre_tags || [], mood: tg.mood, energy: tg.energy,
+          tempo_estimate: tg.tempo_estimate, era: tg.era, atmosphere: tg.atmosphere,
+          production_style: tg.production_style, groove_feel: tg.groove_feel,
+          vocal_style: tg.vocal_style, sonic_brightness: tg.sonic_brightness,
+          spatial_quality: tg.spatial_quality, rhythmic_identity: tg.rhythmic_identity,
+          listening_context: tg.listening_context, sonic_texture: tg.sonic_texture,
+          intimacy_scale: tg.intimacy_scale, tension_level: tg.tension_level,
+          analyzed_at: now,
         }).eq("id", songs[idx].id);
       }
 
-      const { count: analyzedNow } = await supabase
-        .from("liked_songs").select("id", { count: "exact", head: true })
+      const { count: an } = await sb.from("liked_songs").select("id", { count: "exact", head: true })
         .eq("user_id", user.id).not("analyzed_at", "is", null);
-
-      return json({
-        success: true, done: (analyzedNow ?? 0) >= total,
-        tracks_analyzed_this_batch: taggedSongs.length,
-        total_analyzed: analyzedNow ?? 0, total_liked_songs: total,
-      });
+      return json({ success: true, done: (an ?? 0) >= t, tracks_analyzed_this_batch: ts.length, total_analyzed: an ?? 0, total_liked_songs: t });
     }
 
+    /* ═══ DEFINE WORLDS ═══ */
     if (mode === "define_worlds") {
-      const allSongs = await fetchAllRows(supabase, "liked_songs", user.id, SONG_COLUMNS);
-      const taggedSongs = allSongs.filter(s => s.groove_feel != null);
+      const all = await fetchAll(sb, "liked_songs", user.id, COLS);
+      const tagged = all.filter((s: any) => s.groove_feel != null);
+      if (tagged.length < 10) return json({ error: "Need more tagged songs. Run tagging first.", needs_tagging: true, tagged: tagged.length, total: all.length }, 400);
 
-      const playlists = await fetchAllRows(supabase, "spotify_playlists", user.id, "id, name, description, track_count, spotify_playlist_id, is_owned_by_user, is_collaborative");
-
-      const playlistContext: string[] = [];
-      for (const pl of playlists.slice(0, 30)) {
-        const { data: tracks } = await supabase
-          .from("spotify_playlist_tracks")
-          .select("track_name, artist_name")
-          .eq("playlist_id", pl.id)
-          .eq("user_id", user.id)
-          .order("position")
-          .limit(15);
-
-        if (tracks && tracks.length > 0) {
-          const trackList = tracks.map(t => `  - "${t.track_name}" – ${t.artist_name}`).join("\n");
-          playlistContext.push(`📋 "${pl.name}" (${pl.track_count} tracks${pl.is_owned_by_user ? ", user-created" : ""}${pl.is_collaborative ? ", collaborative" : ""}):\n${trackList}`);
+      // Full playlists with tracklists
+      const pls = await fetchAll(sb, "spotify_playlists", user.id, "id, name, description, track_count, is_owned_by_user, is_collaborative");
+      const plBlocks: string[] = [];
+      for (const pl of pls) {
+        const tks = await fetchAll(sb, "spotify_playlist_tracks", user.id, "track_name, artist_name, position", { col: "playlist_id", val: pl.id });
+        tks.sort((a: any, b: any) => (a.position || 0) - (b.position || 0));
+        const shown = tks.slice(0, 50);
+        if (shown.length > 0) {
+          const tl = shown.map((t: any) => `  - "${t.track_name}" – ${t.artist_name}`).join("\n");
+          const f = [pl.is_owned_by_user ? "user-created" : "followed", pl.is_collaborative ? "collab" : null, `${pl.track_count} tracks`].filter(Boolean).join(", ");
+          plBlocks.push(`📋 "${pl.name}" (${f})${pl.description ? ` — "${pl.description}"` : ""}\n${tl}${tks.length > 50 ? `\n  +${tks.length - 50} more` : ""}`);
         }
       }
 
-      const artists = await fetchAllRows(supabase, "spotify_followed_artists", user.id, "artist_name, genres");
-      const artistContext = artists.slice(0, 50).map(a =>
-        `- ${a.artist_name}${a.genres?.length ? ` [${a.genres.slice(0, 3).join(", ")}]` : ""}`
-      ).join("\n");
+      const arts = await fetchAll(sb, "spotify_followed_artists", user.id, "artist_name, genres, popularity");
+      const artL = arts.map((a: any) => `- ${a.artist_name}${a.genres?.length ? ` [${a.genres.slice(0, 4).join(", ")}]` : ""}`).join("\n");
 
-      const albums = await fetchAllRows(supabase, "spotify_saved_albums", user.id, "album_name, artist_name, album_type, genres");
-      const albumContext = albums.slice(0, 40).map(a =>
-        `- "${a.album_name}" by ${a.artist_name}${a.genres?.length ? ` [${a.genres.slice(0, 2).join(", ")}]` : ""}`
-      ).join("\n");
+      const albs = await fetchAll(sb, "spotify_saved_albums", user.id, "album_name, artist_name, genres, release_date, total_tracks");
+      const albL = albs.map((a: any) => `- "${a.album_name}" by ${a.artist_name} (${a.release_date || "?"})${a.genres?.length ? ` [${a.genres.slice(0, 3).join(", ")}]` : ""}`).join("\n");
 
-      const buckets = new Map<string, any[]>();
-      for (const s of taggedSongs) {
-        const key = `${s.sonic_brightness || "?"}_${s.energy || "?"}`;
-        if (!buckets.has(key)) buckets.set(key, []);
-        buckets.get(key)!.push(s);
-      }
+      const sample = stratSample(tagged, 500);
+      const sampleL = sample.map((s: any, i: number) => fmtSong(s, i)).join("\n");
+      const suggest = Math.max(8, Math.min(30, Math.floor(all.length / 40)));
 
-      const maxSample = Math.min(300, taggedSongs.length);
-      const sample: any[] = [];
-      const bucketKeys = [...buckets.keys()];
-      let round = 0;
-      while (sample.length < maxSample) {
-        let added = false;
-        for (const key of bucketKeys) {
-          const bucket = buckets.get(key)!;
-          if (round < bucket.length && sample.length < maxSample) {
-            sample.push(bucket[round]);
-            added = true;
-          }
-        }
-        if (!added) break;
-        round++;
-      }
+      const ctx = `
+═══ FULL SPOTIFY ECOSYSTEM ═══
+LIBRARY: ${all.length} liked songs (${tagged.length} analyzed)
 
-      const sampleLines = sample.map((s, i) => formatSongLine(s, i)).join("\n");
+═══ PLAYLISTS (${pls.length} — PRIMARY BLUEPRINT) ═══
+${plBlocks.length > 0 ? plBlocks.join("\n\n") : "None"}
 
-      const contextBlock = `
-═══ USER'S SPOTIFY ECOSYSTEM ═══
+═══ FOLLOWED ARTISTS (${arts.length}) ═══
+${artL || "None"}
 
-LIBRARY SIZE: ${allSongs.length} liked songs (${taggedSongs.length} fully analyzed)
+═══ SAVED ALBUMS (${albs.length}) ═══
+${albL || "None"}
 
-${playlistContext.length > 0 ? `EXISTING PLAYLISTS (showing how the user already groups music):\n${playlistContext.join("\n\n")}` : "No existing playlists found."}
+═══ TAGGED SONG SAMPLE (${sample.length} of ${tagged.length}) ═══
+${sampleL}`;
 
-${artistContext ? `FOLLOWED ARTISTS:\n${artistContext}` : ""}
+      console.info(`[worlds] ${sample.length} sample, ${pls.length} playlists, ${arts.length} artists, ${albs.length} albums`);
 
-${albumContext ? `SAVED ALBUMS:\n${albumContext}` : ""}
+      const p = await callAI(API_KEY, "google/gemini-2.5-pro", WORLDS_SYS,
+        `Study this COMPLETE ecosystem and define ALL sonic worlds.
+Use playlists as PRIMARY reference. Aim for ${suggest}+ worlds for ${all.length} songs. Be specific.\n${ctx}\n\nUse define_sonic_worlds.`,
+        [WORLDS_TOOL], { type: "function", function: { name: "define_sonic_worlds" } }, 0.4);
 
-═══ REPRESENTATIVE SAMPLE (${sample.length} of ${taggedSongs.length} tagged songs) ═══
-
-${sampleLines}
-`;
-
-      console.info(`[analyze] define_worlds: ${sample.length} sample songs, ${playlists.length} playlists, ${artists.length} artists for user ${user.id}`);
-
-      const parsed = await callAI(
-        LOVABLE_API_KEY, "google/gemini-2.5-pro", DEFINE_WORLDS_SYSTEM,
-        `Define the sonic worlds in this user's library. Create as many as the music naturally requires — be specific and narrow. Use the existing playlists as reference signals for the user's natural grouping tendencies.\n\n${contextBlock}\n\nUse the define_sonic_worlds function.`,
-        [DEFINE_WORLDS_TOOL], { type: "function", function: { name: "define_sonic_worlds" } },
-        0.4
-      );
-
-      const worlds = parsed.worlds || [];
-      console.info(`[analyze] defined ${worlds.length} sonic worlds`);
-
-      return json({
-        success: true,
-        worlds,
-        total_songs: allSongs.length,
-        tagged_songs: taggedSongs.length,
-        playlists_analyzed: playlists.length,
-      });
+      const worlds = p.worlds || [];
+      console.info(`[worlds] defined ${worlds.length}`);
+      return json({ success: true, worlds, total_songs: all.length, tagged_songs: tagged.length, playlists_analyzed: pls.length });
     }
 
+    /* ═══ ASSIGN ═══ */
     if (mode === "assign_batch") {
-      if (!worldDefs || worldDefs.length === 0) {
-        return json({ error: "world_definitions required for assign_batch mode" }, 400);
-      }
+      if (!worldDefs?.length) return json({ error: "world_definitions required" }, 400);
 
-      const allSongs = await fetchAllRows(supabase, "liked_songs", user.id, SONG_COLUMNS);
-      const batch = allSongs.slice(batchOffset, batchOffset + batchSize);
+      const all = await fetchAll(sb, "liked_songs", user.id, COLS);
+      const batch = all.slice(offset, offset + batchSize);
+      if (batch.length === 0) return json({ success: true, done: true, assignments: [], total: all.length });
 
-      if (batch.length === 0) {
-        return json({ success: true, done: true, assigned: 0, total: allSongs.length });
-      }
-
-      const worldSummary = worldDefs.map(w =>
-        `[${w.world_id}] "${w.name}" — ${w.vibe_description}\n  Groove: ${w.groove_identity || "mixed"} | Brightness: ${w.sonic_brightness || "mixed"} | Space: ${w.spatial_quality || "mixed"} | Production: ${w.production_identity || "mixed"} | Atmosphere: ${w.atmosphere || "mixed"} | Vocals: ${w.vocal_character || "mixed"} | Context: ${w.listening_context || "mixed"} | Language: ${w.primary_language || "any"} | Energy: ${w.energy_level || "mixed"}`
+      const ws = worldDefs.map((w: any) =>
+        `[${w.world_id}] "${w.name}" — ${w.vibe_description}
+  Groove: ${w.groove_identity || "?"} | Bright: ${w.sonic_brightness || "?"} | Space: ${w.spatial_quality || "?"}
+  Prod: ${w.production_identity || "?"} | Atm: ${w.atmosphere || "?"} | Vocal: ${w.vocal_character || "?"}
+  Ctx: ${w.listening_context || "?"} | Lang: ${w.primary_language || "any"} | Energy: ${w.energy_level || "?"}
+  ✅ ${w.what_belongs || "N/A"}
+  ❌ ${w.what_breaks_it || "N/A"}`
       ).join("\n\n");
 
-      const songLines = batch.map((s, i) => formatSongLine(s, i)).join("\n");
+      const sl = batch.map((s: any, i: number) => fmtSong(s, i)).join("\n");
+      console.info(`[assign] ${batch.length} songs (off ${offset}) → ${worldDefs.length} worlds`);
 
-      const parsed = await callAI(
-        LOVABLE_API_KEY, "google/gemini-2.5-flash", ASSIGN_SYSTEM,
-        `SONIC WORLDS:\n${worldSummary}\n\nSONGS TO ASSIGN (batch of ${batch.length}):\n${songLines}\n\nAssign each song to its best matching world. Use the assign_songs function.`,
-        [ASSIGN_TOOL], { type: "function", function: { name: "assign_songs" } }
-      );
+      const p = await callAI(API_KEY, "google/gemini-2.5-flash", ASSIGN_SYS,
+        `WORLDS (${worldDefs.length}):\n${ws}\n\nSONGS (${batch.length}):\n${sl}\n\n10-point check each. 7+ to assign. Use assign_songs.`,
+        [ASSIGN_TOOL], { type: "function", function: { name: "assign_songs" } });
 
-      const assignments = parsed.assignments || [];
-
-      const result = assignments.map((a: any) => {
-        const idx = (a.index || 0) - 1;
-        if (idx < 0 || idx >= batch.length) return null;
-        return {
-          song_id: batch[idx].id,
-          spotify_track_id: batch[idx].spotify_track_id,
-          world_id: a.world_id,
-          confidence: a.confidence ?? 0.8,
-        };
+      const asgn = (p.assignments || []).map((a: any) => {
+        const i = (a.index || 0) - 1;
+        if (i < 0 || i >= batch.length) return null;
+        return { song_id: batch[i].id, spotify_track_id: batch[i].spotify_track_id, world_id: a.world_id, confidence: a.confidence ?? 0.8 };
       }).filter(Boolean);
 
-      return json({
-        success: true,
-        done: batchOffset + batch.length >= allSongs.length,
-        assignments: result,
-        batch_size: batch.length,
-        offset: batchOffset,
-        total: allSongs.length,
-      });
+      return json({ success: true, done: offset + batch.length >= all.length, assignments: asgn, batch_size: batch.length, offset, total: all.length });
     }
 
+    /* ═══ REFINE ═══ */
     if (mode === "refine") {
-      const { data: clusters } = await supabase
-        .from("liked_song_clusters")
-        .select("id, name, vibe_description, ai_explanation, mood_tags, energy_level, track_count")
-        .eq("user_id", user.id)
-        .order("sort_order");
+      const { data: cls } = await sb.from("liked_song_clusters")
+        .select("id, name, vibe_description, ai_explanation, track_count")
+        .eq("user_id", user.id).order("sort_order");
+      if (!cls?.length) return json({ success: true, removals: 0, merges: 0, deletions: 0 });
 
-      if (!clusters || clusters.length === 0) {
-        return json({ success: true, message: "No clusters to refine" });
+      const allS = await fetchAll(sb, "liked_songs", user.id, COLS);
+      const sm = new Map<string, any>();
+      for (const s of allS) sm.set(s.id, s);
+
+      const wcm: Record<string, string> = {};
+      const ctk: Record<string, { id: string; liked_song_id: string }[]> = {};
+      const sums: string[] = [];
+
+      for (const c of cls) {
+        const tks = await fetchAll(sb, "liked_song_cluster_tracks", user.id, "id, liked_song_id", { col: "cluster_id", val: c.id });
+        ctk[c.id] = tks;
+        const wid = c.name.toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "");
+        wcm[wid] = c.id;
+        const tl = tks.map((t: any, i: number) => { const s = sm.get(t.liked_song_id); return s ? fmtSong(s, i) : `${i + 1}. [?]`; }).join("\n");
+        sums.push(`📋 [${wid}] "${c.name}" (${tks.length} songs)\nVibe: ${c.vibe_description || "N/A"}\n${tl}`);
       }
 
-      const clusterSummaries: string[] = [];
-      const allSongsMap = new Map<string, any>();
+      console.info(`[refine] ${cls.length} clusters`);
 
-      const allSongs = await fetchAllRows(supabase, "liked_songs", user.id, SONG_COLUMNS);
-      for (const s of allSongs) allSongsMap.set(s.id, s);
+      try {
+        const p = await callAI(API_KEY, "google/gemini-2.5-flash", REFINE_SYS,
+          `Review ${cls.length} playlists. Remove outliers, merge small ones, delete incoherent.\n\n${sums.join("\n\n")}\n\nUse refine_playlists.`,
+          [REFINE_TOOL], { type: "function", function: { name: "refine_playlists" } });
 
-      for (const cluster of clusters) {
-        const { data: tracks } = await supabase
-          .from("liked_song_cluster_tracks")
-          .select("liked_song_id, spotify_track_id")
-          .eq("cluster_id", cluster.id)
-          .eq("user_id", user.id);
+        let rem = 0, mrg = 0, del = 0;
+        for (const act of (p.actions || [])) {
+          const cid = wcm[act.world_id];
+          if (!cid && act.action !== "keep") continue;
 
-        const trackLines = (tracks || []).map((t, i) => {
-          const song = allSongsMap.get(t.liked_song_id);
-          if (!song) return `${i + 1}. [unknown]`;
-          return formatSongLine(song, i);
-        }).join("\n");
-
-        clusterSummaries.push(
-          `\n📋 "${cluster.name}" (${cluster.track_count} songs)\nVibe: ${cluster.vibe_description || "N/A"}\n${trackLines}`
-        );
-      }
-
-      if (clusterSummaries.length > 0) {
-        try {
-          const parsed = await callAI(
-            LOVABLE_API_KEY, "google/gemini-2.5-flash", REFINE_SYSTEM,
-            `Review these playlists for coherence. Flag any songs that break the sonic unity, playlists that should be split, or playlists that are too small to keep.\n\n${clusterSummaries.join("\n\n")}\n\nUse the refine_playlists function.`,
-            [REFINE_TOOL], { type: "function", function: { name: "refine_playlists" } }
-          );
-
-          const actions = parsed.actions || [];
-          let removals = 0;
-          for (const action of actions) {
-            if (action.action === "remove" && action.song_index != null && action.world_id) {
-              const cluster = clusters.find(c => c.name === action.world_id || c.id === action.world_id);
-              if (cluster) {
-                removals++;
-              }
+          if (act.action === "remove" && act.song_indices?.length && cid) {
+            const tl = ctk[cid] || [];
+            for (const idx of act.song_indices) {
+              const ri = idx - 1;
+              if (ri >= 0 && ri < tl.length) { await adm.from("liked_song_cluster_tracks").delete().eq("id", tl[ri].id); rem++; }
+            }
+            const { count } = await sb.from("liked_song_cluster_tracks").select("id", { count: "exact", head: true }).eq("cluster_id", cid).eq("user_id", user.id);
+            await adm.from("liked_song_clusters").update({ track_count: count ?? 0 }).eq("id", cid);
+          }
+          if (act.action === "delete_world" && cid) {
+            await adm.from("liked_song_cluster_tracks").delete().eq("cluster_id", cid);
+            await adm.from("liked_song_clusters").delete().eq("id", cid);
+            del++;
+          }
+          if (act.action === "merge" && act.target_world_id && cid) {
+            const tid = wcm[act.target_world_id];
+            if (tid) {
+              await adm.from("liked_song_cluster_tracks").update({ cluster_id: tid }).eq("cluster_id", cid).eq("user_id", user.id);
+              const { count } = await sb.from("liked_song_cluster_tracks").select("id", { count: "exact", head: true }).eq("cluster_id", tid).eq("user_id", user.id);
+              await adm.from("liked_song_clusters").update({ track_count: count ?? 0 }).eq("id", tid);
+              await adm.from("liked_song_clusters").delete().eq("id", cid);
+              mrg++;
             }
           }
-
-          console.info(`[analyze] refine: ${actions.length} actions, ${removals} removals suggested`);
-          return json({ success: true, actions_count: actions.length, removals });
-        } catch (e) {
-          console.error("Refine error:", e);
-          return json({ success: true, message: "Refinement skipped due to error" });
         }
+        console.info(`[refine] ${rem} rem, ${mrg} mrg, ${del} del`);
+        return json({ success: true, removals: rem, merges: mrg, deletions: del });
+      } catch (e: any) {
+        console.error("Refine err:", e);
+        return json({ success: true, removals: 0, merges: 0, deletions: 0 });
       }
-
-      return json({ success: true, message: "Refinement complete" });
     }
 
-    const allSongs = await fetchAllRows(supabase, "liked_songs", user.id, SONG_COLUMNS);
-    if (allSongs.length === 0) {
-      return json({ error: "No liked songs found." }, 400);
-    }
-
-    const taggedCount = allSongs.filter(s => s.groove_feel != null).length;
-    console.info(`[analyze] full_rebuild: ${allSongs.length} songs (${taggedCount} tagged) for user ${user.id}`);
-
-    if (taggedCount < allSongs.length * 0.8) {
-      return json({
-        success: false,
-        needs_tagging: true,
-        total_songs: allSongs.length,
-        tagged_songs: taggedCount,
-        message: "Most songs need deep analysis first. Run tag_only batches.",
-      });
-    }
-
-    return json({
-      success: false,
-      needs_world_definition: true,
-      total_songs: allSongs.length,
-      tagged_songs: taggedCount,
-      message: "Use define_worlds mode to start the multi-phase pipeline.",
-    });
-
-  } catch (e) {
-    console.error("analyze-liked-songs error:", e);
-    const msg = e instanceof Error ? e.message : "Analysis failed";
-    if (msg === "RATE_LIMIT") return json({ error: "Rate limit exceeded. Try again in a moment." }, 429);
-    if (msg === "CREDITS_EXHAUSTED") return json({ error: "AI credits exhausted." }, 402);
-    return json({ error: msg }, 500);
+    return json({ error: `Unknown mode: ${mode}` }, 400);
+  } catch (e: any) {
+    console.error("analyze error:", e);
+    const m = e instanceof Error ? e.message : "Analysis failed";
+    if (m === "RATE_LIMIT") return json({ error: "Rate limit. Try again." }, 429);
+    if (m === "CREDITS_EXHAUSTED") return json({ error: "AI credits exhausted." }, 402);
+    return json({ error: m }, 500);
   }
 });
