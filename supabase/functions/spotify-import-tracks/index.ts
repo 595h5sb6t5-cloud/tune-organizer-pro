@@ -173,6 +173,31 @@ async function fetchAudioFeatures(trackIds: string[], token: string): Promise<Ma
   return featureMap;
 }
 
+async function getAllUnfetchedAudioFeatureIds(adminClient: any, userId: string): Promise<string[]> {
+  const ids: string[] = [];
+  const pageSize = 1000;
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await adminClient
+      .from("liked_songs")
+      .select("spotify_track_id")
+      .eq("user_id", userId)
+      .is("audio_features_fetched_at", null)
+      .range(from, from + pageSize - 1);
+
+    if (error) throw error;
+
+    const rows = data || [];
+    ids.push(...rows.map((row: any) => row.spotify_track_id).filter(Boolean));
+
+    if (rows.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return ids;
+}
+
 // ─── Sync helpers ───
 
 function shouldDoFullSync(connection: SpotifyConnectionRow, forceFullSync: boolean): boolean {
@@ -390,7 +415,7 @@ async function syncPlaylists(
   }
 
   const changedSet = new Set(changedPlaylistIds);
-  const toSync = playlists.filter(pl => changedSet.has(pl.id)).slice(0, 50);
+  const toSync = playlists.filter(pl => changedSet.has(pl.id));
   let totalTracks = 0;
 
   for (const pl of toSync) {
@@ -402,15 +427,15 @@ async function syncPlaylists(
 
       const trackRows: any[] = [];
       let plOffset = 0;
-      const plTotal = Math.min(pl.track_count, 500);
 
-      while (plOffset < plTotal) {
+      while (true) {
         const data = await spotifyGet(
           `https://api.spotify.com/v1/playlists/${pl.id}/tracks?limit=50&offset=${plOffset}&fields=items(added_at,track(id,name,artists(name),album(name,images)))`,
           token
         );
-        for (let idx = 0; idx < (data.items || []).length; idx++) {
-          const item = data.items[idx];
+        const items = data.items || [];
+        for (let idx = 0; idx < items.length; idx++) {
+          const item = items[idx];
           const track = item?.track;
           if (!track || !track.id) continue;
           const artists = (track.artists || []).map((a: any) => a?.name).filter(Boolean).join(", ");
@@ -426,6 +451,8 @@ async function syncPlaylists(
             position: plOffset + idx,
           });
         }
+        console.log(`[spotify-import-tracks] playlist ${pl.name} pagination: ${plOffset + items.length}/${pl.track_count}`);
+        if (items.length === 0) break;
         plOffset += 50;
       }
 
@@ -608,19 +635,16 @@ Deno.serve(async (req) => {
       await adminClient.from("spotify_connections").update({ last_library_sync_at: now }).eq("user_id", user.id);
 
       // Fetch audio features for NEW tracks only (skip in scoped sync to be fast)
-      if (likedResult.added > 0 && syncScope === "all") {
+      if (syncScope === "all") {
         step = "fetch_audio_features";
-        // Refetch new IDs by finding tracks without audio_features_fetched_at
-        const { data: unfetched } = await adminClient
-          .from("liked_songs")
-          .select("spotify_track_id")
-          .eq("user_id", user.id)
-          .is("audio_features_fetched_at", null)
-          .limit(200);
+        const pendingAudioFeatureIds = await getAllUnfetchedAudioFeatureIds(adminClient, user.id);
 
-        const newIds = (unfetched || []).map((r: any) => r.spotify_track_id);
-        if (newIds.length > 0) {
-          const featureMap = await fetchAudioFeatures(newIds, accessToken);
+        if (pendingAudioFeatureIds.length > 0) {
+          console.log("[spotify-import-tracks] fetching audio features for all remaining tracks", {
+            pending: pendingAudioFeatureIds.length,
+          });
+
+          const featureMap = await fetchAudioFeatures(pendingAudioFeatureIds, accessToken);
           const featNow = new Date().toISOString();
           for (const [trackId, feat] of featureMap) {
             await adminClient.from("liked_songs").update({
@@ -641,6 +665,21 @@ Deno.serve(async (req) => {
           }
           result.audio_features = featureMap.size;
         }
+
+        const [analyzedCountRes, likedCountRes] = await Promise.all([
+          adminClient
+            .from("liked_songs")
+            .select("id", { count: "exact", head: true })
+            .eq("user_id", user.id)
+            .not("audio_features_fetched_at", "is", null),
+          adminClient
+            .from("liked_songs")
+            .select("id", { count: "exact", head: true })
+            .eq("user_id", user.id),
+        ]);
+
+        result.audio_features_analyzed = analyzedCountRes.count ?? 0;
+        result.audio_features_total = likedCountRes.count ?? 0;
       }
     }
 
