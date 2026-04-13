@@ -7,12 +7,14 @@ export interface LikedSongCluster {
   name: string;
   description: string | null;
   vibe_description: string | null;
+  ai_explanation: string | null;
   mood_tags: string[];
   color_hex: string;
   energy_level: string | null;
   tempo_range: string | null;
   era_range: string | null;
   track_count: number;
+  cover_tracks: { image_url: string; track_name: string }[];
   sort_order: number;
   tracks: ClusterTrack[];
 }
