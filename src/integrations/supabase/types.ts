@@ -552,12 +552,52 @@ export type Database = {
         }
         Relationships: []
       }
+      spotify_album_tracks: {
+        Row: {
+          album_id: string
+          artist_name: string
+          created_at: string
+          disc_number: number | null
+          duration_ms: number | null
+          id: string
+          spotify_track_id: string
+          track_name: string
+          track_number: number | null
+          user_id: string
+        }
+        Insert: {
+          album_id: string
+          artist_name: string
+          created_at?: string
+          disc_number?: number | null
+          duration_ms?: number | null
+          id?: string
+          spotify_track_id: string
+          track_name: string
+          track_number?: number | null
+          user_id: string
+        }
+        Update: {
+          album_id?: string
+          artist_name?: string
+          created_at?: string
+          disc_number?: number | null
+          duration_ms?: number | null
+          id?: string
+          spotify_track_id?: string
+          track_name?: string
+          track_number?: number | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       spotify_connections: {
         Row: {
           access_token: string
           created_at: string
           expires_at: string
           id: string
+          last_album_sync_at: string | null
           last_artist_sync_at: string | null
           last_full_sync_at: string | null
           last_incremental_sync_at: string | null
@@ -575,6 +615,7 @@ export type Database = {
           created_at?: string
           expires_at: string
           id?: string
+          last_album_sync_at?: string | null
           last_artist_sync_at?: string | null
           last_full_sync_at?: string | null
           last_incremental_sync_at?: string | null
@@ -592,6 +633,7 @@ export type Database = {
           created_at?: string
           expires_at?: string
           id?: string
+          last_album_sync_at?: string | null
           last_artist_sync_at?: string | null
           last_full_sync_at?: string | null
           last_incremental_sync_at?: string | null
@@ -744,6 +786,60 @@ export type Database = {
           spotify_owner_id?: string | null
           spotify_playlist_id?: string
           track_count?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      spotify_saved_albums: {
+        Row: {
+          added_at: string | null
+          album_name: string
+          album_type: string | null
+          artist_name: string
+          created_at: string
+          genres: string[] | null
+          id: string
+          image_url: string | null
+          label: string | null
+          popularity: number | null
+          release_date: string | null
+          spotify_album_id: string
+          total_tracks: number | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          added_at?: string | null
+          album_name: string
+          album_type?: string | null
+          artist_name: string
+          created_at?: string
+          genres?: string[] | null
+          id?: string
+          image_url?: string | null
+          label?: string | null
+          popularity?: number | null
+          release_date?: string | null
+          spotify_album_id: string
+          total_tracks?: number | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          added_at?: string | null
+          album_name?: string
+          album_type?: string | null
+          artist_name?: string
+          created_at?: string
+          genres?: string[] | null
+          id?: string
+          image_url?: string | null
+          label?: string | null
+          popularity?: number | null
+          release_date?: string | null
+          spotify_album_id?: string
+          total_tracks?: number | null
           updated_at?: string
           user_id?: string
         }
