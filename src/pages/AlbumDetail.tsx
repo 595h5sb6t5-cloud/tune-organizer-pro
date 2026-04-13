@@ -58,7 +58,7 @@ const AlbumDetail = () => {
     <AppLayout>
       <div className="max-w-4xl">
         <Button variant="ghost" size="sm" className="mb-4 gap-1" asChild>
-          <Link to="/playlists"><ChevronLeft className="w-4 h-4" /> Library</Link>
+          <Link to="/library"><ChevronLeft className="w-4 h-4" /> Library</Link>
         </Button>
 
         {loading ? (

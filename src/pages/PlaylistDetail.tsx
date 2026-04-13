@@ -554,7 +554,7 @@ const PlaylistDetail = () => {
       <AppLayout>
         <div className="text-center py-20">
           <p className="text-muted-foreground">Playlist not found.</p>
-          <Link to="/playlists" className="text-accent hover:underline mt-2 block text-sm">Back to playlists</Link>
+          <Link to="/library" className="text-accent hover:underline mt-2 block text-sm">Back to library</Link>
         </div>
       </AppLayout>
     );
@@ -563,9 +563,9 @@ const PlaylistDetail = () => {
   return (
     <AppLayout>
       <div className="max-w-4xl">
-        <Link to="/playlists" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-6 transition-colors">
+        <Link to="/library" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-6 transition-colors">
           <ArrowLeft className="w-4 h-4" />
-          Back to playlists
+          Back to library
         </Link>
 
         {/* Playlist header */}

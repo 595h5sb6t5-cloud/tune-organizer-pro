@@ -30,7 +30,7 @@ const LikedSongs = () => {
       <div className="max-w-4xl">
         <div className="flex items-center gap-3 mb-6">
           <Button variant="ghost" size="icon" className="rounded-full" asChild>
-            <Link to="/playlists"><ChevronLeft className="w-5 h-5" /></Link>
+            <Link to="/library"><ChevronLeft className="w-5 h-5" /></Link>
           </Button>
           <Heart className="w-6 h-6 text-accent" />
           <div>

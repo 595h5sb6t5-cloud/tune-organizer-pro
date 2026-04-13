@@ -280,7 +280,7 @@ const Dashboard = () => {
           </div>
           <div className="flex gap-2 shrink-0">
             <Button variant="hero-outline" size="sm" asChild>
-              <Link to="/playlists">
+              <Link to="/library">
                 <ListMusic className="w-4 h-4 mr-2" />
                 Library
               </Link>
