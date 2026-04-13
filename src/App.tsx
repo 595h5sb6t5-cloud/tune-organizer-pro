@@ -11,6 +11,8 @@ import Auth from "./pages/Auth.tsx";
 import Dashboard from "./pages/Dashboard.tsx";
 import Playlists from "./pages/Playlists.tsx";
 import PlaylistDetail from "./pages/PlaylistDetail.tsx";
+import LikedSongs from "./pages/LikedSongs.tsx";
+import AlbumDetail from "./pages/AlbumDetail.tsx";
 import Discover from "./pages/Discover.tsx";
 import RecommendationHistory from "./pages/RecommendationHistory.tsx";
 import Sync from "./pages/Sync.tsx";
@@ -35,6 +37,8 @@ const App = () => (
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/playlists" element={<Playlists />} />
           <Route path="/playlists/:id" element={<PlaylistDetail />} />
+          <Route path="/liked-songs" element={<LikedSongs />} />
+          <Route path="/albums/:id" element={<AlbumDetail />} />
           <Route path="/discover" element={<Discover />} />
           <Route path="/history" element={<RecommendationHistory />} />
           <Route path="/sync" element={<Sync />} />
