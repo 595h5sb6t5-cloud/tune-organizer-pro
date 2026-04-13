@@ -303,12 +303,48 @@ Deno.serve(async (req) => {
     let batchOffset = 0;
     let batchSize = 200;
     let mode: "cluster" | "tag_only" = "cluster";
+    let forceRetag = false;
     try {
       const body = await req.json();
       if (typeof body?.offset === "number") batchOffset = body.offset;
       if (typeof body?.batch_size === "number") batchSize = Math.min(body.batch_size, 200);
       if (body?.mode === "tag_only") mode = "tag_only";
+      if (body?.force_retag === true) forceRetag = true;
     } catch { /* no body is fine */ }
+
+    // If force_retag, clear all analyzed_at timestamps so every song gets re-analyzed with deep tags
+    if (forceRetag) {
+      console.info(`[analyze-liked-songs] FORCE RETAG: clearing analyzed_at for all songs of user ${user.id}`);
+      await admin.from("liked_songs").update({
+        analyzed_at: null,
+        groove_feel: null,
+        vocal_style: null,
+        sonic_brightness: null,
+        spatial_quality: null,
+        rhythmic_identity: null,
+        listening_context: null,
+        sonic_texture: null,
+        intimacy_scale: null,
+        tension_level: null,
+      }).eq("user_id", user.id);
+
+      // Also delete existing clusters so they get rebuilt
+      const { data: existingClusters } = await admin
+        .from("liked_song_clusters")
+        .select("id")
+        .eq("user_id", user.id);
+      if (existingClusters && existingClusters.length > 0) {
+        const clusterIds = existingClusters.map(c => c.id);
+        await admin.from("liked_song_cluster_tracks").delete().in("cluster_id", clusterIds);
+        await admin.from("liked_song_clusters").delete().eq("user_id", user.id);
+        console.info(`[analyze-liked-songs] FORCE RETAG: deleted ${existingClusters.length} old clusters`);
+      }
+
+      // In force mode, always start with tag_only to re-tag everything first
+      if (mode !== "tag_only") {
+        mode = "tag_only";
+      }
+    }
 
     const { count: totalLikedSongs } = await supabase
       .from("liked_songs")
