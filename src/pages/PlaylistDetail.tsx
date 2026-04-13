@@ -661,13 +661,22 @@ const PlaylistDetail = () => {
                   const tier = tierConfig[rec.popularityTier || "mid"];
                   const TierIcon = tier.icon;
                   const isExpanded = expandedRecId === rec.id;
+                  const spotifyInfo = recSpotifyData.get(`${rec.title}|||${rec.artist}`.toLowerCase());
+                  const artworkUrl = spotifyInfo?.image_url;
+                  const previewUrl = spotifyInfo?.preview_url;
+                  const recTrackId = spotifyInfo?.spotify_id || rec.id;
 
                   return (
                     <div key={rec.id} className="rounded-2xl bg-surface-elevated border border-border/50 hover:border-accent/30 hover:shadow-sm transition-all overflow-hidden">
                       <div className="group p-4">
                         <div className="flex items-start gap-4">
-                          <div className="w-10 h-10 rounded-xl flex items-center justify-center text-base flex-shrink-0 mt-0.5" style={{ backgroundColor: vibeColor + "15" }}>
-                            🎵
+                          {artworkUrl ? (
+                            <img src={artworkUrl} alt={rec.album} className="w-10 h-10 rounded-xl object-cover flex-shrink-0 mt-0.5" />
+                          ) : (
+                            <div className="w-10 h-10 rounded-xl flex items-center justify-center text-base flex-shrink-0 mt-0.5" style={{ backgroundColor: vibeColor + "15" }}>
+                              🎵
+                            </div>
+                          )}
                           </div>
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 mb-0.5">
