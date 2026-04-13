@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import AppLayout from "@/components/app/AppLayout";
 import { Button } from "@/components/ui/button";
 import { ListMusic, Sparkles, Headphones, Music, RefreshCw, Loader2, Heart, Users, CheckCircle2, AlertCircle } from "lucide-react";
