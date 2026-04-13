@@ -1,20 +1,13 @@
 import AppLayout from "@/components/app/AppLayout";
 import { Button } from "@/components/ui/button";
 import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, RefreshCw, Play, MoreHorizontal, Plus, X, Bookmark, Sparkles, Loader2, Gem, TrendingUp, Music, Trash2, Brain, Eye, EyeOff, Zap, Clock, Palette, Target, Shield, Lightbulb, MapPin } from "lucide-react";
+import { ArrowLeft, RefreshCw, Plus, X, Bookmark, Sparkles, Loader2, Gem, TrendingUp, Music, Brain, Eye, EyeOff, Zap, Clock, Palette, Target, Shield, Lightbulb, MapPin, Mic2, Radio, Layers, Star } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
-import { usePlaylistVibe, type PlaylistVibeAnalysis } from "@/hooks/use-playlist-vibe";
+import { usePlaylistVibe, type PlaylistVibeAnalysis, type EmotionalArcSegment, type SonicDna, type TrackHighlight } from "@/hooks/use-playlist-vibe";
 import { supabase } from "@/integrations/supabase/client";
 import { useKnownTracks } from "@/hooks/use-known-tracks";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-  DropdownMenuSeparator,
-} from "@/components/ui/dropdown-menu";
 
 interface PlaylistTrack {
   id: string;
@@ -44,7 +37,9 @@ interface VibeRecommendation {
   moodTags: string[];
   insertAfterTrack: string | null;
   insertExplanation: string | null;
+  sonicConnection: string | null;
   popularityTier: "deep-cut" | "mid" | "well-known";
+  compatibilityBreakdown: Record<string, number> | null;
 }
 
 const tierConfig = {
@@ -53,27 +48,192 @@ const tierConfig = {
   "well-known": { label: "Known", icon: TrendingUp, className: "text-warm bg-warm/10" },
 };
 
-/* ─── Playlist DNA Component ─── */
-function PlaylistDNA({ vibe, analyzing, onAnalyze }: {
+/* ─── Emotional Arc Visualization ─── */
+function EmotionalArc({ arc, color }: { arc: EmotionalArcSegment[]; color: string }) {
+  if (!arc?.length) return null;
+  const maxEnergy = Math.max(...arc.map(a => a.energy), 100);
+
+  return (
+    <div className="mt-6">
+      <div className="flex items-center gap-2 mb-3">
+        <TrendingUp className="w-4 h-4" style={{ color }} />
+        <span className="text-xs font-semibold uppercase tracking-wider" style={{ color }}>Emotional Arc</span>
+      </div>
+      <div className="flex items-end gap-1 h-24 mb-2">
+        {arc.map((seg, i) => {
+          const height = (seg.energy / maxEnergy) * 100;
+          return (
+            <div key={seg.segment} className="flex-1 flex flex-col items-center gap-1">
+              <div
+                className="w-full rounded-t-lg transition-all relative group cursor-default"
+                style={{
+                  height: `${height}%`,
+                  backgroundColor: color + "30",
+                  borderLeft: `2px solid ${color}`,
+                  borderTop: `2px solid ${color}`,
+                  borderRight: `2px solid ${color}`,
+                }}
+              >
+                <span className="absolute -top-5 left-1/2 -translate-x-1/2 text-[10px] font-bold" style={{ color }}>{seg.energy}</span>
+                <div className="absolute bottom-full mb-6 left-1/2 -translate-x-1/2 w-48 p-2 rounded-lg bg-popover border border-border shadow-lg text-xs opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
+                  <p className="font-medium mb-0.5" style={{ color }}>{seg.mood}</p>
+                  <p className="text-muted-foreground">{seg.description}</p>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="flex gap-1">
+        {arc.map(seg => (
+          <div key={seg.segment} className="flex-1 text-center">
+            <p className="text-[10px] text-muted-foreground capitalize">{seg.segment}</p>
+            <p className="text-[9px] text-muted-foreground/70 truncate">{seg.mood}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ─── Sonic DNA Panel ─── */
+function SonicDnaPanel({ dna, color }: { dna: SonicDna; color: string }) {
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2">
+        <Radio className="w-4 h-4" style={{ color }} />
+        <span className="text-xs font-semibold uppercase tracking-wider" style={{ color }}>Sonic DNA</span>
+      </div>
+      <div className="grid grid-cols-1 gap-3">
+        {dna.key_instruments?.length > 0 && (
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Key Instruments</p>
+            <div className="flex flex-wrap gap-1">
+              {dna.key_instruments.map(inst => (
+                <span key={inst} className="px-2 py-0.5 rounded-full text-[11px] border border-border/50" style={{ color: color + "cc" }}>{inst}</span>
+              ))}
+            </div>
+          </div>
+        )}
+        {dna.vocal_character && (
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Vocal Character</p>
+            <p className="text-sm text-foreground/80">{dna.vocal_character}</p>
+          </div>
+        )}
+        {dna.production_school && (
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Production School</p>
+            <p className="text-sm text-foreground/80">{dna.production_school}</p>
+          </div>
+        )}
+        {dna.spatial_quality && (
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Spatial Quality</p>
+            <p className="text-sm text-foreground/80">{dna.spatial_quality}</p>
+          </div>
+        )}
+        {dna.rhythmic_identity && (
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Rhythmic Identity</p>
+            <p className="text-sm text-foreground/80">{dna.rhythmic_identity}</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ─── Genre Blend Bar ─── */
+function GenreBlend({ blend, color }: { blend: Record<string, number>; color: string }) {
+  const entries = Object.entries(blend).sort((a, b) => b[1] - a[1]);
+  if (entries.length === 0) return null;
+  const total = entries.reduce((s, [, v]) => s + v, 0);
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-3">
+        <Layers className="w-4 h-4" style={{ color }} />
+        <span className="text-xs font-semibold uppercase tracking-wider" style={{ color }}>Genre DNA</span>
+      </div>
+      <div className="flex rounded-full h-3 overflow-hidden mb-2">
+        {entries.map(([genre, pct], i) => (
+          <div
+            key={genre}
+            className="h-full first:rounded-l-full last:rounded-r-full"
+            style={{
+              width: `${(pct / total) * 100}%`,
+              backgroundColor: color,
+              opacity: 1 - (i * 0.15),
+            }}
+            title={`${genre}: ${pct}%`}
+          />
+        ))}
+      </div>
+      <div className="flex flex-wrap gap-x-4 gap-y-1">
+        {entries.map(([genre, pct], i) => (
+          <span key={genre} className="text-[11px] text-muted-foreground">
+            <span className="inline-block w-2 h-2 rounded-full mr-1" style={{ backgroundColor: color, opacity: 1 - (i * 0.15) }} />
+            {genre} {pct}%
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ─── Track Highlights ─── */
+function TrackHighlights({ highlights, color }: { highlights: TrackHighlight[]; color: string }) {
+  if (!highlights?.length) return null;
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-3">
+        <Star className="w-4 h-4" style={{ color }} />
+        <span className="text-xs font-semibold uppercase tracking-wider" style={{ color }}>Identity Pillars</span>
+      </div>
+      <div className="space-y-2">
+        {highlights.map((h, i) => (
+          <div key={i} className="rounded-xl bg-card/50 border border-border/30 p-3">
+            <div className="flex items-center gap-2 mb-1">
+              <p className="text-sm font-medium">{h.track_name}</p>
+              <span className="text-[10px] px-2 py-0.5 rounded-full font-medium" style={{ backgroundColor: color + "20", color }}>{h.role}</span>
+            </div>
+            <p className="text-xs text-muted-foreground">{h.artist_name}</p>
+            <p className="text-xs text-foreground/70 mt-1">{h.why}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ─── Playlist Identity Panel ─── */
+function PlaylistIdentity({ vibe, analyzing, onAnalyze }: {
   vibe: PlaylistVibeAnalysis | null;
   analyzing: boolean;
   onAnalyze: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [tab, setTab] = useState<"overview" | "sonic" | "flow">("overview");
 
   if (!vibe && !analyzing) {
     return (
-      <div className="rounded-2xl border border-border/50 bg-surface-elevated p-6 mb-8">
+      <div className="rounded-2xl border border-border/50 bg-surface-elevated p-8 mb-8">
         <div className="flex items-center gap-3 mb-4">
-          <Brain className="w-5 h-5 text-accent" />
-          <h2 className="font-heading text-xl">AI Playlist Identity</h2>
+          <div className="w-12 h-12 rounded-2xl bg-accent/10 flex items-center justify-center">
+            <Brain className="w-6 h-6 text-accent" />
+          </div>
+          <div>
+            <h2 className="font-heading text-xl">Playlist Identity Engine</h2>
+            <p className="text-xs text-muted-foreground">Deep musical intelligence by Tempo AI</p>
+          </div>
         </div>
-        <p className="text-sm text-muted-foreground mb-4">
-          Let Tempo AI analyze the true vibe, mood, and identity of this playlist — going far beyond genre labels.
+        <p className="text-sm text-muted-foreground mb-6 max-w-lg">
+          Decode the true identity of this playlist — emotional arc, sonic DNA, production fingerprint, and the invisible thread connecting every track.
         </p>
         <Button variant="hero" className="rounded-xl gap-2" onClick={onAnalyze}>
           <Sparkles className="w-4 h-4" />
-          Analyze Playlist DNA
+          Analyze Playlist Identity
         </Button>
       </div>
     );
@@ -81,14 +241,19 @@ function PlaylistDNA({ vibe, analyzing, onAnalyze }: {
 
   if (analyzing) {
     return (
-      <div className="rounded-2xl border border-border/50 bg-surface-elevated p-6 mb-8">
+      <div className="rounded-2xl border border-border/50 bg-surface-elevated p-8 mb-8">
         <div className="flex items-center gap-3 mb-4">
-          <Loader2 className="w-5 h-5 text-accent animate-spin" />
-          <h2 className="font-heading text-xl">Analyzing Playlist DNA…</h2>
+          <Loader2 className="w-6 h-6 text-accent animate-spin" />
+          <div>
+            <h2 className="font-heading text-xl">Decoding Playlist Identity…</h2>
+            <p className="text-xs text-muted-foreground">Analyzing emotional arc, sonic DNA, production fingerprint, and flow intelligence</p>
+          </div>
         </div>
-        <p className="text-sm text-muted-foreground">
-          AI is deeply analyzing mood, atmosphere, production style, rhythm, and emotional arc…
-        </p>
+        <div className="flex gap-2 flex-wrap mt-4">
+          {["Mapping emotional arc", "Analyzing production DNA", "Identifying sonic palette", "Building genre blend", "Finding identity pillars"].map(step => (
+            <span key={step} className="text-[11px] px-3 py-1 rounded-full bg-secondary text-muted-foreground animate-pulse">{step}</span>
+          ))}
+        </div>
       </div>
     );
   }
@@ -101,20 +266,20 @@ function PlaylistDNA({ vibe, analyzing, onAnalyze }: {
     <div className="rounded-2xl border border-border/50 overflow-hidden mb-8" style={{ borderTopColor: vibeColor, borderTopWidth: 3 }}>
       {/* Header */}
       <div className="p-6 bg-surface-elevated">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between mb-5">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: vibeColor + "20" }}>
-              <Brain className="w-5 h-5" style={{ color: vibeColor }} />
+            <div className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ backgroundColor: vibeColor + "20" }}>
+              <Brain className="w-6 h-6" style={{ color: vibeColor }} />
             </div>
             <div>
-              <h2 className="font-heading text-xl">AI Playlist Identity</h2>
-              <p className="text-xs text-muted-foreground">Deep vibe analysis by Tempo AI</p>
+              <h2 className="font-heading text-xl">Playlist Identity</h2>
+              <p className="text-[11px] text-muted-foreground">Deep analysis by Tempo AI</p>
             </div>
           </div>
           <div className="flex gap-2">
             <Button variant="ghost" size="sm" className="rounded-lg gap-1 text-xs" onClick={() => setExpanded(!expanded)}>
               {expanded ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-              {expanded ? "Less" : "More"}
+              {expanded ? "Collapse" : "Deep Dive"}
             </Button>
             <Button variant="ghost" size="sm" className="rounded-lg gap-1 text-xs text-accent" onClick={onAnalyze}>
               <RefreshCw className="w-3.5 h-3.5" />
@@ -123,59 +288,101 @@ function PlaylistDNA({ vibe, analyzing, onAnalyze }: {
           </div>
         </div>
 
-        {/* Primary vibe */}
+        {/* Primary identity */}
         <div className="mb-4">
-          <span className="inline-block px-3 py-1.5 rounded-full text-sm font-medium" style={{ backgroundColor: vibeColor + "20", color: vibeColor }}>
+          <span className="inline-block px-4 py-2 rounded-xl text-sm font-semibold" style={{ backgroundColor: vibeColor + "20", color: vibeColor }}>
             {vibe.primary_vibe}
           </span>
         </div>
 
-        {/* Secondary vibes */}
-        {vibe.secondary_vibes?.length > 0 && (
+        {/* Secondary + emotional keywords */}
+        <div className="flex flex-wrap gap-1.5 mb-4">
+          {vibe.secondary_vibes?.map((v) => (
+            <span key={v} className="px-2 py-0.5 rounded-full text-[11px] bg-secondary text-muted-foreground">{v}</span>
+          ))}
+        </div>
+
+        {vibe.emotional_keywords?.length > 0 && (
           <div className="flex flex-wrap gap-1.5 mb-4">
-            {vibe.secondary_vibes.map((v) => (
-              <span key={v} className="px-2 py-0.5 rounded-full text-[11px] bg-secondary text-muted-foreground">{v}</span>
+            {vibe.emotional_keywords.map(kw => (
+              <span key={kw} className="px-2 py-0.5 rounded-full text-[11px] font-medium border" style={{ borderColor: vibeColor + "40", color: vibeColor }}>{kw}</span>
+            ))}
+          </div>
+        )}
+
+        {/* Sonic palette chips */}
+        {vibe.sonic_palette?.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mb-4">
+            {vibe.sonic_palette.map(sp => (
+              <span key={sp} className="px-2 py-0.5 rounded-full text-[10px] bg-card text-muted-foreground/80 border border-border/30">{sp}</span>
             ))}
           </div>
         )}
 
         {/* AI explanation */}
         <p className="text-sm text-foreground/80 leading-relaxed">{vibe.ai_explanation}</p>
+
+        {/* Emotional Arc (always visible) */}
+        <EmotionalArc arc={vibe.emotional_arc} color={vibeColor} />
+
+        {/* Genre Blend (always visible) */}
+        {vibe.genre_blend && Object.keys(vibe.genre_blend).length > 0 && (
+          <div className="mt-6">
+            <GenreBlend blend={vibe.genre_blend} color={vibeColor} />
+          </div>
+        )}
       </div>
 
-      {/* Expanded details */}
+      {/* Expanded deep dive */}
       {expanded && (
-        <div className="border-t border-border/30 p-6 bg-card">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {vibe.mood_summary && (
-              <VibeDetail icon={<Palette className="w-4 h-4" />} title="Mood & Emotion" content={vibe.mood_summary} />
+        <div className="border-t border-border/30">
+          {/* Tab navigation */}
+          <div className="flex border-b border-border/30 bg-card/50">
+            {[
+              { key: "overview" as const, label: "Overview", icon: Palette },
+              { key: "sonic" as const, label: "Sonic DNA", icon: Radio },
+              { key: "flow" as const, label: "Flow & Identity", icon: TrendingUp },
+            ].map(t => (
+              <button
+                key={t.key}
+                onClick={() => setTab(t.key)}
+                className={`flex items-center gap-1.5 px-5 py-3 text-xs font-medium transition-colors border-b-2 ${
+                  tab === t.key ? "border-accent text-accent" : "border-transparent text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <t.icon className="w-3.5 h-3.5" />
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="p-6 bg-card">
+            {tab === "overview" && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {vibe.mood_summary && <VibeDetail icon={<Palette className="w-4 h-4" />} title="Emotional Landscape" content={vibe.mood_summary} color={vibeColor} />}
+                {vibe.energy_summary && <VibeDetail icon={<Zap className="w-4 h-4" />} title="Energy Profile" content={vibe.energy_summary} color={vibeColor} />}
+                {vibe.tempo_summary && <VibeDetail icon={<Clock className="w-4 h-4" />} title="Rhythm & Pulse" content={vibe.tempo_summary} color={vibeColor} />}
+                {vibe.production_summary && <VibeDetail icon={<Music className="w-4 h-4" />} title="Production Signature" content={vibe.production_summary} color={vibeColor} />}
+                {vibe.listening_context && <VibeDetail icon={<Target className="w-4 h-4" />} title="Listening Context" content={vibe.listening_context} color={vibeColor} />}
+                {vibe.era_summary && <VibeDetail icon={<Clock className="w-4 h-4" />} title="Era & Time" content={vibe.era_summary} color={vibeColor} />}
+              </div>
             )}
-            {vibe.energy_summary && (
-              <VibeDetail icon={<Zap className="w-4 h-4" />} title="Energy Profile" content={vibe.energy_summary} />
+
+            {tab === "sonic" && (
+              <div className="space-y-8">
+                {vibe.sonic_dna && <SonicDnaPanel dna={vibe.sonic_dna} color={vibeColor} />}
+                <TrackHighlights highlights={vibe.track_highlights} color={vibeColor} />
+              </div>
             )}
-            {vibe.tempo_summary && (
-              <VibeDetail icon={<Clock className="w-4 h-4" />} title="Tempo & Rhythm" content={vibe.tempo_summary} />
-            )}
-            {vibe.production_summary && (
-              <VibeDetail icon={<Music className="w-4 h-4" />} title="Production Style" content={vibe.production_summary} />
-            )}
-            {vibe.structural_flow && (
-              <VibeDetail icon={<TrendingUp className="w-4 h-4" />} title="Structural Flow" content={vibe.structural_flow} />
-            )}
-            {vibe.listening_context && (
-              <VibeDetail icon={<Target className="w-4 h-4" />} title="Listening Context" content={vibe.listening_context} />
-            )}
-            {vibe.cohesion_description && (
-              <VibeDetail icon={<Shield className="w-4 h-4" />} title="What Makes It Cohesive" content={vibe.cohesion_description} />
-            )}
-            {vibe.what_belongs && (
-              <VibeDetail icon={<Lightbulb className="w-4 h-4" />} title="What Belongs Here" content={vibe.what_belongs} />
-            )}
-            {vibe.what_breaks_it && (
-              <VibeDetail icon={<X className="w-4 h-4" />} title="What Breaks The Vibe" content={vibe.what_breaks_it} color="text-destructive/70" />
-            )}
-            {vibe.era_summary && (
-              <VibeDetail icon={<Clock className="w-4 h-4" />} title="Era" content={vibe.era_summary} />
+
+            {tab === "flow" && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {vibe.structural_flow && <VibeDetail icon={<TrendingUp className="w-4 h-4" />} title="Structural Flow" content={vibe.structural_flow} color={vibeColor} />}
+                {vibe.user_intent && <VibeDetail icon={<Target className="w-4 h-4" />} title="Curator's Intent" content={vibe.user_intent} color={vibeColor} />}
+                {vibe.cohesion_description && <VibeDetail icon={<Shield className="w-4 h-4" />} title="Cohesion Thread" content={vibe.cohesion_description} color={vibeColor} />}
+                {vibe.what_belongs && <VibeDetail icon={<Lightbulb className="w-4 h-4" />} title="What Belongs" content={vibe.what_belongs} color={vibeColor} />}
+                {vibe.what_breaks_it && <VibeDetail icon={<X className="w-4 h-4" />} title="What Breaks It" content={vibe.what_breaks_it} accent="destructive" color={vibeColor} />}
+              </div>
             )}
           </div>
         </div>
@@ -184,14 +391,34 @@ function PlaylistDNA({ vibe, analyzing, onAnalyze }: {
   );
 }
 
-function VibeDetail({ icon, title, content, color }: { icon: React.ReactNode; title: string; content: string; color?: string }) {
+function VibeDetail({ icon, title, content, color, accent }: { icon: React.ReactNode; title: string; content: string; color: string; accent?: string }) {
+  const textColor = accent === "destructive" ? "hsl(var(--destructive))" : color;
   return (
     <div>
-      <div className={`flex items-center gap-2 mb-1.5 ${color || "text-accent"}`}>
+      <div className="flex items-center gap-2 mb-1.5" style={{ color: textColor }}>
         {icon}
-        <span className="text-xs font-medium uppercase tracking-wider">{title}</span>
+        <span className="text-xs font-semibold uppercase tracking-wider">{title}</span>
       </div>
       <p className="text-sm text-foreground/70 leading-relaxed">{content}</p>
+    </div>
+  );
+}
+
+/* ─── Compatibility Breakdown Mini Chart ─── */
+function CompatibilityBreakdown({ breakdown, color }: { breakdown: Record<string, number>; color: string }) {
+  const entries = Object.entries(breakdown).slice(0, 6);
+  if (entries.length === 0) return null;
+  return (
+    <div className="grid grid-cols-3 gap-x-4 gap-y-1 mt-2">
+      {entries.map(([key, val]) => (
+        <div key={key} className="flex items-center gap-1.5">
+          <div className="flex-1 h-1 rounded-full bg-secondary overflow-hidden">
+            <div className="h-full rounded-full" style={{ width: `${val}%`, backgroundColor: color }} />
+          </div>
+          <span className="text-[9px] text-muted-foreground w-14 truncate capitalize">{key}</span>
+          <span className="text-[9px] font-medium" style={{ color }}>{val}</span>
+        </div>
+      ))}
     </div>
   );
 }
@@ -202,15 +429,12 @@ const PlaylistDetail = () => {
   const { user } = useAuth();
   const { knownTrackIds, isKnown } = useKnownTracks();
 
-  // Playlist data from DB
   const [playlist, setPlaylist] = useState<SpotifyPlaylistInfo | null>(null);
   const [tracks, setTracks] = useState<PlaylistTrack[]>([]);
   const [loadingPlaylist, setLoadingPlaylist] = useState(true);
 
-  // Vibe intelligence
   const { vibe, loading: vibeLoading, analyzing, analyze } = usePlaylistVibe(id);
 
-  // Recommendations
   const [recs, setRecs] = useState<VibeRecommendation[]>([]);
   const [recsLoading, setRecsLoading] = useState(false);
   const [recsLoaded, setRecsLoaded] = useState(false);
@@ -218,7 +442,6 @@ const PlaylistDetail = () => {
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
   const [expandedRecId, setExpandedRecId] = useState<string | null>(null);
 
-  // Load playlist + tracks
   useEffect(() => {
     if (!id || !user) return;
     setLoadingPlaylist(true);
@@ -232,7 +455,6 @@ const PlaylistDetail = () => {
     });
   }, [id, user]);
 
-  // Generate vibe-aware recommendations
   const generateRecs = useCallback(async () => {
     if (!playlist || tracks.length === 0) return;
     setRecsLoading(true);
@@ -243,26 +465,28 @@ const PlaylistDetail = () => {
           playlistName: playlist.name,
           playlistMood: vibe?.primary_vibe || "mixed",
           playlistDescription: vibe?.ai_explanation || playlist.description || "",
-          tracks: tracks.slice(0, 50).map(t => ({
+          tracks: tracks.slice(0, 60).map(t => ({
             title: t.track_name,
             artist: t.artist_name,
-            genre: "",
-            mood: vibe?.primary_vibe || "",
-            tempo: 0,
-            energy: 0,
-            valence: 0,
-            acousticness: 0,
-            danceability: 0,
-            year: 0,
           })),
           discoveryMode: "balanced",
           existingLibrary: knownSongs.map(id => ({ spotifyId: id })),
           vibeContext: vibe ? {
             primaryVibe: vibe.primary_vibe,
             secondaryVibes: vibe.secondary_vibes,
+            moodSummary: vibe.mood_summary,
+            energySummary: vibe.energy_summary,
+            productionSummary: vibe.production_summary,
+            structuralFlow: vibe.structural_flow,
+            listeningContext: vibe.listening_context,
             whatBelongs: vibe.what_belongs,
             whatBreaksIt: vibe.what_breaks_it,
-            listeningContext: vibe.listening_context,
+            cohesionDescription: vibe.cohesion_description,
+            sonicPalette: vibe.sonic_palette,
+            emotionalKeywords: vibe.emotional_keywords,
+            sonicDna: vibe.sonic_dna,
+            genreBlend: vibe.genre_blend,
+            emotionalArc: vibe.emotional_arc,
           } : null,
           count: 8,
         },
@@ -274,13 +498,14 @@ const PlaylistDetail = () => {
         artist: r.artist,
         album: r.album || "Unknown",
         matchScore: r.matchScore || 80,
-        reason: r.reason || "Fits the playlist vibe",
+        reason: r.reason || "Fits the playlist identity",
         moodTags: r.moodTags || [],
         insertAfterTrack: r.insertAfterTrack || null,
         insertExplanation: r.insertExplanation || null,
+        sonicConnection: r.sonicConnection || null,
         popularityTier: r.popularityTier || "mid",
+        compatibilityBreakdown: r.compatibilityBreakdown || null,
       }));
-      // Filter out known tracks
       const filtered = recommendations.filter(r => !isKnown(r.title, r.artist));
       setRecs(filtered);
       setRecsLoaded(true);
@@ -302,6 +527,7 @@ const PlaylistDetail = () => {
   };
 
   const visibleRecs = recs.filter(r => !dismissedIds.has(r.id));
+  const vibeColor = vibe?.vibe_color_hex || "#6366f1";
 
   if (loadingPlaylist) {
     return (
@@ -335,9 +561,9 @@ const PlaylistDetail = () => {
         {/* Playlist header */}
         <div className="flex gap-6 mb-8">
           {playlist.image_url ? (
-            <img src={playlist.image_url} alt={playlist.name} className="w-32 h-32 rounded-2xl object-cover flex-shrink-0" />
+            <img src={playlist.image_url} alt={playlist.name} className="w-36 h-36 rounded-2xl object-cover flex-shrink-0 shadow-lg" />
           ) : (
-            <div className="w-32 h-32 rounded-2xl bg-secondary flex items-center justify-center text-5xl flex-shrink-0">🎵</div>
+            <div className="w-36 h-36 rounded-2xl bg-secondary flex items-center justify-center text-5xl flex-shrink-0">🎵</div>
           )}
           <div className="flex-1">
             <h1 className="font-heading text-4xl mb-1">{playlist.name}</h1>
@@ -347,7 +573,7 @@ const PlaylistDetail = () => {
             <div className="flex items-center gap-4 text-sm text-muted-foreground mb-4">
               <span>{tracks.length} tracks</span>
               {vibe && (
-                <span className="text-accent font-medium">{vibe.primary_vibe}</span>
+                <span className="font-medium" style={{ color: vibeColor }}>{vibe.primary_vibe}</span>
               )}
             </div>
             <div className="flex gap-3 flex-wrap">
@@ -359,8 +585,8 @@ const PlaylistDetail = () => {
           </div>
         </div>
 
-        {/* AI Playlist Identity / DNA */}
-        <PlaylistDNA vibe={vibe} analyzing={analyzing} onAnalyze={handleAnalyze} />
+        {/* Playlist Identity Panel */}
+        <PlaylistIdentity vibe={vibe} analyzing={analyzing} onAnalyze={handleAnalyze} />
 
         {/* Track list */}
         <div className="rounded-2xl border border-border/50 overflow-hidden mb-8">
@@ -394,14 +620,14 @@ const PlaylistDetail = () => {
           )}
         </div>
 
-        {/* AI Suggested Additions */}
+        {/* AI Curated Additions */}
         <div>
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
               <Sparkles className="w-5 h-5 text-accent" />
-              <h2 className="font-heading text-2xl">Suggested Additions</h2>
+              <h2 className="font-heading text-2xl">Curated Additions</h2>
               {!recsLoading && visibleRecs.length > 0 && (
-                <span className="text-xs text-muted-foreground ml-1">({visibleRecs.length} songs)</span>
+                <span className="text-xs text-muted-foreground ml-1">({visibleRecs.length})</span>
               )}
             </div>
             <Button variant="ghost" size="sm" className="rounded-lg gap-1 text-accent" onClick={generateRecs} disabled={recsLoading}>
@@ -411,14 +637,14 @@ const PlaylistDetail = () => {
           </div>
 
           {recsLoading ? (
-            <div className="flex flex-col items-center justify-center py-12 gap-3">
+            <div className="flex flex-col items-center justify-center py-16 gap-3">
               <Loader2 className="w-6 h-6 animate-spin text-accent" />
-              <p className="text-sm text-muted-foreground">AI is analyzing vibe compatibility and finding perfect matches…</p>
+              <p className="text-sm text-muted-foreground">Analyzing sonic coherence, emotional fit, and flow quality…</p>
             </div>
           ) : visibleRecs.length > 0 ? (
             <>
               <p className="text-sm text-muted-foreground mb-4">
-                Curated by AI based on playlist vibe, mood, energy, and flow — not just genre or popularity.
+                Each recommendation was selected for musical coherence with this playlist's identity — not genre tags or popularity.
               </p>
               <div className="space-y-3">
                 {visibleRecs.map((rec) => {
@@ -428,68 +654,92 @@ const PlaylistDetail = () => {
 
                   return (
                     <div key={rec.id} className="rounded-2xl bg-surface-elevated border border-border/50 hover:border-accent/30 hover:shadow-sm transition-all overflow-hidden">
-                      <div className="group flex items-center gap-4 p-4">
-                        <div className="w-10 h-10 rounded-xl bg-secondary flex items-center justify-center text-base flex-shrink-0">🎵</div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-0.5">
-                            <p className="text-sm font-medium truncate">{rec.title}</p>
-                            <span className="text-xs font-medium text-accent">{rec.matchScore}%</span>
-                            <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${tier.className}`}>
-                              <TierIcon className="w-2.5 h-2.5" />
-                              {tier.label}
-                            </span>
+                      <div className="group p-4">
+                        <div className="flex items-start gap-4">
+                          <div className="w-10 h-10 rounded-xl flex items-center justify-center text-base flex-shrink-0 mt-0.5" style={{ backgroundColor: vibeColor + "15" }}>
+                            🎵
                           </div>
-                          <p className="text-xs text-muted-foreground">{rec.artist} · {rec.album}</p>
-                          <p className="text-xs text-muted-foreground mt-1">{rec.reason}</p>
-                          {rec.insertExplanation && (
-                            <button onClick={() => setExpandedRecId(isExpanded ? null : rec.id)} className="text-[10px] text-accent hover:underline mt-1 flex items-center gap-1">
-                              <MapPin className="w-2.5 h-2.5" />
-                              {isExpanded ? "Hide placement" : "View suggested placement"}
-                            </button>
-                          )}
-                        </div>
-                        <div className="flex flex-col items-end gap-1.5">
-                          <div className="flex gap-1 flex-wrap justify-end">
-                            {rec.moodTags.map((tag) => (
-                              <span key={tag} className="px-2 py-0.5 rounded-full text-[10px] bg-secondary text-muted-foreground">{tag}</span>
-                            ))}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-0.5">
+                              <p className="text-sm font-medium truncate">{rec.title}</p>
+                              <span className="text-xs font-bold" style={{ color: vibeColor }}>{rec.matchScore}%</span>
+                              <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${tier.className}`}>
+                                <TierIcon className="w-2.5 h-2.5" />
+                                {tier.label}
+                              </span>
+                            </div>
+                            <p className="text-xs text-muted-foreground">{rec.artist} · {rec.album}</p>
+
+                            {/* Reason */}
+                            <p className="text-xs text-foreground/70 mt-2 leading-relaxed">{rec.reason}</p>
+
+                            {/* Sonic connection highlight */}
+                            {rec.sonicConnection && (
+                              <div className="flex items-start gap-1.5 mt-2">
+                                <Radio className="w-3 h-3 flex-shrink-0 mt-0.5" style={{ color: vibeColor }} />
+                                <p className="text-[11px] italic" style={{ color: vibeColor + "cc" }}>{rec.sonicConnection}</p>
+                              </div>
+                            )}
+
+                            {/* Compatibility breakdown */}
+                            {rec.compatibilityBreakdown && (
+                              <CompatibilityBreakdown breakdown={rec.compatibilityBreakdown} color={vibeColor} />
+                            )}
+
+                            {/* Mood tags */}
+                            <div className="flex flex-wrap gap-1 mt-2">
+                              {rec.moodTags.map((tag) => (
+                                <span key={tag} className="px-2 py-0.5 rounded-full text-[10px] bg-secondary text-muted-foreground">{tag}</span>
+                              ))}
+                            </div>
+
+                            {/* Insertion detail toggle */}
+                            {(rec.insertExplanation || rec.insertAfterTrack) && (
+                              <button onClick={() => setExpandedRecId(isExpanded ? null : rec.id)} className="text-[11px] hover:underline mt-2 flex items-center gap-1" style={{ color: vibeColor }}>
+                                <MapPin className="w-3 h-3" />
+                                {isExpanded ? "Hide placement" : "View suggested placement"}
+                              </button>
+                            )}
                           </div>
-                        </div>
-                        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-                          <Button variant="ghost" size="icon" className="w-8 h-8 rounded-lg text-accent hover:text-accent" title="Add to playlist" onClick={() => toast.success(`"${rec.title}" would be added`)}>
-                            <Plus className="w-4 h-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className={`w-8 h-8 rounded-lg ${savedIds.has(rec.id) ? "text-warm" : ""}`}
-                            title="Save for later"
-                            onClick={() => {
-                              setSavedIds(prev => {
-                                const next = new Set(prev);
-                                next.has(rec.id) ? next.delete(rec.id) : next.add(rec.id);
-                                return next;
-                              });
-                            }}
-                          >
-                            <Bookmark className={`w-4 h-4 ${savedIds.has(rec.id) ? "fill-current" : ""}`} />
-                          </Button>
-                          <Button variant="ghost" size="icon" className="w-8 h-8 rounded-lg text-muted-foreground" title="Dismiss" onClick={() => setDismissedIds(prev => new Set(prev).add(rec.id))}>
-                            <X className="w-4 h-4" />
-                          </Button>
+
+                          {/* Actions */}
+                          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                            <Button variant="ghost" size="icon" className="w-8 h-8 rounded-lg text-accent hover:text-accent" title="Add" onClick={() => toast.success(`"${rec.title}" would be added`)}>
+                              <Plus className="w-4 h-4" />
+                            </Button>
+                            <Button
+                              variant="ghost" size="icon"
+                              className={`w-8 h-8 rounded-lg ${savedIds.has(rec.id) ? "text-warm" : ""}`}
+                              title="Save"
+                              onClick={() => {
+                                setSavedIds(prev => {
+                                  const next = new Set(prev);
+                                  next.has(rec.id) ? next.delete(rec.id) : next.add(rec.id);
+                                  return next;
+                                });
+                              }}
+                            >
+                              <Bookmark className={`w-4 h-4 ${savedIds.has(rec.id) ? "fill-current" : ""}`} />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="w-8 h-8 rounded-lg text-muted-foreground" title="Dismiss" onClick={() => setDismissedIds(prev => new Set(prev).add(rec.id))}>
+                              <X className="w-4 h-4" />
+                            </Button>
+                          </div>
                         </div>
                       </div>
 
                       {/* Insertion point detail */}
-                      {isExpanded && rec.insertExplanation && (
+                      {isExpanded && (rec.insertExplanation || rec.insertAfterTrack) && (
                         <div className="px-4 pb-4 pt-0 border-t border-border/30">
                           <div className="pt-3 flex items-start gap-2">
-                            <MapPin className="w-4 h-4 text-accent flex-shrink-0 mt-0.5" />
+                            <MapPin className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: vibeColor }} />
                             <div>
                               {rec.insertAfterTrack && (
-                                <p className="text-xs font-medium mb-0.5">Suggested position: after "{rec.insertAfterTrack}"</p>
+                                <p className="text-xs font-medium mb-0.5">Insert after: "{rec.insertAfterTrack}"</p>
                               )}
-                              <p className="text-xs text-muted-foreground">{rec.insertExplanation}</p>
+                              {rec.insertExplanation && (
+                                <p className="text-xs text-muted-foreground">{rec.insertExplanation}</p>
+                              )}
                             </div>
                           </div>
                         </div>
@@ -510,7 +760,10 @@ const PlaylistDetail = () => {
           ) : tracks.length > 0 ? (
             <div className="text-center py-12 rounded-2xl border border-dashed border-border/50">
               <Sparkles className="w-8 h-8 text-muted-foreground/40 mx-auto mb-3" />
-              <p className="text-sm text-muted-foreground mb-3">Click "Get Recommendations" above to find songs that match this playlist's vibe.</p>
+              <p className="text-sm text-muted-foreground mb-1">Click "Get Recommendations" to find songs curated for this playlist.</p>
+              <p className="text-xs text-muted-foreground/60">
+                {vibe ? "Recommendations will use the deep identity analysis for maximum coherence." : "Analyze the playlist identity first for more intelligent recommendations."}
+              </p>
             </div>
           ) : null}
         </div>
