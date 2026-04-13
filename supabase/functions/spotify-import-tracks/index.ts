@@ -554,8 +554,25 @@ async function syncPlaylists(
     playlistIdMap.set(p.spotify_playlist_id, p.id);
   }
 
+  // Also force re-import for playlists that have 0 tracks in DB
+  const trackCountByPlaylist = new Map<string, number>();
+  for (const p of freshDbPlaylists || []) {
+    const { count } = await adminClient
+      .from("spotify_playlist_tracks")
+      .select("id", { count: "exact", head: true })
+      .eq("playlist_id", p.id);
+    trackCountByPlaylist.set(p.spotify_playlist_id, count ?? 0);
+  }
+
   const changedSet = new Set(changedPlaylistIds);
+  // Include playlists with 0 tracks even if snapshot hasn't changed
+  for (const pl of playlists) {
+    if ((trackCountByPlaylist.get(pl.id) ?? 0) === 0 && pl.track_count > 0) {
+      changedSet.add(pl.id);
+    }
+  }
   const toSync = playlists.filter(pl => changedSet.has(pl.id));
+  console.log(`[spotify-import-tracks] playlists to sync tracks: ${toSync.length} (${changedPlaylistIds.length} changed + ${toSync.length - changedPlaylistIds.length} missing tracks)`);
   let totalTracks = 0;
 
   for (const pl of toSync) {

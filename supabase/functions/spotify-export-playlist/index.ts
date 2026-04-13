@@ -25,9 +25,9 @@ Deno.serve(async (req) => {
     }
 
     const body = await req.json();
-    const { cluster_id, name, description, track_ids } = body;
-    console.log("[spotify-export-playlist] received:", JSON.stringify({ cluster_id, name, track_ids_count: track_ids?.length ?? 0 }));
-    if (!cluster_id || !name || !track_ids?.length) {
+    const { cluster_id, name, description, track_ids, spotify_playlist_id: directSpotifyPlaylistId } = body;
+    console.log("[spotify-export-playlist] received:", JSON.stringify({ cluster_id, name, track_ids_count: track_ids?.length ?? 0, directSpotifyPlaylistId }));
+    if (!name || !track_ids?.length) {
       return new Response(JSON.stringify({ error: "Missing required fields", details: { has_cluster_id: !!cluster_id, has_name: !!name, track_ids_count: track_ids?.length ?? 0 } }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
@@ -67,16 +67,20 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: "Spotify token expired. Please reconnect Spotify in Settings." }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // Check if this cluster was already exported
-    const { data: cluster } = await supabase
-      .from("liked_song_clusters")
-      .select("spotify_playlist_id")
-      .eq("id", cluster_id)
-      .eq("user_id", user.id)
-      .single();
-
-    let spotifyPlaylistId = cluster?.spotify_playlist_id;
+    // Determine the target Spotify playlist ID
+    let spotifyPlaylistId: string | null = directSpotifyPlaylistId || null;
     let isUpdate = false;
+
+    // If no direct Spotify playlist ID, check cluster for previously exported playlist
+    if (!spotifyPlaylistId && cluster_id) {
+      const { data: cluster } = await supabase
+        .from("liked_song_clusters")
+        .select("spotify_playlist_id")
+        .eq("id", cluster_id)
+        .eq("user_id", user.id)
+        .single();
+      spotifyPlaylistId = cluster?.spotify_playlist_id || null;
+    }
 
     if (spotifyPlaylistId) {
       // Update existing playlist — clear tracks and re-add
@@ -143,12 +147,14 @@ Deno.serve(async (req) => {
 
     const spotifyUrl = `https://open.spotify.com/playlist/${spotifyPlaylistId}`;
 
-    // Update cluster with Spotify info
-    await supabase.from("liked_song_clusters").update({
-      spotify_playlist_id: spotifyPlaylistId,
-      spotify_exported_at: new Date().toISOString(),
-      spotify_playlist_url: spotifyUrl,
-    }).eq("id", cluster_id).eq("user_id", user.id);
+    // Update cluster with Spotify info (only if cluster_id was provided)
+    if (cluster_id) {
+      await supabase.from("liked_song_clusters").update({
+        spotify_playlist_id: spotifyPlaylistId,
+        spotify_exported_at: new Date().toISOString(),
+        spotify_playlist_url: spotifyUrl,
+      }).eq("id", cluster_id).eq("user_id", user.id);
+    }
 
     return new Response(JSON.stringify({
       success: true,
