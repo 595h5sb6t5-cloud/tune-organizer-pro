@@ -1,36 +1,12 @@
 import AppLayout from "@/components/app/AppLayout";
-import { samplePlaylists } from "@/lib/sample-data";
 import { Button } from "@/components/ui/button";
-import { Plus, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
+import { ListMusic, Sparkles, Headphones } from "lucide-react";
 import { Link } from "react-router-dom";
-import { useState } from "react";
-import { toast } from "sonner";
-
-const statusBadge = (status: string) => {
-  switch (status) {
-    case "synced":
-      return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-accent/10 text-accent"><CheckCircle2 className="w-3 h-3" />Synced</span>;
-    case "exporting":
-      return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-warm-light/20 text-warm"><Loader2 className="w-3 h-3 animate-spin" />Exporting</span>;
-    case "failed":
-      return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-destructive/10 text-destructive"><AlertCircle className="w-3 h-3" />Failed</span>;
-    default:
-      return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-secondary text-muted-foreground">Ready</span>;
-  }
-};
+import { useAuth } from "@/hooks/use-auth";
 
 const Playlists = () => {
-  const [generating, setGenerating] = useState(false);
-
-  const handleGenerate = () => {
-    setGenerating(true);
-    toast.loading("AI is analyzing your library for new vibes…");
-    setTimeout(() => {
-      setGenerating(false);
-      toast.dismiss();
-      toast.success("Analysis complete!", { description: "Your existing playlists have been refreshed with AI insights." });
-    }, 3000);
-  };
+  const { profile } = useAuth();
+  const spotifyConnected = profile?.spotify_connected ?? false;
 
   return (
     <AppLayout>
@@ -38,54 +14,34 @@ const Playlists = () => {
         <div className="flex items-center justify-between mb-8">
           <div>
             <h1 className="font-heading text-3xl mb-1">Your Playlists</h1>
-            <p className="text-muted-foreground">AI-generated and curated for your library.</p>
+            <p className="text-muted-foreground">AI-generated playlists based on your library.</p>
           </div>
-          <Button
-            variant="hero"
-            className="rounded-xl gap-2"
-            onClick={handleGenerate}
-            disabled={generating}
-          >
-            {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-            {generating ? "Generating…" : "Generate New"}
-          </Button>
         </div>
 
-        {samplePlaylists.length === 0 ? (
-          <div className="text-center py-20">
-            <p className="text-lg text-muted-foreground mb-4">No playlists yet.</p>
-            <p className="text-sm text-muted-foreground mb-6">Import your music library and let AI create playlists for you.</p>
-            <Button variant="hero" className="rounded-xl gap-2" onClick={handleGenerate} disabled={generating}>
-              <Plus className="w-4 h-4" />
-              Generate Playlists
+        {!spotifyConnected ? (
+          <div className="rounded-2xl bg-surface-elevated border border-border/50 p-12 text-center">
+            <Headphones className="w-10 h-10 text-muted-foreground mx-auto mb-4" />
+            <h2 className="font-heading text-xl mb-2">Connect Spotify first</h2>
+            <p className="text-sm text-muted-foreground max-w-sm mx-auto mb-6">
+              Your playlists will appear here after you connect Spotify and import your library.
+            </p>
+            <Button variant="hero" asChild>
+              <Link to="/settings">Go to Settings</Link>
             </Button>
           </div>
         ) : (
-          <div className="grid grid-cols-2 gap-5">
-            {samplePlaylists.map((pl) => (
-              <Link
-                key={pl.id}
-                to={`/playlists/${pl.id}`}
-                className="group flex gap-5 p-5 rounded-2xl bg-surface-elevated border border-border/50 hover:border-border hover:shadow-lg hover:shadow-navy/5 transition-all duration-300"
-              >
-                <div className="w-20 h-20 rounded-xl bg-secondary flex items-center justify-center text-4xl flex-shrink-0">
-                  {pl.emoji}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-start justify-between mb-1">
-                    <h3 className="font-heading text-xl group-hover:text-accent transition-colors">{pl.name}</h3>
-                    {statusBadge(pl.syncStatus)}
-                  </div>
-                  <p className="text-sm text-muted-foreground mb-3 line-clamp-1">{pl.description}</p>
-                  <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                    <span>{pl.trackCount} tracks</span>
-                    <span>{pl.mood}</span>
-                    <span>{pl.avgTempo} BPM</span>
-                    <span className="text-accent font-medium">{pl.cohesionScore}% cohesion</span>
-                  </div>
-                </div>
+          <div className="rounded-2xl bg-surface-elevated border border-border/50 p-12 text-center">
+            <ListMusic className="w-10 h-10 text-muted-foreground mx-auto mb-4" />
+            <h2 className="font-heading text-xl mb-2">No playlists yet</h2>
+            <p className="text-sm text-muted-foreground max-w-sm mx-auto mb-6">
+              AI-generated playlists will appear here once Tempo analyzes your imported library. Head to Discover to start exploring.
+            </p>
+            <Button variant="hero" asChild>
+              <Link to="/discover">
+                <Sparkles className="w-4 h-4 mr-2" />
+                Open Discover
               </Link>
-            ))}
+            </Button>
           </div>
         )}
       </div>
