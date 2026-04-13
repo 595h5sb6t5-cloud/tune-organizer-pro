@@ -25,17 +25,12 @@ const moodData = [
 const Dashboard = () => {
   const { connections } = useConnections();
 
-  const connectedPlatforms: string[] = [];
-  if (connections.spotify.connected) connectedPlatforms.push("Spotify");
-  if (connections.apple.connected) connectedPlatforms.push("Apple Music");
-  const platformLabel = connectedPlatforms.length > 0 ? connectedPlatforms.join(" + ") : "None";
-  const platformChange = connectedPlatforms.length > 0 ? "Connected" : "Not connected";
-
   const stats = [
-    { label: "Imported Tracks", value: "1,247", icon: Music, change: "+38 this week" },
-    { label: "AI Playlists", value: "12", icon: Disc3, change: "4 synced" },
-    { label: "Avg Cohesion", value: "91%", icon: Activity, change: "+3% vs last gen" },
-    { label: "Platforms", value: platformLabel, icon: Headphones, change: platformChange },
+    { label: "Imported Tracks", value: "1,247", icon: Music, change: "+38 this week", ok: true },
+    { label: "AI Playlists", value: "12", icon: Disc3, change: "4 synced", ok: true },
+    { label: "Avg Cohesion", value: "91%", icon: Activity, change: "+3% vs last gen", ok: true },
+    { label: "Spotify", value: connections.spotify.connected ? "Connected" : "Off", icon: Headphones, change: connections.spotify.connected ? connections.spotify.email : "Not connected", ok: connections.spotify.connected },
+    { label: "Apple Music", value: connections.apple.connected ? "Connected" : "Off", icon: Headphones, change: connections.apple.connected ? connections.apple.email : "Not connected", ok: connections.apple.connected },
   ];
 
   return (
@@ -48,24 +43,23 @@ const Dashboard = () => {
         </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-4 gap-4 mb-8">
+        <div className="grid grid-cols-5 gap-3 mb-8">
           {stats.map((stat) => (
-            <div key={stat.label} className="p-5 rounded-2xl bg-surface-elevated border border-border/50">
-              <div className="flex items-center justify-between mb-3">
-                <stat.icon className="w-5 h-5 text-muted-foreground" />
-                {stat.label === "Platforms" && connectedPlatforms.length === 0 ? (
-                  <AlertCircle className="w-3.5 h-3.5 text-destructive" />
+            <div key={stat.label} className="p-4 rounded-2xl bg-surface-elevated border border-border/50">
+              <div className="flex items-center justify-between mb-2">
+                <stat.icon className="w-4 h-4 text-muted-foreground" />
+                {stat.ok ? (
+                  <TrendingUp className="w-3 h-3 text-accent" />
                 ) : (
-                  <TrendingUp className="w-3.5 h-3.5 text-accent" />
+                  <AlertCircle className="w-3 h-3 text-destructive" />
                 )}
               </div>
-              <p className="font-heading text-2xl mb-0.5">{stat.value}</p>
+              <p className="font-heading text-xl mb-0.5">{stat.value}</p>
               <p className="text-xs text-muted-foreground">{stat.label}</p>
-              <p className={`text-xs mt-1 ${stat.label === "Platforms" && connectedPlatforms.length === 0 ? "text-destructive" : "text-accent"}`}>{stat.change}</p>
+              <p className={`text-xs mt-1 truncate ${stat.ok ? "text-accent" : "text-destructive"}`}>{stat.change}</p>
             </div>
           ))}
         </div>
-
         <div className="grid grid-cols-3 gap-6 mb-8">
           {/* Genre distribution */}
           <div className="col-span-1 p-6 rounded-2xl bg-surface-elevated border border-border/50">
