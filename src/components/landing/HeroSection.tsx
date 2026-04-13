@@ -28,7 +28,7 @@ const HeroSection = () => {
 
           <div className="flex items-center justify-center gap-4 animate-fade-up" style={{ animationDelay: "0.3s" }}>
             <Button variant="hero" size="lg" className="rounded-xl px-8 h-12 text-base" asChild>
-              <Link to="/dashboard">
+              <Link to="/auth">
                 Start organizing
                 <ArrowRight className="w-4 h-4 ml-1" />
               </Link>

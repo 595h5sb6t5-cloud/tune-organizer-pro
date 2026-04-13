@@ -4,7 +4,9 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ConnectionProvider } from "./hooks/use-connections";
+import { AuthProvider } from "./hooks/use-auth";
 import Index from "./pages/Index.tsx";
+import Auth from "./pages/Auth.tsx";
 import Dashboard from "./pages/Dashboard.tsx";
 import Playlists from "./pages/Playlists.tsx";
 import PlaylistDetail from "./pages/PlaylistDetail.tsx";
@@ -18,6 +20,7 @@ const queryClient = new QueryClient();
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
+    <AuthProvider>
     <ConnectionProvider>
     <TooltipProvider>
       <Toaster />
@@ -25,6 +28,7 @@ const App = () => (
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Index />} />
+          <Route path="/auth" element={<Auth />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/playlists" element={<Playlists />} />
           <Route path="/playlists/:id" element={<PlaylistDetail />} />
@@ -37,6 +41,7 @@ const App = () => (
       </BrowserRouter>
     </TooltipProvider>
     </ConnectionProvider>
+    </AuthProvider>
   </QueryClientProvider>
 );
 
