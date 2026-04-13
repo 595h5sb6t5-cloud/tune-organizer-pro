@@ -18,6 +18,9 @@ export interface LikedSongCluster {
   cover_tracks: { image_url: string; track_name: string }[];
   sort_order: number;
   tracks: ClusterTrack[];
+  spotify_playlist_id: string | null;
+  spotify_exported_at: string | null;
+  spotify_playlist_url: string | null;
 }
 
 export interface ClusterTrack {
