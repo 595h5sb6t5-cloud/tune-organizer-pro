@@ -1,5 +1,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
+const EXACT_SPOTIFY_REDIRECT_URI = "https://159079dd-d99f-4e32-b626-b73b50d600ec.lovableproject.com/spotify-callback";
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
@@ -18,18 +20,28 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { code, code_verifier } = await req.json();
+    const { code, code_verifier, redirect_uri: requestedRedirectUri } = await req.json();
     if (!code || !code_verifier) {
       return json({ error: "Missing code or PKCE verifier." }, 400);
     }
 
-    const clientId = Deno.env.get("SPOTIFY_CLIENT_ID");
-    const clientSecret = Deno.env.get("SPOTIFY_CLIENT_SECRET");
-    const redirectUri = Deno.env.get("SPOTIFY_REDIRECT_URI");
+    const clientId = Deno.env.get("SPOTIFY_CLIENT_ID")?.trim();
+    const clientSecret = Deno.env.get("SPOTIFY_CLIENT_SECRET")?.trim();
+    const redirectUri = Deno.env.get("SPOTIFY_REDIRECT_URI")?.trim();
 
     if (!clientId || !clientSecret || !redirectUri) {
       return json({ error: "Spotify credentials are not fully configured." }, 500);
     }
+
+    if (redirectUri !== EXACT_SPOTIFY_REDIRECT_URI) {
+      return json({ error: `Spotify redirect URI mismatch. Expected ${EXACT_SPOTIFY_REDIRECT_URI} but got ${redirectUri}.` }, 500);
+    }
+
+    if (requestedRedirectUri && requestedRedirectUri !== redirectUri) {
+      return json({ error: `Spotify redirect URI mismatch. Expected ${redirectUri} but got ${requestedRedirectUri}.` }, 400);
+    }
+
+    console.info("[spotify-auth-callback] token_exchange_redirect_uri", redirectUri);
 
     const tokenRes = await fetch("https://accounts.spotify.com/api/token", {
       method: "POST",

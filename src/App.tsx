@@ -37,7 +37,6 @@ const App = () => (
           <Route path="/history" element={<RecommendationHistory />} />
           <Route path="/sync" element={<Sync />} />
           <Route path="/settings" element={<Settings />} />
-          <Route path="/auth/spotify/callback" element={<SpotifyCallback />} />
           <Route path="/spotify-callback" element={<SpotifyCallback />} />
           <Route path="*" element={<NotFound />} />
         </Routes>

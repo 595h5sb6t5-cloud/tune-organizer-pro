@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "./use-auth";
 
 const SPOTIFY_AUTH_URL = "https://accounts.spotify.com/authorize";
+const EXACT_SPOTIFY_REDIRECT_URI = "https://159079dd-d99f-4e32-b626-b73b50d600ec.lovableproject.com/spotify-callback";
 const SCOPES = "user-library-read playlist-modify-private playlist-modify-public";
 
 const SPOTIFY_OAUTH_DONE_KEY = "spotify-oauth-complete";
@@ -15,6 +16,7 @@ const SPOTIFY_RETURN_PATH_KEY = "spotify-return-path";
 type SpotifyConfig = {
   client_id?: string | null;
   redirect_uri?: string | null;
+  error?: string | null;
 };
 
 function generateRandomString(length: number) {
@@ -40,6 +42,10 @@ function clearTransientSpotifyKeys() {
   localStorage.removeItem(SPOTIFY_PKCE_VERIFIER_KEY);
   localStorage.removeItem(SPOTIFY_PKCE_STATE_KEY);
   localStorage.removeItem(SPOTIFY_REDIRECT_URI_KEY);
+}
+
+function logSpotifyOAuth(step: string, details: Record<string, unknown>) {
+  console.info(`[Spotify OAuth] ${step}`, details);
 }
 
 export type SpotifyStatus =
@@ -123,6 +129,7 @@ export function useSpotify() {
     setError(null);
     localStorage.removeItem(SPOTIFY_OAUTH_DONE_KEY);
     localStorage.removeItem(SPOTIFY_OAUTH_ERROR_KEY);
+    localStorage.removeItem(SPOTIFY_REDIRECT_URI_KEY);
 
     try {
       const configRes = await supabase.functions.invoke("spotify-config");
@@ -130,17 +137,26 @@ export function useSpotify() {
       const clientId = config.client_id?.trim();
       const redirectUri = config.redirect_uri?.trim();
 
-      if (configRes.error) {
-        throw new Error(configRes.error.message || "Unable to load Spotify configuration.");
+      if (configRes.error || config.error) {
+        throw new Error(config.error || configRes.error?.message || "Unable to load Spotify configuration.");
       }
 
-      if (!clientId || !redirectUri) {
-        throw new Error("Spotify is not fully configured. Missing client ID or redirect URI.");
+      if (!clientId) {
+        throw new Error("Spotify is not fully configured. Missing client ID.");
       }
 
-      const redirectUrl = new URL(redirectUri);
-      if (redirectUrl.origin !== window.location.origin) {
-        throw new Error(`Spotify is configured for ${redirectUrl.origin}. Open the app on that exact URL to connect your account.`);
+      if (redirectUri !== EXACT_SPOTIFY_REDIRECT_URI) {
+        throw new Error(`Spotify redirect URI mismatch. Expected ${EXACT_SPOTIFY_REDIRECT_URI} but got ${redirectUri || "empty"}.`);
+      }
+
+      const redirectOrigin = new URL(redirectUri).origin;
+      if (redirectOrigin !== window.location.origin) {
+        logSpotifyOAuth("origin_mismatch", {
+          current_origin: window.location.origin,
+          redirect_origin: redirectOrigin,
+          redirect_uri: EXACT_SPOTIFY_REDIRECT_URI,
+        });
+        throw new Error(`Spotify OAuth is locked to ${redirectOrigin}. Open the app on that exact URL to connect Spotify.`);
       }
 
       const state = generateRandomString(24);
@@ -150,13 +166,12 @@ export function useSpotify() {
 
       localStorage.setItem(SPOTIFY_PKCE_VERIFIER_KEY, codeVerifier);
       localStorage.setItem(SPOTIFY_PKCE_STATE_KEY, state);
-      localStorage.setItem(SPOTIFY_REDIRECT_URI_KEY, redirectUri);
       localStorage.setItem(SPOTIFY_RETURN_PATH_KEY, returnPath);
 
       const params = new URLSearchParams({
         response_type: "code",
         client_id: clientId,
-        redirect_uri: redirectUri,
+        redirect_uri: EXACT_SPOTIFY_REDIRECT_URI,
         scope: SCOPES,
         code_challenge_method: "S256",
         code_challenge: codeChallenge,
@@ -164,12 +179,20 @@ export function useSpotify() {
       });
 
       const authUrl = `${SPOTIFY_AUTH_URL}?${params.toString()}`;
+      logSpotifyOAuth("authorization_request", {
+        redirect_uri: EXACT_SPOTIFY_REDIRECT_URI,
+        authorization_url: authUrl,
+      });
       setStatus("authorizing");
 
       if (window.self !== window.top) {
         const popup = window.open(authUrl, "spotify-auth", "popup=yes,width=520,height=760");
 
         if (!popup) {
+          logSpotifyOAuth("popup_blocked_fallback", {
+            redirect_uri: EXACT_SPOTIFY_REDIRECT_URI,
+            authorization_url: authUrl,
+          });
           window.open(authUrl, "_blank");
           return;
         }
@@ -219,8 +242,13 @@ export function useSpotify() {
         throw new Error("Your session expired before Spotify could connect. Please log in again and retry.");
       }
 
+      logSpotifyOAuth("token_exchange_request", {
+        redirect_uri: EXACT_SPOTIFY_REDIRECT_URI,
+        has_code: Boolean(code),
+      });
+
       const res = await supabase.functions.invoke("spotify-auth-callback", {
-        body: { code, code_verifier: codeVerifier },
+        body: { code, code_verifier: codeVerifier, redirect_uri: EXACT_SPOTIFY_REDIRECT_URI },
       });
 
       if (res.error || res.data?.error) {
