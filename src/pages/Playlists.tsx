@@ -240,6 +240,7 @@ const Playlists = () => {
             </p>
           </div>
           <div className="flex items-center gap-2">
+            <CreatePlaylistDialog onPlaylistCreated={refresh} />
             {hasAnalyzed && (
               <Button variant="outline" size="sm" className="rounded-lg gap-1 text-xs" onClick={handleRebuildAll} disabled={analyzing}>
                 {analyzing ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Rebuilding…</> : <><RefreshCw className="w-3.5 h-3.5" /> Rebuild All</>}
