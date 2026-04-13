@@ -20,6 +20,7 @@ serve(async (req) => {
     const {
       allPlaylists,
       allTracks,
+      knownSongs = [],
       discoveryMode = "balanced",
       acceptedSongs = [],
       dismissedSongs = [],
