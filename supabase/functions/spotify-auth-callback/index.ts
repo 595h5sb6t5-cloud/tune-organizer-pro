@@ -201,14 +201,9 @@ Deno.serve(async (req) => {
       });
     }
 
-    if (statePayload.redirect_uri !== redirectUri) {
-      return fail(step, "Spotify redirect URI inside authorization state does not match the configured callback.", 400, {
-        diagnostics: {
-          state_redirect_uri: statePayload.redirect_uri,
-          configured_redirect_uri: redirectUri,
-        },
-      });
-    }
+    // Use the redirect_uri from the signed state — it was set during auth-start
+    // and must match what Spotify received in the authorization request
+    const redirectUri = statePayload.redirect_uri;
 
     step = "token_exchange";
     const tokenRes = await fetch("https://accounts.spotify.com/api/token", {
