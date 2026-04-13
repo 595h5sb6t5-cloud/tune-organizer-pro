@@ -73,6 +73,7 @@ const Auth = () => {
     if (user && profile?.onboarding_completed) {
       const hasPending = localStorage.getItem(SPOTIFY_PENDING_CALLBACK_KEY);
       if (!hasPending) {
+        // If Spotify not connected, still go to dashboard (it shows connect prompt)
         navigate("/dashboard", { replace: true });
       }
     }
