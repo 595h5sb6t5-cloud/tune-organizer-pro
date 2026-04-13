@@ -28,6 +28,8 @@ const Playlists = () => {
     syncing,
     syncPhase,
     lastSyncResult,
+    lastSyncedLabel,
+    syncMeta,
     resync,
   } = useSpotifyLibrary();
 
