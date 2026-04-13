@@ -162,6 +162,11 @@ async function fetchAudioFeatures(trackIds: string[], token: string): Promise<Ma
         if (feat && feat.id) featureMap.set(feat.id, feat);
       }
     } catch (e) {
+      // Audio features API returns 403 for apps without the scope — skip gracefully
+      if (e instanceof SpotifyImportError && e.status === 403) {
+        console.warn("[spotify-import-tracks] audio features API returned 403 — skipping (likely deprecated for this app)");
+        return featureMap; // stop trying further batches
+      }
       console.warn("[spotify-import-tracks] audio features batch failed:", e);
     }
   }
