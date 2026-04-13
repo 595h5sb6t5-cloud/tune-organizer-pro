@@ -149,17 +149,14 @@ Deno.serve(async (req) => {
     step = "runtime_config";
     const clientId = Deno.env.get("SPOTIFY_CLIENT_ID")?.trim();
     const clientSecret = Deno.env.get("SPOTIFY_CLIENT_SECRET")?.trim();
-    const redirectUri = Deno.env.get("SPOTIFY_REDIRECT_URI")?.trim();
     const signingSecret = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")?.trim() || Deno.env.get("LOVABLE_API_KEY")?.trim();
     const runtimeDiagnostics = {
       has_client_id: Boolean(clientId),
       has_client_secret: Boolean(clientSecret),
-      has_redirect_uri: Boolean(redirectUri),
       has_signing_secret: Boolean(signingSecret),
-      configured_redirect_uri: redirectUri ?? null,
     };
 
-    if (!clientId || !clientSecret || !redirectUri || !signingSecret) {
+    if (!clientId || !clientSecret || !signingSecret) {
       return fail(step, "Spotify credentials are not fully configured.", 500, {
         diagnostics: runtimeDiagnostics,
       });
