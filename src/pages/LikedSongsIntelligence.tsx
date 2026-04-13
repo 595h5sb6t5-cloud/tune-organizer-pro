@@ -32,6 +32,14 @@ const LikedSongsIntelligence = () => {
     }
   };
 
+  const handleRebuildAll = async () => {
+    toast.info("Deep rebuild started…", { description: "Re-analyzing every track with the improved system. This may take several minutes." });
+    await runAnalysis({ forceRetag: true });
+    if (!error) {
+      toast.success("Rebuild complete!", { description: `Rebuilt ${clusters.length} playlists with deep sonic analysis.` });
+    }
+  };
+
   if (!spotifyConnected) {
     return (
       <AppLayout>
