@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/use-auth";
 import { useSpotify } from "@/hooks/use-spotify";
@@ -11,24 +11,28 @@ import { Music, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 
 const Auth = () => {
-  const { user, profile, signUp, signIn, updateProfile } = useAuth();
+  const { user, profile, updateProfile } = useAuth();
   const navigate = useNavigate();
   const [step, setStep] = useState<"auth" | "connect">("auth");
 
-  // If user is already logged in and onboarded, redirect
-  if (user && profile?.onboarding_completed) {
-    navigate("/dashboard", { replace: true });
-    return null;
-  }
+  useEffect(() => {
+    if (user && profile?.onboarding_completed) {
+      navigate("/dashboard", { replace: true });
+    }
+  }, [user, profile?.onboarding_completed, navigate]);
 
-  // If user just signed up, show connect step
-  if (user && profile && !profile.onboarding_completed && step === "auth") {
-    setStep("connect");
+  useEffect(() => {
+    if (user && profile && !profile.onboarding_completed) {
+      setStep((current) => (current === "auth" ? "connect" : current));
+    }
+  }, [user, profile]);
+
+  if (user && profile?.onboarding_completed) {
+    return null;
   }
 
   return (
     <div className="min-h-screen bg-background flex flex-col items-center justify-center px-4">
-      {/* Branding */}
       <div className="text-center mb-8">
         <div className="flex items-center justify-center gap-2 mb-3">
           <Music className="h-8 w-8 text-accent" />
@@ -43,8 +47,8 @@ const Auth = () => {
         <AuthCard onSuccess={() => setStep("connect")} />
       ) : (
         <ConnectCard
-          onComplete={() => {
-            updateProfile({ onboarding_completed: true });
+          onComplete={async () => {
+            await updateProfile({ onboarding_completed: true });
             navigate("/dashboard");
           }}
         />
@@ -57,10 +61,7 @@ const Auth = () => {
   );
 };
 
-/* ─── Auth Card ─── */
-
 function AuthCard({ onSuccess }: { onSuccess: () => void }) {
-  const { signUp, signIn } = useAuth();
   const [tab, setTab] = useState("login");
 
   return (
@@ -83,8 +84,6 @@ function AuthCard({ onSuccess }: { onSuccess: () => void }) {
   );
 }
 
-/* ─── Login Form ─── */
-
 function LoginForm({ onSuccess }: { onSuccess: () => void }) {
   const { signIn } = useAuth();
   const [contact, setContact] = useState("");
@@ -97,11 +96,13 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+
     if (!contact.trim()) return setError("Email or phone number is required.");
     if (!password) return setError("Password is required.");
 
     setLoading(true);
-    const params: any = { password };
+    const params: { password: string; email?: string; phone?: string } = { password };
+
     if (isEmail) params.email = contact.trim();
     else params.phone = contact.trim();
 
@@ -110,10 +111,11 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }) {
 
     if (err) {
       setError(err);
-    } else {
-      toast({ title: "Welcome back!" });
-      onSuccess();
+      return;
     }
+
+    toast({ title: "Welcome back!" });
+    onSuccess();
   };
 
   return (
@@ -152,8 +154,6 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }) {
   );
 }
 
-/* ─── Sign Up Form ─── */
-
 function SignUpForm({ onSuccess }: { onSuccess: () => void }) {
   const { signUp } = useAuth();
   const [firstName, setFirstName] = useState("");
@@ -182,11 +182,12 @@ function SignUpForm({ onSuccess }: { onSuccess: () => void }) {
     if (password.length < 6) return setError("Password must be at least 6 characters.");
 
     setLoading(true);
-    const params: any = {
+    const params: { password: string; firstName: string; lastName: string; email?: string; phone?: string } = {
       password,
       firstName: firstName.trim(),
       lastName: lastName.trim(),
     };
+
     if (isEmail) params.email = contact.trim();
     else params.phone = contact.trim();
 
@@ -195,12 +196,16 @@ function SignUpForm({ onSuccess }: { onSuccess: () => void }) {
 
     if (err) {
       setError(err);
-    } else if (isEmail) {
-      setSuccess(true);
-    } else {
-      toast({ title: "Account created!" });
-      onSuccess();
+      return;
     }
+
+    if (isEmail) {
+      setSuccess(true);
+      return;
+    }
+
+    toast({ title: "Account created!" });
+    onSuccess();
   };
 
   if (success) {
@@ -278,15 +283,13 @@ function SignUpForm({ onSuccess }: { onSuccess: () => void }) {
   );
 }
 
-/* ─── Connect Card (Onboarding Step 2) ─── */
-
-function ConnectCard({ onComplete }: { onComplete: () => void }) {
+function ConnectCard({ onComplete }: { onComplete: () => void | Promise<void> }) {
   const { updateProfile, profile } = useAuth();
   const { startAuth: startSpotify, status: spotifyStatus } = useSpotify();
   const [connectingApple, setConnectingApple] = useState(false);
   const [appleDone, setAppleDone] = useState(false);
 
-  const spotifyDone = profile?.spotify_connected || false;
+  const spotifyDone = profile?.spotify_connected || spotifyStatus === "done";
 
   const handleSpotify = async () => {
     sessionStorage.setItem("spotify_return_path", "/auth");
@@ -324,7 +327,7 @@ function ConnectCard({ onComplete }: { onComplete: () => void }) {
             ) : spotifyDone ? (
               <CheckCircle2 className="h-5 w-5 text-accent" />
             ) : (
-              <div className="h-5 w-5 rounded-full bg-[hsl(141,73%,42%)]" />
+              <div className="h-5 w-5 rounded-full bg-accent" />
             )}
             <span className="flex-1 text-left">
               {spotifyDone ? "Spotify Connected" : "Continue with Spotify"}

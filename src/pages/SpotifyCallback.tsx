@@ -5,6 +5,9 @@ import { Loader2, CheckCircle2, AlertCircle, Music } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 
+const SPOTIFY_OAUTH_DONE_KEY = "spotify-oauth-complete";
+const SPOTIFY_OAUTH_ERROR_KEY = "spotify-oauth-error";
+
 const SpotifyCallback = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -14,11 +17,32 @@ const SpotifyCallback = () => {
   const authError = searchParams.get("error");
 
   useEffect(() => {
-    if (authError) return;
-    if (code && status === "idle") {
-      handleCallback(code);
+    if (authError || !code || status !== "idle") return;
+    handleCallback(code);
+  }, [authError, code, status, handleCallback]);
+
+  useEffect(() => {
+    if (status !== "done") return;
+
+    const payload = JSON.stringify({ importCount, completedAt: Date.now() });
+    localStorage.setItem(SPOTIFY_OAUTH_DONE_KEY, payload);
+
+    if (window.opener && !window.opener.closed) {
+      window.opener.postMessage({ type: SPOTIFY_OAUTH_DONE_KEY, importCount }, window.location.origin);
+      window.close();
     }
-  }, [code, authError, status, handleCallback]);
+  }, [status, importCount]);
+
+  useEffect(() => {
+    const message = authError || error;
+    if (!message) return;
+
+    localStorage.setItem(SPOTIFY_OAUTH_ERROR_KEY, JSON.stringify({ message, failedAt: Date.now() }));
+
+    if (window.opener && !window.opener.closed) {
+      window.opener.postMessage({ type: SPOTIFY_OAUTH_ERROR_KEY, message }, window.location.origin);
+    }
+  }, [authError, error]);
 
   const returnPath = sessionStorage.getItem("spotify_return_path") || "/settings";
 
