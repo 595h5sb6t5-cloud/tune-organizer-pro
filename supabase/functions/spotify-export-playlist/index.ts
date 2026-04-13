@@ -147,12 +147,14 @@ Deno.serve(async (req) => {
 
     const spotifyUrl = `https://open.spotify.com/playlist/${spotifyPlaylistId}`;
 
-    // Update cluster with Spotify info
-    await supabase.from("liked_song_clusters").update({
-      spotify_playlist_id: spotifyPlaylistId,
-      spotify_exported_at: new Date().toISOString(),
-      spotify_playlist_url: spotifyUrl,
-    }).eq("id", cluster_id).eq("user_id", user.id);
+    // Update cluster with Spotify info (only if cluster_id was provided)
+    if (cluster_id) {
+      await supabase.from("liked_song_clusters").update({
+        spotify_playlist_id: spotifyPlaylistId,
+        spotify_exported_at: new Date().toISOString(),
+        spotify_playlist_url: spotifyUrl,
+      }).eq("id", cluster_id).eq("user_id", user.id);
+    }
 
     return new Response(JSON.stringify({
       success: true,
