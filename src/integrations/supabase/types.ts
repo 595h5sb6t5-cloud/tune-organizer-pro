@@ -182,14 +182,23 @@ export type Database = {
           energy: string | null
           era: string | null
           genre_tags: string[] | null
+          groove_feel: string | null
           id: string
           image_url: string | null
+          intimacy_scale: string | null
+          listening_context: string | null
           mood: string | null
           production_style: string | null
+          rhythmic_identity: string | null
+          sonic_brightness: string | null
+          sonic_texture: string | null
+          spatial_quality: string | null
           spotify_track_id: string
           tempo_estimate: string | null
+          tension_level: string | null
           track_name: string
           user_id: string
+          vocal_style: string | null
         }
         Insert: {
           added_at?: string | null
@@ -214,14 +223,23 @@ export type Database = {
           energy?: string | null
           era?: string | null
           genre_tags?: string[] | null
+          groove_feel?: string | null
           id?: string
           image_url?: string | null
+          intimacy_scale?: string | null
+          listening_context?: string | null
           mood?: string | null
           production_style?: string | null
+          rhythmic_identity?: string | null
+          sonic_brightness?: string | null
+          sonic_texture?: string | null
+          spatial_quality?: string | null
           spotify_track_id: string
           tempo_estimate?: string | null
+          tension_level?: string | null
           track_name: string
           user_id: string
+          vocal_style?: string | null
         }
         Update: {
           added_at?: string | null
@@ -246,14 +264,23 @@ export type Database = {
           energy?: string | null
           era?: string | null
           genre_tags?: string[] | null
+          groove_feel?: string | null
           id?: string
           image_url?: string | null
+          intimacy_scale?: string | null
+          listening_context?: string | null
           mood?: string | null
           production_style?: string | null
+          rhythmic_identity?: string | null
+          sonic_brightness?: string | null
+          sonic_texture?: string | null
+          spatial_quality?: string | null
           spotify_track_id?: string
           tempo_estimate?: string | null
+          tension_level?: string | null
           track_name?: string
           user_id?: string
+          vocal_style?: string | null
         }
         Relationships: []
       }

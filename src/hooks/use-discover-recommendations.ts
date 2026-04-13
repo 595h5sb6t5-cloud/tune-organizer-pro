@@ -28,7 +28,7 @@ export function useDiscoverRecommendations() {
         historyRes, clustersRes, vibeRes, tasteRes,
       ] = await Promise.all([
         supabase.from("imported_tracks").select("track_name, artist_name, album_name").eq("user_id", user.id),
-        supabase.from("liked_songs").select("track_name, artist_name, album_name, genre_tags, mood, atmosphere, energy, production_style, era, audio_tempo, audio_energy, audio_valence, audio_danceability, audio_acousticness, audio_instrumentalness, audio_speechiness, audio_loudness").eq("user_id", user.id),
+        supabase.from("liked_songs").select("track_name, artist_name, album_name, genre_tags, mood, atmosphere, energy, production_style, era, audio_tempo, audio_energy, audio_valence, audio_danceability, audio_acousticness, audio_instrumentalness, audio_speechiness, audio_loudness, groove_feel, vocal_style, sonic_brightness, spatial_quality, rhythmic_identity, listening_context, sonic_texture, intimacy_scale, tension_level").eq("user_id", user.id),
         supabase.from("spotify_playlists").select("spotify_playlist_id, name, description, track_count").eq("user_id", user.id),
         supabase.from("spotify_playlist_tracks").select("track_name, artist_name").eq("user_id", user.id).limit(1000),
         supabase.from("recommendation_history").select("track_title, track_artist, status").eq("user_id", user.id),
@@ -80,13 +80,19 @@ export function useDiscoverRecommendations() {
         ],
       } : null;
 
-      // Aggregate mood/genre/atmosphere from liked songs
+      // Aggregate mood/genre/atmosphere + deep tags from liked songs
       const moodCounts: Record<string, number> = {};
       const atmosphereCounts: Record<string, number> = {};
       const prodStyleCounts: Record<string, number> = {};
       const eraCounts: Record<string, number> = {};
       const genreTagCounts: Record<string, number> = {};
       const artistCounts: Record<string, number> = {};
+      const grooveFeelCounts: Record<string, number> = {};
+      const vocalStyleCounts: Record<string, number> = {};
+      const sonicBrightnessCounts: Record<string, number> = {};
+      const spatialQualityCounts: Record<string, number> = {};
+      const rhythmicIdentityCounts: Record<string, number> = {};
+      const sonicTextureCounts: Record<string, number> = {};
 
       for (const s of likedSongs) {
         if (s.mood) moodCounts[s.mood] = (moodCounts[s.mood] || 0) + 1;
@@ -95,6 +101,14 @@ export function useDiscoverRecommendations() {
         if (s.era) eraCounts[s.era] = (eraCounts[s.era] || 0) + 1;
         artistCounts[s.artist_name] = (artistCounts[s.artist_name] || 0) + 1;
         for (const g of s.genre_tags || []) genreTagCounts[g] = (genreTagCounts[g] || 0) + 1;
+        // Deep tags
+        const sa = s as any;
+        if (sa.groove_feel) grooveFeelCounts[sa.groove_feel] = (grooveFeelCounts[sa.groove_feel] || 0) + 1;
+        if (sa.vocal_style) vocalStyleCounts[sa.vocal_style] = (vocalStyleCounts[sa.vocal_style] || 0) + 1;
+        if (sa.sonic_brightness) sonicBrightnessCounts[sa.sonic_brightness] = (sonicBrightnessCounts[sa.sonic_brightness] || 0) + 1;
+        if (sa.spatial_quality) spatialQualityCounts[sa.spatial_quality] = (spatialQualityCounts[sa.spatial_quality] || 0) + 1;
+        if (sa.rhythmic_identity) rhythmicIdentityCounts[sa.rhythmic_identity] = (rhythmicIdentityCounts[sa.rhythmic_identity] || 0) + 1;
+        if (sa.sonic_texture) sonicTextureCounts[sa.sonic_texture] = (sonicTextureCounts[sa.sonic_texture] || 0) + 1;
       }
       for (const t of importedTracks) {
         artistCounts[t.artist_name] = (artistCounts[t.artist_name] || 0) + 1;
@@ -129,6 +143,12 @@ export function useDiscoverRecommendations() {
             topProductionStyles: topN(prodStyleCounts, 5),
             topEras: topN(eraCounts, 4),
             topArtists: topN(artistCounts, 15),
+            topGrooveFeels: topN(grooveFeelCounts, 6),
+            topVocalStyles: topN(vocalStyleCounts, 5),
+            topSonicBrightness: topN(sonicBrightnessCounts, 3),
+            topSpatialQualities: topN(spatialQualityCounts, 5),
+            topRhythmicIdentities: topN(rhythmicIdentityCounts, 5),
+            topSonicTextures: topN(sonicTextureCounts, 5),
           },
           clusters: (clustersRes.data ?? []).map(c => ({
             name: c.name,
@@ -166,6 +186,15 @@ export function useDiscoverRecommendations() {
             valence: s.audio_valence,
             danceability: s.audio_danceability,
             acousticness: s.audio_acousticness,
+            grooveFeel: (s as any).groove_feel,
+            vocalStyle: (s as any).vocal_style,
+            sonicBrightness: (s as any).sonic_brightness,
+            spatialQuality: (s as any).spatial_quality,
+            rhythmicIdentity: (s as any).rhythmic_identity,
+            listeningContext: (s as any).listening_context,
+            sonicTexture: (s as any).sonic_texture,
+            intimacyScale: (s as any).intimacy_scale,
+            tensionLevel: (s as any).tension_level,
           })),
         },
       });

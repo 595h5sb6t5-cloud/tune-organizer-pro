@@ -208,7 +208,15 @@ INTERPRETATION: ${audioProfile.avgEnergy > 0.65 ? "High-energy listener" : audio
 - Top atmospheres: ${tasteSignals.topAtmospheres?.join(", ") || "unknown"}
 - Production styles: ${tasteSignals.topProductionStyles?.join(", ") || "unknown"}
 - Preferred eras: ${tasteSignals.topEras?.join(", ") || "mixed"}
-- Most listened artists: ${tasteSignals.topArtists?.join(", ") || "unknown"}`;
+- Most listened artists: ${tasteSignals.topArtists?.join(", ") || "unknown"}
+
+DEEP SONIC IDENTITY:
+- Top groove feels: ${tasteSignals.topGrooveFeels?.join(", ") || "not analyzed yet"}
+- Top vocal styles: ${tasteSignals.topVocalStyles?.join(", ") || "not analyzed yet"}
+- Sonic brightness preference: ${tasteSignals.topSonicBrightness?.join(", ") || "not analyzed yet"}
+- Spatial quality preference: ${tasteSignals.topSpatialQualities?.join(", ") || "not analyzed yet"}
+- Rhythmic identity: ${tasteSignals.topRhythmicIdentities?.join(", ") || "not analyzed yet"}
+- Sonic textures: ${tasteSignals.topSonicTextures?.join(", ") || "not analyzed yet"}`;
     }
 
     let clusterSection = "";
@@ -225,12 +233,21 @@ ${playlistVibes.map((v: any) => `- Primary: "${v.primaryVibe}" | Mood: ${v.moodS
 
     let sampleSection = "";
     if (sampleTracks.length > 0) {
-      sampleSection = `\nSAMPLE TRACKS FROM LIBRARY (with audio features):
+      sampleSection = `\nSAMPLE TRACKS FROM LIBRARY (with audio features + deep sonic analysis):
 ${sampleTracks.slice(0, 25).map((t: any) => {
   const parts = [`"${t.title}" by ${t.artist}`];
-  if (t.mood) parts.push(`mood:${t.mood}`);
-  if (t.atmosphere) parts.push(`atm:${t.atmosphere}`);
-  if (t.production) parts.push(`prod:${t.production}`);
+  if (t.mood) parts.push(`mood:"${t.mood}"`);
+  if (t.grooveFeel) parts.push(`groove:"${t.grooveFeel}"`);
+  if (t.sonicBrightness) parts.push(`brightness:${t.sonicBrightness}`);
+  if (t.spatialQuality) parts.push(`space:"${t.spatialQuality}"`);
+  if (t.rhythmicIdentity) parts.push(`rhythm:"${t.rhythmicIdentity}"`);
+  if (t.production) parts.push(`prod:"${t.production}"`);
+  if (t.vocalStyle) parts.push(`vocal:"${t.vocalStyle}"`);
+  if (t.sonicTexture) parts.push(`texture:"${t.sonicTexture}"`);
+  if (t.atmosphere) parts.push(`atm:"${t.atmosphere}"`);
+  if (t.listeningContext) parts.push(`context:"${t.listeningContext}"`);
+  if (t.intimacyScale) parts.push(`scale:"${t.intimacyScale}"`);
+  if (t.tensionLevel) parts.push(`tension:"${t.tensionLevel}"`);
   if (t.tempo) parts.push(`${t.tempo}BPM`);
   if (t.audioEnergy != null) parts.push(`E:${t.audioEnergy}`);
   if (t.valence != null) parts.push(`V:${t.valence}`);
@@ -272,56 +289,66 @@ ${dismissedHistory.map((s: any) => `- "${s.title}" by ${s.artist}`).join("\n")}`
 
     const systemPrompt = `You are Tempo's elite discovery AI — a deeply musical curator who has internalized this listener's entire sonic identity.
 
-YOUR CORE MISSION: Surface songs the user has NEVER heard that feel like they were made for them. Every recommendation must pass strict multi-dimensional compatibility checks.
+YOUR CORE MISSION: Surface songs the user has NEVER heard that feel like they were made for them. Every recommendation must pass strict multi-dimensional SONIC WORLD compatibility checks.
 
+═══════════════════════════════════════════════════════
 CRITICAL RULES:
+═══════════════════════════════════════════════════════
 1. NEVER recommend any song from the exclusion list — these are songs the user already knows
 2. NEVER recommend based on streaming popularity or chart position
 3. NEVER recommend more than 1 song per artist across ALL categories
-4. NEVER use generic explanations — every insight must reference concrete audio characteristics
+4. NEVER use generic explanations — every insight must reference concrete sonic qualities
 5. Prefer album tracks over singles, B-sides over hits, deep catalog over greatest hits
 6. Each recommendation must feel intentional and personally curated, not algorithmic
 7. Maintain diversity: vary tempo, energy, mood, and era across recommendations
 8. At least 40% of recommendations should be "deep-cut" popularity tier
 
-STRICT COMPATIBILITY REQUIREMENTS — every recommendation must pass MOST of these:
-1. Mood & emotional tone — same shade of emotion as the user's taste profile
-2. Atmosphere & sonic texture — compatible sonic world
-3. Production style — compatible production school
-4. Tempo & rhythm — within the user's preferred BPM range and rhythmic feel
-5. Energy profile — within the user's preferred energy range
-6. Instrumentation — compatible instrument families
-7. Vocal style — compatible vocal character
-8. Darkness vs brightness — aligned with user preference
-9. Transition compatibility — would flow in a playlist with the user's music
+═══════════════════════════════════════════════════════
+SONIC WORLD COMPATIBILITY (PRIMARY — not genre/BPM):
+═══════════════════════════════════════════════════════
+Every recommendation must share the same SONIC WORLD as the user's taste. This means:
+1. **Groove & rhythmic feel** — Same groove pocket, swing character, rhythmic density. NOT just similar BPM.
+2. **Production identity** — Same production philosophy (lo-fi/hi-fi, analog/digital, warm/cold, raw/polished)
+3. **Sonic texture & brightness** — Same tonal palette (dark/bright, warm/cold, gritty/clean)
+4. **Spatial quality** — Same spatial scale (intimate/wide, close/reverberant, dense/sparse)
+5. **Mood & emotional shade** — Same SPECIFIC emotional tone, not broad categories
+6. **Vocal texture** — Compatible vocal delivery and treatment
+7. **Tension behavior** — Similar tension/release patterns
+8. **Atmosphere** — Same environmental/spatial feeling
+9. **Listening context** — Would work in the same listening moment
 
+Genre and BPM are WEAK supporting signals — they must NEVER override sonic world compatibility.
+
+═══════════════════════════════════════════════════════
 LANGUAGE RULES — CRITICAL:
+═══════════════════════════════════════════════════════
 - Analyze the user's library to detect their primary listening language(s).
 - If the user primarily listens in English, recommend English songs by default.
 - If the user primarily listens in Spanish, recommend Spanish songs by default.
-- Do NOT casually mix Spanish and English recommendations unless the user's library is already multilingual.
-- For the "perfect-for-your-playlists" category, MATCH the language of the target playlist.
-- Language mismatches make recommendations feel wrong — treat language as a strong compatibility signal.
-- For "try-something-different", you may cross languages only if it genuinely serves discovery and the vibe is compelling.
+- Do NOT casually mix languages unless the user's library is already multilingual.
+- For "perfect-for-your-playlists", MATCH the language of the target playlist.
+- For "try-something-different", you may cross languages only if the sonic world is compelling.
 
+═══════════════════════════════════════════════════════
 DISCOVERY MODE: "${discoveryMode}" — ${modeInstructions[discoveryMode] || modeInstructions.balanced}
+═══════════════════════════════════════════════════════
 
 COMPATIBILITY SCORING WEIGHTS:
-- Sonic texture & production similarity: 20%
-- Mood / emotional tone alignment: 20%
-- Tempo & rhythm compatibility: 15%
-- Energy level fit: 15%
+- Groove & rhythmic feel: 20%
+- Production identity & sonic texture: 20%
+- Mood & emotional tone alignment: 20%
+- Spatial quality & atmosphere: 10%
+- Energy & tension behavior: 10%
 - Language compatibility: 10%
-- Genre proximity (subgenre level): 5%
-- Artist network / scene adjacency: 5%
 - Novelty bonus (how fresh/unknown): 10%
+- Genre proximity: 0% (genre is NOT scored — it's a byproduct of sonic compatibility)
 
 EXPLANATION QUALITY:
 Each aiExplanation must be 2-3 sentences that reference SPECIFIC musical qualities:
-- Name exact BPM ranges, energy levels, production techniques
-- Reference specific moods, textures, vocal qualities
+- Name groove feel, production techniques, spatial qualities, vocal textures
+- Reference specific moods, atmospheres, sonic worlds
 - Connect to the user's actual listening patterns
-- NEVER say "fits your vibe" or "matches your taste" without specifics`;
+- NEVER say "fits your vibe" or "matches your taste" without naming the exact sonic dimension`;
 
     const userPrompt = `USER'S COMPLETE TASTE PROFILE:
 
@@ -391,15 +418,15 @@ IMPORTANT: You MUST call the save_recommendations function with your results. Do
                           compatibilityBreakdown: {
                             type: "object",
                             properties: {
-                              mood: { type: "integer" },
-                              tempo: { type: "integer" },
-                              energy: { type: "integer" },
-                              genre: { type: "integer" },
-                              production: { type: "integer" },
-                              rhythm: { type: "integer" },
-                              novelty: { type: "integer" },
+                              mood: { type: "integer", description: "Emotional tone alignment 0-100" },
+                              groove: { type: "integer", description: "Rhythmic feel & groove compatibility 0-100" },
+                              energy: { type: "integer", description: "Energy & tension behavior fit 0-100" },
+                              production: { type: "integer", description: "Production identity & sonic texture 0-100" },
+                              atmosphere: { type: "integer", description: "Spatial quality & atmosphere 0-100" },
+                              rhythm: { type: "integer", description: "Rhythmic identity compatibility 0-100" },
+                              novelty: { type: "integer", description: "How fresh/unknown this pick is 0-100" },
                             },
-                            required: ["mood", "tempo", "energy", "genre", "production", "rhythm", "novelty"],
+                            required: ["mood", "groove", "energy", "production", "atmosphere", "rhythm", "novelty"],
                           },
                         },
                         required: ["title", "artist", "album", "matchScore", "reason", "aiExplanation", "moodTags", "popularityTier", "compatibilityBreakdown"],
