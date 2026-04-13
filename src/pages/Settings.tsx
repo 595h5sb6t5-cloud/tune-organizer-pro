@@ -9,6 +9,8 @@ import { useState } from "react";
 
 const Settings = () => {
   const { connections, connectSpotify, disconnectSpotify, connectApple, disconnectApple, connectingSpotify, connectingApple } = useConnections();
+  const { startAuth: startSpotifyAuth, disconnect: disconnectSpotifyReal, status: spotifyAuthStatus } = useSpotify();
+  const { profile } = useAuth();
   const [overlapMode, setOverlapMode] = useState(false);
   const [excludeExplicit, setExcludeExplicit] = useState(false);
   const [visibility, setVisibility] = useState<"Private" | "Public">("Private");
