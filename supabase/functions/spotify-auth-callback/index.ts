@@ -33,6 +33,63 @@ function fail(step: string, error: string, status = 400, details: Record<string,
   return json({ error, step, status, ...details }, status);
 }
 
+function base64UrlEncode(bytes: Uint8Array) {
+  return btoa(String.fromCharCode(...bytes))
+    .replace(/=/g, "")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_");
+}
+
+function decodeBase64Url(value: string) {
+  const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+  return atob(padded);
+}
+
+async function createHmacSignature(secret: string, payload: string) {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+
+  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload));
+  return base64UrlEncode(new Uint8Array(signature));
+}
+
+type SpotifyStatePayload = {
+  user_id: string;
+  return_path: string;
+  redirect_uri: string;
+  code_verifier: string;
+  issued_at: number;
+  expires_at: number;
+  nonce: string;
+  ver: number;
+};
+
+async function verifyStateToken(state: string, signingSecret: string) {
+  const [payloadSegment, signatureSegment] = state.split(".");
+  if (!payloadSegment || !signatureSegment) {
+    return { error: "Missing state signature.", payload: null } as const;
+  }
+
+  const expectedSignature = await createHmacSignature(signingSecret, payloadSegment);
+  if (expectedSignature !== signatureSegment) {
+    return { error: "Invalid Spotify authorization state signature.", payload: null } as const;
+  }
+
+  try {
+    const payloadText = decodeBase64Url(payloadSegment);
+    const payload = JSON.parse(payloadText) as SpotifyStatePayload;
+    return { error: null, payload } as const;
+  } catch {
+    return { error: "Invalid Spotify authorization state payload.", payload: null } as const;
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -46,12 +103,45 @@ Deno.serve(async (req) => {
       return fail(step, "Invalid callback payload.", 400);
     }
 
-    const { code, code_verifier, redirect_uri: requestedRedirectUri } = body as Record<string, string | undefined>;
-    if (!code || !code_verifier) {
-      return fail(step, "Missing code or PKCE verifier.", 400, {
+    const { code, state } = body as Record<string, string | undefined>;
+    if (!code) {
+      return fail(step, "Missing Spotify authorization code.", 400, {
+        diagnostics: { has_code: false },
+      });
+    }
+
+    step = "auth_validation";
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader) {
+      return fail(step, "Not authenticated.", 401);
+    }
+
+    step = "backend_client_config";
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const supabaseKey = Deno.env.get("SUPABASE_ANON_KEY");
+
+    if (!supabaseUrl || !supabaseKey) {
+      return fail(step, "Backend client configuration is missing.", 500, {
         diagnostics: {
-          has_code: Boolean(code),
-          has_code_verifier: Boolean(code_verifier),
+          has_supabase_url: Boolean(supabaseUrl),
+          has_supabase_anon_key: Boolean(supabaseKey),
+        },
+      });
+    }
+
+    const supabase = createClient(supabaseUrl, supabaseKey, {
+      global: { headers: { Authorization: authHeader } },
+    });
+
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError || !user) {
+      return fail("user_session", "Invalid user session.", 401, {
+        diagnostics: {
+          user_error: userError?.message ?? null,
         },
       });
     }
@@ -60,19 +150,18 @@ Deno.serve(async (req) => {
     const clientId = Deno.env.get("SPOTIFY_CLIENT_ID")?.trim();
     const clientSecret = Deno.env.get("SPOTIFY_CLIENT_SECRET")?.trim();
     const redirectUri = Deno.env.get("SPOTIFY_REDIRECT_URI")?.trim();
+    const signingSecret = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")?.trim() || Deno.env.get("LOVABLE_API_KEY")?.trim();
     const runtimeDiagnostics = {
       has_client_id: Boolean(clientId),
       has_client_secret: Boolean(clientSecret),
       has_redirect_uri: Boolean(redirectUri),
+      has_signing_secret: Boolean(signingSecret),
       configured_redirect_uri: redirectUri ?? null,
-      requested_redirect_uri: requestedRedirectUri ?? null,
-      exact_redirect_uri: EXACT_SPOTIFY_REDIRECT_URI,
+      expected_redirect_uri: EXACT_SPOTIFY_REDIRECT_URI,
       redirect_uri_matches_exact: redirectUri === EXACT_SPOTIFY_REDIRECT_URI,
     };
 
-    console.info("[spotify-auth-callback] runtime_config", runtimeDiagnostics);
-
-    if (!clientId || !clientSecret || !redirectUri) {
+    if (!clientId || !clientSecret || !redirectUri || !signingSecret) {
       return fail(step, "Spotify credentials are not fully configured.", 500, {
         diagnostics: runtimeDiagnostics,
       });
@@ -87,21 +176,53 @@ Deno.serve(async (req) => {
       );
     }
 
-    if (requestedRedirectUri && requestedRedirectUri !== redirectUri) {
-      return fail(
-        step,
-        `Spotify redirect URI mismatch. Expected ${redirectUri} but got ${requestedRedirectUri}.`,
-        400,
-        { diagnostics: runtimeDiagnostics },
-      );
+    step = "state_validation";
+    if (!state) {
+      return fail(step, "Missing Spotify authorization state.", 400);
     }
 
-    console.info("[spotify-auth-callback] token_exchange_request", {
-      redirect_uri: redirectUri,
-      has_code: true,
-      has_code_verifier: true,
-      code_verifier_length: code_verifier.length,
-    });
+    const verifiedState = await verifyStateToken(state, signingSecret);
+    if (verifiedState.error || !verifiedState.payload) {
+      return fail(step, verifiedState.error || "Invalid Spotify authorization state.", 400);
+    }
+
+    const statePayload = verifiedState.payload;
+    if (
+      !statePayload.user_id ||
+      !statePayload.code_verifier ||
+      !statePayload.redirect_uri ||
+      typeof statePayload.expires_at !== "number"
+    ) {
+      return fail(step, "Spotify authorization state is incomplete.", 400, {
+        diagnostics: { state_payload_present: true },
+      });
+    }
+
+    if (Date.now() > statePayload.expires_at) {
+      return fail(step, "Spotify authorization state expired. Please connect again.", 400, {
+        diagnostics: {
+          expires_at: statePayload.expires_at,
+        },
+      });
+    }
+
+    if (statePayload.user_id !== user.id) {
+      return fail(step, "Spotify authorization state does not belong to the current Tempo user.", 401, {
+        diagnostics: {
+          state_user_id: statePayload.user_id,
+          session_user_id: user.id,
+        },
+      });
+    }
+
+    if (statePayload.redirect_uri !== redirectUri) {
+      return fail(step, "Spotify redirect URI inside authorization state does not match the configured callback.", 400, {
+        diagnostics: {
+          state_redirect_uri: statePayload.redirect_uri,
+          configured_redirect_uri: redirectUri,
+        },
+      });
+    }
 
     step = "token_exchange";
     const tokenRes = await fetch("https://accounts.spotify.com/api/token", {
@@ -114,7 +235,7 @@ Deno.serve(async (req) => {
         grant_type: "authorization_code",
         code,
         redirect_uri: redirectUri,
-        code_verifier,
+        code_verifier: statePayload.code_verifier,
       }),
     });
 
@@ -170,41 +291,6 @@ Deno.serve(async (req) => {
       });
     }
 
-    step = "user_session";
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
-      return fail(step, "Not authenticated.", 401);
-    }
-
-    const supabaseUrl = Deno.env.get("SUPABASE_URL");
-    const supabaseKey = Deno.env.get("SUPABASE_ANON_KEY");
-
-    if (!supabaseUrl || !supabaseKey) {
-      return fail("backend_client_config", "Backend client configuration is missing.", 500, {
-        diagnostics: {
-          has_supabase_url: Boolean(supabaseUrl),
-          has_supabase_anon_key: Boolean(supabaseKey),
-        },
-      });
-    }
-
-    const supabase = createClient(supabaseUrl, supabaseKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
-
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
-
-    if (userError || !user) {
-      return fail(step, "Invalid user session.", 401, {
-        diagnostics: {
-          user_error: userError?.message ?? null,
-        },
-      });
-    }
-
     step = "database_write_connection";
     const { error: upsertError } = await supabase
       .from("spotify_connections")
@@ -247,6 +333,7 @@ Deno.serve(async (req) => {
       step: "complete",
       spotify_user_id: meData.id,
       display_name: typeof meData.display_name === "string" ? meData.display_name : null,
+      return_path: statePayload.return_path,
       diagnostics: runtimeDiagnostics,
     });
   } catch (e) {
