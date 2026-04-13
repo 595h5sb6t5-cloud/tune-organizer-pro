@@ -442,6 +442,7 @@ const PlaylistDetail = () => {
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
   const [expandedRecId, setExpandedRecId] = useState<string | null>(null);
+  const [explainedRecId, setExplainedRecId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!id || !user) return;
