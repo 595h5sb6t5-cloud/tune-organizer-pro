@@ -7,6 +7,8 @@ import Index from "./pages/Index.tsx";
 import Dashboard from "./pages/Dashboard.tsx";
 import Playlists from "./pages/Playlists.tsx";
 import PlaylistDetail from "./pages/PlaylistDetail.tsx";
+import Discover from "./pages/Discover.tsx";
+import RecommendationHistory from "./pages/RecommendationHistory.tsx";
 import Sync from "./pages/Sync.tsx";
 import Settings from "./pages/Settings.tsx";
 import NotFound from "./pages/NotFound.tsx";
@@ -24,6 +26,8 @@ const App = () => (
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/playlists" element={<Playlists />} />
           <Route path="/playlists/:id" element={<PlaylistDetail />} />
+          <Route path="/discover" element={<Discover />} />
+          <Route path="/history" element={<RecommendationHistory />} />
           <Route path="/sync" element={<Sync />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="*" element={<NotFound />} />

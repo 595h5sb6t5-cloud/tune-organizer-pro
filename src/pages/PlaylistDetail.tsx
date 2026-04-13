@@ -1,12 +1,13 @@
 import AppLayout from "@/components/app/AppLayout";
-import { samplePlaylists } from "@/lib/sample-data";
+import { samplePlaylists, getRecommendationsForPlaylist } from "@/lib/sample-data";
 import { Button } from "@/components/ui/button";
 import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, Upload, RefreshCw, Shuffle, Play, MoreHorizontal } from "lucide-react";
+import { ArrowLeft, Upload, RefreshCw, Shuffle, Play, MoreHorizontal, Plus, X, Bookmark, Sparkles } from "lucide-react";
 
 const PlaylistDetail = () => {
   const { id } = useParams();
   const playlist = samplePlaylists.find((p) => p.id === id) ?? samplePlaylists[0];
+  const recommendations = getRecommendationsForPlaylist(playlist.id).filter(r => r.status === "pending");
 
   return (
     <AppLayout>
@@ -47,7 +48,7 @@ const PlaylistDetail = () => {
         </div>
 
         {/* Track list */}
-        <div className="rounded-2xl border border-border/50 overflow-hidden">
+        <div className="rounded-2xl border border-border/50 overflow-hidden mb-8">
           <div className="grid grid-cols-[40px_1fr_1fr_80px_80px_40px] gap-4 px-5 py-3 text-xs text-muted-foreground border-b border-border/50 bg-secondary/30">
             <span>#</span>
             <span>Title</span>
@@ -76,6 +77,54 @@ const PlaylistDetail = () => {
             </div>
           ))}
         </div>
+
+        {/* Suggested Additions */}
+        {recommendations.length > 0 && (
+          <div>
+            <div className="flex items-center gap-2 mb-4">
+              <Sparkles className="w-5 h-5 text-accent" />
+              <h2 className="font-heading text-2xl">Suggested Additions</h2>
+              <span className="text-xs text-muted-foreground ml-1">({recommendations.length} songs)</span>
+            </div>
+            <p className="text-sm text-muted-foreground mb-4">Songs we think belong in this playlist based on your taste.</p>
+            <div className="space-y-2">
+              {recommendations.map((rec) => (
+                <div
+                  key={rec.id}
+                  className="group flex items-center gap-4 p-4 rounded-2xl bg-surface-elevated border border-border/50 hover:border-accent/30 hover:shadow-sm transition-all"
+                >
+                  <div className="w-10 h-10 rounded-xl bg-secondary flex items-center justify-center text-base flex-shrink-0">
+                    🎵
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <p className="text-sm font-medium truncate">{rec.track.title}</p>
+                      <span className="text-xs font-medium text-accent">{rec.matchScore}% match</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">{rec.track.artist} · {rec.track.album}</p>
+                    <p className="text-xs text-muted-foreground mt-1">{rec.reason}</p>
+                  </div>
+                  <div className="flex gap-1.5 flex-wrap justify-end">
+                    {rec.moodTags.map((tag) => (
+                      <span key={tag} className="px-2 py-0.5 rounded-full text-[10px] bg-secondary text-muted-foreground">{tag}</span>
+                    ))}
+                  </div>
+                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                    <Button variant="ghost" size="icon" className="w-8 h-8 rounded-lg text-accent hover:text-accent" title="Add to playlist">
+                      <Plus className="w-4 h-4" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="w-8 h-8 rounded-lg" title="Save for later">
+                      <Bookmark className="w-4 h-4" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="w-8 h-8 rounded-lg text-muted-foreground" title="Dismiss">
+                      <X className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </AppLayout>
   );

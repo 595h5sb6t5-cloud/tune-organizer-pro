@@ -1,9 +1,11 @@
-import { Music2, LayoutDashboard, ListMusic, Settings, Upload, LogOut } from "lucide-react";
+import { Music2, LayoutDashboard, ListMusic, Settings, Upload, LogOut, Sparkles, History } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 
 const navItems = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/dashboard" },
   { icon: ListMusic, label: "Playlists", path: "/playlists" },
+  { icon: Sparkles, label: "Discover", path: "/discover" },
+  { icon: History, label: "History", path: "/history" },
   { icon: Upload, label: "Sync", path: "/sync" },
   { icon: Settings, label: "Settings", path: "/settings" },
 ];
