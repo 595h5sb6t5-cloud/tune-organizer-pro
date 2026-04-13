@@ -636,7 +636,7 @@ Deno.serve(async (req) => {
       result.playlists_removed = plResult.removed;
       result.playlist_tracks_synced = plResult.tracksSynced;
       if (plResult.warning) warnings.push(plResult.warning);
-      console.info("[spotify-import-tracks] playlists_done", plResult);
+      console.log("[spotify-import-tracks] playlists_done", plResult);
 
       await adminClient.from("spotify_connections").update({ last_playlist_sync_at: now }).eq("user_id", user.id);
     }
