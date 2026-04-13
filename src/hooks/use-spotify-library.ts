@@ -43,6 +43,30 @@ export type SyncPhase =
   | "complete"
   | "error";
 
+export type SyncStatus = "idle" | "syncing" | "error";
+
+export interface SyncMetadata {
+  syncStatus: SyncStatus;
+  syncError: string | null;
+  lastFullSyncAt: string | null;
+  lastIncrementalSyncAt: string | null;
+  lastLibrarySyncAt: string | null;
+  lastPlaylistSyncAt: string | null;
+  lastArtistSyncAt: string | null;
+}
+
+function formatTimeAgo(dateStr: string | null): string | null {
+  if (!dateStr) return null;
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ago`;
+}
+
 export function useSpotifyLibrary() {
   const { user, profile } = useAuth();
   const spotifyConnected = profile?.spotify_connected ?? false;
@@ -55,6 +79,36 @@ export function useSpotifyLibrary() {
   const [syncing, setSyncing] = useState(false);
   const [syncPhase, setSyncPhase] = useState<SyncPhase>("idle");
   const [lastSyncResult, setLastSyncResult] = useState<Record<string, any> | null>(null);
+  const [syncMeta, setSyncMeta] = useState<SyncMetadata>({
+    syncStatus: "idle",
+    syncError: null,
+    lastFullSyncAt: null,
+    lastIncrementalSyncAt: null,
+    lastLibrarySyncAt: null,
+    lastPlaylistSyncAt: null,
+    lastArtistSyncAt: null,
+  });
+
+  const loadSyncMeta = useCallback(async () => {
+    if (!user || !spotifyConnected) return;
+    const { data } = await supabase
+      .from("spotify_connections")
+      .select("sync_status, sync_error, last_full_sync_at, last_incremental_sync_at, last_library_sync_at, last_playlist_sync_at, last_artist_sync_at")
+      .eq("user_id", user.id)
+      .single();
+
+    if (data) {
+      setSyncMeta({
+        syncStatus: (data.sync_status as SyncStatus) || "idle",
+        syncError: data.sync_error || null,
+        lastFullSyncAt: data.last_full_sync_at || null,
+        lastIncrementalSyncAt: data.last_incremental_sync_at || null,
+        lastLibrarySyncAt: data.last_library_sync_at || null,
+        lastPlaylistSyncAt: data.last_playlist_sync_at || null,
+        lastArtistSyncAt: data.last_artist_sync_at || null,
+      });
+    }
+  }, [user, spotifyConnected]);
 
   const refresh = useCallback(async () => {
     if (!user || !spotifyConnected) {
@@ -96,7 +150,10 @@ export function useSpotifyLibrary() {
     setLikedSongs((likedRes.data as LikedSong[]) ?? []);
     setFollowedArtists((artistRes.data as FollowedArtist[]) ?? []);
     setLoading(false);
-  }, [user, spotifyConnected]);
+
+    // Also refresh sync metadata
+    await loadSyncMeta();
+  }, [user, spotifyConnected, loadSyncMeta]);
 
   const resync = useCallback(async (forceFullSync = false) => {
     if (syncing || !user || !spotifyConnected) return;
@@ -107,13 +164,17 @@ export function useSpotifyLibrary() {
 
     try {
       // Show progress phases optimistically
-      setTimeout(() => setSyncPhase("liked_songs"), 500);
-      setTimeout(() => setSyncPhase("playlists"), 3000);
-      setTimeout(() => setSyncPhase("artists"), 6000);
+      const t1 = setTimeout(() => setSyncPhase("liked_songs"), 500);
+      const t2 = setTimeout(() => setSyncPhase("playlists"), 3000);
+      const t3 = setTimeout(() => setSyncPhase("artists"), 6000);
 
       const res = await supabase.functions.invoke("spotify-import-tracks", {
         body: forceFullSync ? { force_full: true } : undefined,
       });
+
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(t3);
 
       if (res.error) throw new Error(res.error.message);
       if (res.data?.error) throw new Error(res.data.error);
@@ -126,15 +187,19 @@ export function useSpotifyLibrary() {
       setTimeout(() => setSyncPhase("idle"), 3000);
     } catch (e: any) {
       setSyncPhase("error");
+      await loadSyncMeta(); // Refresh to get the error message from DB
       throw e;
     } finally {
       setSyncing(false);
     }
-  }, [syncing, user, spotifyConnected, refresh]);
+  }, [syncing, user, spotifyConnected, refresh, loadSyncMeta]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // Compute last synced display string
+  const lastSyncedLabel = formatTimeAgo(syncMeta.lastIncrementalSyncAt || syncMeta.lastFullSyncAt);
 
   return {
     playlists,
@@ -145,6 +210,8 @@ export function useSpotifyLibrary() {
     syncing,
     syncPhase,
     lastSyncResult,
+    syncMeta,
+    lastSyncedLabel,
     refresh,
     resync,
   };

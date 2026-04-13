@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import AppLayout from "@/components/app/AppLayout";
 import { Button } from "@/components/ui/button";
 import { ListMusic, Sparkles, Headphones, Music, RefreshCw, Loader2, Heart, Users, CheckCircle2, AlertCircle } from "lucide-react";
@@ -28,23 +29,38 @@ const Playlists = () => {
     syncing,
     syncPhase,
     lastSyncResult,
+    lastSyncedLabel,
+    syncMeta,
     resync,
   } = useSpotifyLibrary();
 
   const handleResync = async (forceFullSync = false) => {
     try {
       await resync(forceFullSync);
-      const result = lastSyncResult;
-      const mode = result?.sync_mode === "incremental" ? "Quick sync" : "Full sync";
-      toast.success(`${mode} complete`, {
-        description: result
-          ? `${result.liked_songs ?? 0} new songs · ${result.playlists ?? 0} playlists · ${result.followed_artists ?? 0} artists`
-          : undefined,
-      });
     } catch (e: any) {
       toast.error("Sync failed", { description: e.message });
     }
   };
+
+  // Show toast when sync completes
+  const prevSyncPhase = useRef(syncPhase);
+  useEffect(() => {
+    if (prevSyncPhase.current !== "idle" && syncPhase === "idle" && lastSyncResult) {
+      const r = lastSyncResult;
+      const mode = r.sync_mode === "incremental" ? "Quick sync" : "Full sync";
+      const parts: string[] = [];
+      if (r.liked_songs_added > 0) parts.push(`+${r.liked_songs_added} songs`);
+      if (r.liked_songs_removed > 0) parts.push(`-${r.liked_songs_removed} songs`);
+      if (r.playlists_changed > 0) parts.push(`${r.playlists_changed} playlists updated`);
+      if (r.playlists_removed > 0) parts.push(`${r.playlists_removed} playlists removed`);
+      if (r.artists_added > 0) parts.push(`+${r.artists_added} artists`);
+      if (r.artists_removed > 0) parts.push(`-${r.artists_removed} artists`);
+      toast.success(`${mode} complete`, {
+        description: parts.length > 0 ? parts.join(" · ") : "Everything is up to date",
+      });
+    }
+    prevSyncPhase.current = syncPhase;
+  }, [syncPhase, lastSyncResult]);
 
   if (!spotifyConnected) {
     return (
@@ -85,6 +101,9 @@ const Playlists = () => {
             </p>
           </div>
           <div className="flex items-center gap-2">
+            {lastSyncedLabel && !syncing && (
+              <span className="text-xs text-muted-foreground mr-1">Synced {lastSyncedLabel}</span>
+            )}
             <Button
               variant="ghost"
               size="sm"
