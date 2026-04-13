@@ -11,86 +11,168 @@ interface DiscoverCategory {
   recommendations: Recommendation[];
 }
 
-interface FeedbackTrack {
-  title: string;
-  artist: string;
-}
-
 export function useDiscoverRecommendations() {
   const { user } = useAuth();
   const [categories, setCategories] = useState<DiscoverCategory[]>([]);
   const [loading, setLoading] = useState(false);
   const [hasLoaded, setHasLoaded] = useState(false);
-  const [acceptedSongs, setAcceptedSongs] = useState<FeedbackTrack[]>([]);
-  const [dismissedSongs, setDismissedSongs] = useState<FeedbackTrack[]>([]);
 
   const generate = useCallback(async (discoveryMode: string = "balanced") => {
     setLoading(true);
     try {
       if (!user) { setLoading(false); return; }
 
-      // Fetch imported tracks, liked songs, and playlist info in parallel
-      const [importedRes, likedRes, playlistsRes, playlistTracksRes, historyRes] = await Promise.all([
-        supabase.from("imported_tracks").select("track_name, artist_name, album_name").eq("user_id", user.id).limit(200),
-        supabase.from("liked_songs").select("track_name, artist_name").eq("user_id", user.id).limit(500),
+      // Fetch ALL relevant data in parallel for a rich taste model
+      const [
+        importedRes, likedRes, playlistsRes, playlistTracksRes,
+        historyRes, clustersRes, vibeRes, tasteRes,
+      ] = await Promise.all([
+        supabase.from("imported_tracks").select("track_name, artist_name, album_name").eq("user_id", user.id).limit(300),
+        supabase.from("liked_songs").select("track_name, artist_name, album_name, genre_tags, mood, atmosphere, energy, production_style, era, audio_tempo, audio_energy, audio_valence, audio_danceability, audio_acousticness, audio_instrumentalness, audio_speechiness, audio_loudness").eq("user_id", user.id).limit(500),
         supabase.from("spotify_playlists").select("spotify_playlist_id, name, description, track_count").eq("user_id", user.id),
         supabase.from("spotify_playlist_tracks").select("track_name, artist_name").eq("user_id", user.id).limit(1000),
-        supabase.from("recommendation_history").select("track_title, track_artist").eq("user_id", user.id),
+        supabase.from("recommendation_history").select("track_title, track_artist, status").eq("user_id", user.id),
+        supabase.from("liked_song_clusters").select("name, vibe_description, mood_tags, energy_level, tempo_range, era_range, track_count").eq("user_id", user.id),
+        supabase.from("playlist_vibe_analysis").select("primary_vibe, secondary_vibes, mood_summary, energy_summary, tempo_summary, production_summary, listening_context, emotional_keywords, genre_blend").eq("user_id", user.id),
+        supabase.from("user_taste_profile").select("*").eq("user_id", user.id).maybeSingle(),
       ]);
 
       const importedTracks = importedRes.data ?? [];
-      if (importedTracks.length === 0) {
+      const likedSongs = likedRes.data ?? [];
+
+      if (importedTracks.length === 0 && likedSongs.length === 0) {
         setCategories([]);
         setHasLoaded(true);
         setLoading(false);
         return;
       }
 
-      // Build known songs set for exclusion
-      const knownSongs: { title: string; artist: string }[] = [];
-      for (const t of importedTracks) knownSongs.push({ title: t.track_name, artist: t.artist_name });
-      for (const t of likedRes.data ?? []) knownSongs.push({ title: t.track_name, artist: t.artist_name });
-      for (const t of playlistTracksRes.data ?? []) knownSongs.push({ title: t.track_name, artist: t.artist_name });
-      for (const t of historyRes.data ?? []) knownSongs.push({ title: t.track_title, artist: t.track_artist });
+      // Build comprehensive known songs set
+      const knownSet = new Set<string>();
+      for (const t of importedTracks) knownSet.add(`${t.track_name}|||${t.artist_name}`.toLowerCase());
+      for (const t of likedSongs) knownSet.add(`${t.track_name}|||${t.artist_name}`.toLowerCase());
+      for (const t of playlistTracksRes.data ?? []) knownSet.add(`${t.track_name}|||${t.artist_name}`.toLowerCase());
+      for (const t of historyRes.data ?? []) knownSet.add(`${t.track_title}|||${t.track_artist}`.toLowerCase());
 
-      // Deduplicate
-      const knownSet = new Set(knownSongs.map(s => `${s.title}|||${s.artist}`.toLowerCase()));
-      const uniqueKnown = [...knownSet].slice(0, 500).map(k => {
+      const knownSongs = [...knownSet].slice(0, 600).map(k => {
         const [title, artist] = k.split("|||");
         return { title, artist };
       });
 
+      // Compute audio feature averages from liked songs
+      const audioSongs = likedSongs.filter(s => s.audio_tempo != null);
+      const audioProfile = audioSongs.length > 0 ? {
+        count: audioSongs.length,
+        avgTempo: +(audioSongs.reduce((a, s) => a + (s.audio_tempo || 0), 0) / audioSongs.length).toFixed(1),
+        avgEnergy: +(audioSongs.reduce((a, s) => a + (s.audio_energy || 0), 0) / audioSongs.length).toFixed(3),
+        avgValence: +(audioSongs.reduce((a, s) => a + (s.audio_valence || 0), 0) / audioSongs.length).toFixed(3),
+        avgDanceability: +(audioSongs.reduce((a, s) => a + (s.audio_danceability || 0), 0) / audioSongs.length).toFixed(3),
+        avgAcousticness: +(audioSongs.reduce((a, s) => a + (s.audio_acousticness || 0), 0) / audioSongs.length).toFixed(3),
+        avgInstrumentalness: +(audioSongs.reduce((a, s) => a + (s.audio_instrumentalness || 0), 0) / audioSongs.length).toFixed(3),
+        avgLoudness: +(audioSongs.reduce((a, s) => a + (s.audio_loudness || 0), 0) / audioSongs.length).toFixed(1),
+        tempoRange: [
+          Math.min(...audioSongs.map(s => s.audio_tempo || 120)),
+          Math.max(...audioSongs.map(s => s.audio_tempo || 120)),
+        ],
+        energyRange: [
+          +Math.min(...audioSongs.map(s => s.audio_energy || 0.5)).toFixed(2),
+          +Math.max(...audioSongs.map(s => s.audio_energy || 0.5)).toFixed(2),
+        ],
+      } : null;
+
+      // Aggregate mood/genre/atmosphere from liked songs
+      const moodCounts: Record<string, number> = {};
+      const atmosphereCounts: Record<string, number> = {};
+      const prodStyleCounts: Record<string, number> = {};
+      const eraCounts: Record<string, number> = {};
+      const genreTagCounts: Record<string, number> = {};
+      const artistCounts: Record<string, number> = {};
+
+      for (const s of likedSongs) {
+        if (s.mood) moodCounts[s.mood] = (moodCounts[s.mood] || 0) + 1;
+        if (s.atmosphere) atmosphereCounts[s.atmosphere] = (atmosphereCounts[s.atmosphere] || 0) + 1;
+        if (s.production_style) prodStyleCounts[s.production_style] = (prodStyleCounts[s.production_style] || 0) + 1;
+        if (s.era) eraCounts[s.era] = (eraCounts[s.era] || 0) + 1;
+        artistCounts[s.artist_name] = (artistCounts[s.artist_name] || 0) + 1;
+        for (const g of s.genre_tags || []) genreTagCounts[g] = (genreTagCounts[g] || 0) + 1;
+      }
+      for (const t of importedTracks) {
+        artistCounts[t.artist_name] = (artistCounts[t.artist_name] || 0) + 1;
+      }
+
+      const topN = (obj: Record<string, number>, n: number) =>
+        Object.entries(obj).sort((a, b) => b[1] - a[1]).slice(0, n).map(e => e[0]);
+
+      // Feedback history
+      const history = historyRes.data ?? [];
+      const acceptedHistory = history.filter(h => h.status === "accepted").map(h => ({ title: h.track_title, artist: h.track_artist }));
+      const dismissedHistory = history.filter(h => h.status === "dismissed").map(h => ({ title: h.track_title, artist: h.track_artist }));
+
+      // Build the playlists summary
       const playlists = (playlistsRes.data ?? []).map(pl => ({
         id: pl.spotify_playlist_id,
         name: pl.name,
         description: pl.description || "",
-        mood: "Mixed",
-        avgTempo: 100,
-        tracks: [],
+        trackCount: pl.track_count,
       }));
 
       const { data, error } = await supabase.functions.invoke("discover-recommendations", {
         body: {
-          allPlaylists: playlists,
-          allTracks: importedTracks.map((t) => ({
-            title: t.track_name,
-            artist: t.artist_name,
-            album: t.album_name || "Unknown",
-            genre: "Unknown",
-            mood: "Unknown",
-            tempo: 100,
-            energy: 0.5,
-          })),
-          knownSongs: uniqueKnown,
           discoveryMode,
-          acceptedSongs,
-          dismissedSongs,
+          knownSongs,
+          playlists,
+          audioProfile,
+          tasteSignals: {
+            topGenres: topN(genreTagCounts, 10),
+            topMoods: topN(moodCounts, 6),
+            topAtmospheres: topN(atmosphereCounts, 5),
+            topProductionStyles: topN(prodStyleCounts, 5),
+            topEras: topN(eraCounts, 4),
+            topArtists: topN(artistCounts, 15),
+          },
+          clusters: (clustersRes.data ?? []).map(c => ({
+            name: c.name,
+            vibe: c.vibe_description,
+            moods: c.mood_tags,
+            energy: c.energy_level,
+            tempo: c.tempo_range,
+            era: c.era_range,
+            trackCount: c.track_count,
+          })),
+          playlistVibes: (vibeRes.data ?? []).map(v => ({
+            primaryVibe: v.primary_vibe,
+            secondaryVibes: v.secondary_vibes,
+            moodSummary: v.mood_summary,
+            energySummary: v.energy_summary,
+            tempoSummary: v.tempo_summary,
+            productionSummary: v.production_summary,
+            listeningContext: v.listening_context,
+            emotionalKeywords: v.emotional_keywords,
+            genreBlend: v.genre_blend,
+          })),
+          userTasteProfile: tasteRes.data || null,
+          acceptedHistory: acceptedHistory.slice(-15),
+          dismissedHistory: dismissedHistory.slice(-15),
+          sampleTracks: likedSongs.slice(0, 30).map(s => ({
+            title: s.track_name,
+            artist: s.artist_name,
+            album: s.album_name,
+            mood: s.mood,
+            atmosphere: s.atmosphere,
+            energy: s.energy,
+            production: s.production_style,
+            tempo: s.audio_tempo,
+            audioEnergy: s.audio_energy,
+            valence: s.audio_valence,
+            danceability: s.audio_danceability,
+            acousticness: s.audio_acousticness,
+          })),
         },
       });
 
       if (error) throw new Error(error.message || "Failed to get recommendations");
 
-      // Post-filter: remove any recommendations that match known songs
+      // Post-filter: remove any that match known songs
       const cats: DiscoverCategory[] = (data.categories || []).map((cat: any) => ({
         id: cat.id,
         title: cat.title,
@@ -133,15 +215,50 @@ export function useDiscoverRecommendations() {
     } finally {
       setLoading(false);
     }
-  }, [user, acceptedSongs, dismissedSongs]);
+  }, [user]);
 
-  const recordAccepted = useCallback((track: { title: string; artist: string }) => {
-    setAcceptedSongs((prev) => [...prev, { title: track.title, artist: track.artist }]);
-  }, []);
+  const recordFeedback = useCallback(async (
+    track: { title: string; artist: string; album?: string },
+    status: "accepted" | "dismissed",
+    rec?: Recommendation,
+  ) => {
+    if (!user) return;
+    try {
+      await supabase.from("recommendation_history").insert({
+        user_id: user.id,
+        track_title: track.title,
+        track_artist: track.artist,
+        track_album: track.album || null,
+        status,
+        discovery_mode: "discover",
+        reason: rec?.reason || null,
+        mood_tags: rec?.moodTags || null,
+        compatibility_score: rec?.matchScore || null,
+        popularity_tier: rec?.popularityTier || null,
+        compatibility_breakdown: rec?.compatibilityBreakdown || null,
+      });
 
-  const recordDismissed = useCallback((track: { title: string; artist: string }) => {
-    setDismissedSongs((prev) => [...prev, { title: track.title, artist: track.artist }]);
-  }, []);
+      // Update taste profile counters
+      const field = status === "accepted" ? "accepted_count" : "dismissed_count";
+      const { data: existing } = await supabase
+        .from("user_taste_profile")
+        .select("id, accepted_count, dismissed_count")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (existing) {
+        await supabase.from("user_taste_profile").update({
+          [field]: (existing[field] || 0) + 1,
+        }).eq("id", existing.id);
+      } else {
+        await supabase.from("user_taste_profile").insert({
+          user_id: user.id,
+          [field]: 1,
+        });
+      }
+    } catch (e) {
+      console.error("Failed to record feedback:", e);
+    }
+  }, [user]);
 
-  return { categories, loading, hasLoaded, generate, recordAccepted, recordDismissed };
+  return { categories, loading, hasLoaded, generate, recordFeedback };
 }
