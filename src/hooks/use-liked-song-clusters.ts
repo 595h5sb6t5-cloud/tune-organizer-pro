@@ -58,13 +58,11 @@ const INITIAL_PROGRESS: AnalysisProgress = {
   worldsCount: 0, assignedCount: 0, statusMessage: "",
 };
 
-async function fetchAllRows(table: string, userId: string, columns: string, extraFilter?: { col: string; val: any }) {
+async function fetchAllFromTable(table: "liked_song_clusters" | "liked_song_cluster_tracks" | "liked_songs", userId: string, columns: string) {
   const all: any[] = [];
   let from = 0;
   while (true) {
-    let q = supabase.from(table).select(columns).eq("user_id", userId);
-    if (extraFilter) q = q.eq(extraFilter.col, extraFilter.val);
-    const { data } = await q.range(from, from + 999);
+    const { data } = await (supabase.from(table) as any).select(columns).eq("user_id", userId).range(from, from + 999);
     const rows = data || [];
     all.push(...rows);
     if (rows.length < 1000) break;
