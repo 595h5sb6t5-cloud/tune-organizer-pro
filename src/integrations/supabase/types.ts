@@ -531,10 +531,14 @@ export type Database = {
           created_at: string
           expires_at: string
           id: string
+          last_artist_sync_at: string | null
           last_full_sync_at: string | null
           last_incremental_sync_at: string | null
+          last_library_sync_at: string | null
+          last_playlist_sync_at: string | null
           refresh_token: string
           spotify_user_id: string | null
+          sync_error: string | null
           sync_status: string | null
           updated_at: string
           user_id: string
@@ -544,10 +548,14 @@ export type Database = {
           created_at?: string
           expires_at: string
           id?: string
+          last_artist_sync_at?: string | null
           last_full_sync_at?: string | null
           last_incremental_sync_at?: string | null
+          last_library_sync_at?: string | null
+          last_playlist_sync_at?: string | null
           refresh_token: string
           spotify_user_id?: string | null
+          sync_error?: string | null
           sync_status?: string | null
           updated_at?: string
           user_id: string
@@ -557,10 +565,14 @@ export type Database = {
           created_at?: string
           expires_at?: string
           id?: string
+          last_artist_sync_at?: string | null
           last_full_sync_at?: string | null
           last_incremental_sync_at?: string | null
+          last_library_sync_at?: string | null
+          last_playlist_sync_at?: string | null
           refresh_token?: string
           spotify_user_id?: string | null
+          sync_error?: string | null
           sync_status?: string | null
           updated_at?: string
           user_id?: string
