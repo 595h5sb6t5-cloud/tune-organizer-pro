@@ -516,6 +516,9 @@ const PlaylistDetail = () => {
       const filtered = recommendations.filter(r => !isKnown(r.title, r.artist));
       setRecs(filtered);
       setRecsLoaded(true);
+
+      // Enrich with Spotify data (preview URLs, artwork)
+      enrich(filtered.map(r => ({ title: r.title, artist: r.artist }))).then(setRecSpotifyData);
     } catch (err: any) {
       console.error("Rec error:", err);
       toast.error("Failed to generate recommendations", { description: err.message });
