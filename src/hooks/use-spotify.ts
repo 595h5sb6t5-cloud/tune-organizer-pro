@@ -381,9 +381,28 @@ export function useSpotify() {
 
     try {
       const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-      if (sessionError || !sessionData.session?.access_token) {
-        throw new Error("Your session expired before Spotify could connect. Please log in again and retry.");
+
+      if (sessionError) {
+        logSpotifyOAuth("session_check_failed", {
+          failure_type: "expired_app_session",
+          error: sessionError.message,
+        });
+        throw new Error("Your app session has expired. Please sign in again to finish connecting Spotify.");
       }
+
+      if (!sessionData.session?.access_token) {
+        logSpotifyOAuth("session_check_failed", {
+          failure_type: "missing_app_session",
+          has_session: Boolean(sessionData.session),
+          has_access_token: Boolean(sessionData.session?.access_token),
+        });
+        throw new Error("No active session found. Please sign in to Tempo first, then retry Spotify.");
+      }
+
+      logSpotifyOAuth("session_valid", {
+        user_id: sessionData.session.user?.id,
+        expires_at: sessionData.session.expires_at,
+      });
 
       logSpotifyOAuth("token_exchange_request", {
         redirect_uri: EXACT_SPOTIFY_REDIRECT_URI,
