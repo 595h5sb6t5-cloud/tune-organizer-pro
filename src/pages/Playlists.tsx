@@ -11,7 +11,7 @@ import { toast } from "sonner";
 import CreatePlaylistDialog from "@/components/app/CreatePlaylistDialog";
 import PlaylistEditor from "@/components/app/PlaylistEditor";
 
-const Playlists = () => {
+const PlaylistsPage = () => {
   const { profile } = useAuth();
   const spotifyConnected = profile?.spotify_connected ?? false;
   const {
@@ -454,4 +454,4 @@ function PlaylistCard({ cluster, onClick, onExport, exporting }: { cluster: Like
   );
 }
 
-export default Playlists;
+export default PlaylistsPage;
