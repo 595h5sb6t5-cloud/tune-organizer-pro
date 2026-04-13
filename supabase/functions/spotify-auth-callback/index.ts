@@ -1,6 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
-const EXACT_SPOTIFY_REDIRECT_URI = "https://id-preview--159079dd-d99f-4e32-b626-b73b50d600ec.lovable.app/spotify-callback";
+
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -157,23 +157,12 @@ Deno.serve(async (req) => {
       has_redirect_uri: Boolean(redirectUri),
       has_signing_secret: Boolean(signingSecret),
       configured_redirect_uri: redirectUri ?? null,
-      expected_redirect_uri: EXACT_SPOTIFY_REDIRECT_URI,
-      redirect_uri_matches_exact: redirectUri === EXACT_SPOTIFY_REDIRECT_URI,
     };
 
     if (!clientId || !clientSecret || !redirectUri || !signingSecret) {
       return fail(step, "Spotify credentials are not fully configured.", 500, {
         diagnostics: runtimeDiagnostics,
       });
-    }
-
-    if (redirectUri !== EXACT_SPOTIFY_REDIRECT_URI) {
-      return fail(
-        step,
-        `Spotify redirect URI mismatch. Expected ${EXACT_SPOTIFY_REDIRECT_URI} but got ${redirectUri}.`,
-        500,
-        { diagnostics: runtimeDiagnostics },
-      );
     }
 
     step = "state_validation";

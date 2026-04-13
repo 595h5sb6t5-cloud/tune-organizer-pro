@@ -1,5 +1,3 @@
-const EXACT_SPOTIFY_REDIRECT_URI = "https://id-preview--159079dd-d99f-4e32-b626-b73b50d600ec.lovable.app/spotify-callback";
-
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
@@ -28,8 +26,6 @@ Deno.serve(async (req) => {
     has_client_id: Boolean(clientId),
     has_redirect_uri: Boolean(redirectUri),
     redirect_uri: redirectUri,
-    expected_redirect_uri: EXACT_SPOTIFY_REDIRECT_URI,
-    redirect_uri_matches_exact: redirectUri === EXACT_SPOTIFY_REDIRECT_URI,
   };
 
   console.info("[spotify-config] runtime_config", diagnostics);
@@ -40,15 +36,6 @@ Deno.serve(async (req) => {
 
   if (!redirectUri) {
     return fail("runtime_config", "Spotify redirect URI is not configured.", 500, diagnostics);
-  }
-
-  if (redirectUri !== EXACT_SPOTIFY_REDIRECT_URI) {
-    return fail(
-      "runtime_config",
-      `Spotify redirect URI mismatch. Expected ${EXACT_SPOTIFY_REDIRECT_URI} but got ${redirectUri}.`,
-      500,
-      diagnostics,
-    );
   }
 
   return json({
