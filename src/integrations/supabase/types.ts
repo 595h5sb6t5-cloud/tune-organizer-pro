@@ -165,6 +165,19 @@ export type Database = {
           analyzed_at: string | null
           artist_name: string
           atmosphere: string | null
+          audio_acousticness: number | null
+          audio_danceability: number | null
+          audio_energy: number | null
+          audio_features_fetched_at: string | null
+          audio_instrumentalness: number | null
+          audio_key: number | null
+          audio_liveness: number | null
+          audio_loudness: number | null
+          audio_mode: number | null
+          audio_speechiness: number | null
+          audio_tempo: number | null
+          audio_time_signature: number | null
+          audio_valence: number | null
           created_at: string
           energy: string | null
           era: string | null
@@ -184,6 +197,19 @@ export type Database = {
           analyzed_at?: string | null
           artist_name: string
           atmosphere?: string | null
+          audio_acousticness?: number | null
+          audio_danceability?: number | null
+          audio_energy?: number | null
+          audio_features_fetched_at?: string | null
+          audio_instrumentalness?: number | null
+          audio_key?: number | null
+          audio_liveness?: number | null
+          audio_loudness?: number | null
+          audio_mode?: number | null
+          audio_speechiness?: number | null
+          audio_tempo?: number | null
+          audio_time_signature?: number | null
+          audio_valence?: number | null
           created_at?: string
           energy?: string | null
           era?: string | null
@@ -203,6 +229,19 @@ export type Database = {
           analyzed_at?: string | null
           artist_name?: string
           atmosphere?: string | null
+          audio_acousticness?: number | null
+          audio_danceability?: number | null
+          audio_energy?: number | null
+          audio_features_fetched_at?: string | null
+          audio_instrumentalness?: number | null
+          audio_key?: number | null
+          audio_liveness?: number | null
+          audio_loudness?: number | null
+          audio_mode?: number | null
+          audio_speechiness?: number | null
+          audio_tempo?: number | null
+          audio_time_signature?: number | null
+          audio_valence?: number | null
           created_at?: string
           energy?: string | null
           era?: string | null
