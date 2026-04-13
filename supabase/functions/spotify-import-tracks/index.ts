@@ -121,6 +121,29 @@ function extractTrack(item: any, userId: string): TrackRow | null {
   };
 }
 
+/** Fetch audio features for a batch of track IDs (max 100 per call) */
+async function fetchAudioFeatures(trackIds: string[], token: string): Promise<Map<string, any>> {
+  const featureMap = new Map<string, any>();
+  for (let i = 0; i < trackIds.length; i += 100) {
+    const batch = trackIds.slice(i, i + 100);
+    const ids = batch.join(",");
+    try {
+      const data = await spotifyGet(
+        `https://api.spotify.com/v1/audio-features?ids=${ids}`,
+        token
+      );
+      for (const feat of data.audio_features || []) {
+        if (feat && feat.id) {
+          featureMap.set(feat.id, feat);
+        }
+      }
+    } catch (e) {
+      console.warn("[spotify-import-tracks] audio features batch failed:", e);
+    }
+  }
+  return featureMap;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
@@ -136,7 +159,6 @@ Deno.serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseKey, {
       global: { headers: { Authorization: authHeader } },
     });
-    // Service role client for bulk inserts (bypasses RLS)
     const adminClient = createClient(supabaseUrl, serviceKey);
 
     const { data: { user }, error: userError } = await supabase.auth.getUser();
@@ -146,9 +168,7 @@ Deno.serve(async (req) => {
     const accessToken = await refreshTokenIfNeeded(supabase, user.id);
     console.info("[spotify-import-tracks] access_token_ready", { user_id: user.id });
 
-    // ──────────────────────────────────────────────
     // 1. Import liked/saved songs
-    // ──────────────────────────────────────────────
     step = "import_liked_songs";
     const likedSongs: TrackRow[] = [];
     let offset = 0;
@@ -178,9 +198,56 @@ Deno.serve(async (req) => {
       await adminClient.from("imported_tracks").upsert(batch, { onConflict: "user_id,spotify_track_id", ignoreDuplicates: true });
     }
 
-    // ──────────────────────────────────────────────
-    // 2. Import playlists
-    // ──────────────────────────────────────────────
+    // 2. Fetch audio features for liked songs
+    step = "fetch_audio_features";
+    const trackIdsNeedingFeatures: string[] = [];
+
+    // Check which songs already have audio features
+    const { data: existingFeatures } = await adminClient
+      .from("liked_songs")
+      .select("spotify_track_id, audio_features_fetched_at")
+      .eq("user_id", user.id)
+      .not("audio_features_fetched_at", "is", null);
+
+    const alreadyFetched = new Set((existingFeatures || []).map(r => r.spotify_track_id));
+
+    for (const song of likedSongs) {
+      if (!alreadyFetched.has(song.spotify_track_id)) {
+        trackIdsNeedingFeatures.push(song.spotify_track_id);
+      }
+    }
+
+    console.info("[spotify-import-tracks] audio_features_needed", { count: trackIdsNeedingFeatures.length, already: alreadyFetched.size });
+
+    let audioFeaturesCount = 0;
+    if (trackIdsNeedingFeatures.length > 0) {
+      const featureMap = await fetchAudioFeatures(trackIdsNeedingFeatures, accessToken);
+      const now = new Date().toISOString();
+
+      // Update in batches
+      for (const [trackId, feat] of featureMap) {
+        await adminClient.from("liked_songs").update({
+          audio_tempo: feat.tempo ?? null,
+          audio_energy: feat.energy ?? null,
+          audio_valence: feat.valence ?? null,
+          audio_danceability: feat.danceability ?? null,
+          audio_acousticness: feat.acousticness ?? null,
+          audio_instrumentalness: feat.instrumentalness ?? null,
+          audio_speechiness: feat.speechiness ?? null,
+          audio_loudness: feat.loudness ?? null,
+          audio_liveness: feat.liveness ?? null,
+          audio_key: feat.key ?? null,
+          audio_mode: feat.mode ?? null,
+          audio_time_signature: feat.time_signature ?? null,
+          audio_features_fetched_at: now,
+        }).eq("user_id", user.id).eq("spotify_track_id", trackId);
+        audioFeaturesCount++;
+      }
+    }
+
+    console.info("[spotify-import-tracks] audio_features_stored", { count: audioFeaturesCount });
+
+    // 3. Import playlists
     step = "import_playlists";
     const spotifyProfile = await spotifyGet("https://api.spotify.com/v1/me", accessToken);
     const spotifyUserId = spotifyProfile.id;
@@ -221,7 +288,6 @@ Deno.serve(async (req) => {
 
     console.info("[spotify-import-tracks] playlists_fetched", { count: playlists.length });
 
-    // Upsert playlists
     const playlistRows = playlists.map(pl => ({
       user_id: user.id,
       spotify_playlist_id: pl.id,
@@ -242,12 +308,9 @@ Deno.serve(async (req) => {
       );
     }
 
-    // ──────────────────────────────────────────────
-    // 3. Import playlist tracks (top 20 playlists only to stay within time limits)
-    // ──────────────────────────────────────────────
+    // 4. Import playlist tracks
     step = "import_playlist_tracks";
 
-    // Get DB playlist IDs
     const { data: dbPlaylists } = await adminClient
       .from("spotify_playlists")
       .select("id, spotify_playlist_id")
@@ -258,7 +321,6 @@ Deno.serve(async (req) => {
       playlistIdMap.set(p.spotify_playlist_id, p.id);
     }
 
-    // Import tracks for top playlists (owned first, then followed, max 20)
     const sortedPlaylists = [...playlists].sort((a, b) => {
       if (a.is_owned !== b.is_owned) return a.is_owned ? -1 : 1;
       return b.track_count - a.track_count;
@@ -273,7 +335,7 @@ Deno.serve(async (req) => {
       try {
         const trackRows: any[] = [];
         let plOffset = 0;
-        const plTotal = Math.min(pl.track_count, 200); // max 200 per playlist
+        const plTotal = Math.min(pl.track_count, 200);
 
         while (plOffset < plTotal) {
           const data = await spotifyGet(
@@ -301,7 +363,6 @@ Deno.serve(async (req) => {
           plOffset += 50;
         }
 
-        // Upsert playlist tracks
         for (let i = 0; i < trackRows.length; i += 100) {
           await adminClient.from("spotify_playlist_tracks").upsert(
             trackRows.slice(i, i + 100),
@@ -311,7 +372,6 @@ Deno.serve(async (req) => {
         totalPlaylistTracks += trackRows.length;
       } catch (e) {
         console.warn(`[spotify-import-tracks] Failed to import tracks for playlist ${pl.name}:`, e);
-        // Continue with other playlists
       }
     }
 
@@ -321,6 +381,7 @@ Deno.serve(async (req) => {
       success: true,
       step: "complete",
       liked_songs: likedSongs.length,
+      audio_features: audioFeaturesCount,
       playlists: playlists.length,
       playlist_tracks: totalPlaylistTracks,
       imported: likedSongs.length,
