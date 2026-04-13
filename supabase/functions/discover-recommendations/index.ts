@@ -141,8 +141,11 @@ ${allTracks.slice(0, 20).map((t: any) => `- "${t.title}" by ${t.artist} (${t.gen
 ${feedbackContext}
 ${tasteContext}
 
-EXCLUDED (do NOT recommend any of these):
+EXCLUDED (do NOT recommend any of these — these are songs the user already knows):
 ${excludeList}
+
+ADDITIONAL KNOWN SONGS (also exclude — from liked songs, playlists, and recommendation history):
+${knownExcludeList}
 
 DISCOVERY MODE: ${discoveryMode}
 
