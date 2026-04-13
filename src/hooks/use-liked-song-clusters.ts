@@ -18,6 +18,9 @@ export interface LikedSongCluster {
   cover_tracks: { image_url: string; track_name: string }[];
   sort_order: number;
   tracks: ClusterTrack[];
+  spotify_playlist_id: string | null;
+  spotify_exported_at: string | null;
+  spotify_playlist_url: string | null;
 }
 
 export interface ClusterTrack {
@@ -72,7 +75,7 @@ export function useLikedSongClusters() {
     // Get clusters
     const { data: clusterData } = await supabase
       .from("liked_song_clusters")
-      .select("id, name, description, vibe_description, ai_explanation, mood_tags, color_hex, energy_level, tempo_range, era_range, track_count, sort_order, cover_tracks")
+      .select("id, name, description, vibe_description, ai_explanation, mood_tags, color_hex, energy_level, tempo_range, era_range, track_count, sort_order, cover_tracks, spotify_playlist_id, spotify_exported_at, spotify_playlist_url")
       .eq("user_id", user.id)
       .order("sort_order");
 
@@ -131,6 +134,9 @@ export function useLikedSongClusters() {
         mood_tags: c.mood_tags || [],
         ai_explanation: c.ai_explanation ?? null,
         cover_tracks: (Array.isArray(c.cover_tracks) ? c.cover_tracks : []) as { image_url: string; track_name: string }[],
+        spotify_playlist_id: (c as any).spotify_playlist_id ?? null,
+        spotify_exported_at: (c as any).spotify_exported_at ?? null,
+        spotify_playlist_url: (c as any).spotify_playlist_url ?? null,
         tracks: clusterTracks,
       };
     });

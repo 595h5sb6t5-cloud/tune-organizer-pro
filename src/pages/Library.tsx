@@ -1,0 +1,270 @@
+import { useEffect, useRef } from "react";
+import AppLayout from "@/components/app/AppLayout";
+import { Button } from "@/components/ui/button";
+import { ListMusic, Sparkles, Headphones, Music, RefreshCw, Loader2, Heart, Users, CheckCircle2, AlertCircle, Circle, Disc3, ChevronRight } from "lucide-react";
+import { Link } from "react-router-dom";
+import { useAuth } from "@/hooks/use-auth";
+import { useSpotifyLibrary, type SyncStageState } from "@/hooks/use-spotify-library";
+import { HorizontalRow } from "@/components/app/HorizontalRow";
+import { toast } from "sonner";
+
+function StageIcon({ status }: { status: SyncStageState["status"] }) {
+  switch (status) {
+    case "done":
+      return <CheckCircle2 className="w-3.5 h-3.5 text-accent shrink-0" />;
+    case "active":
+      return <Loader2 className="w-3.5 h-3.5 text-accent animate-spin shrink-0" />;
+    case "error":
+      return <AlertCircle className="w-3.5 h-3.5 text-destructive shrink-0" />;
+    case "skipped":
+      return <Circle className="w-3.5 h-3.5 text-muted-foreground/40 shrink-0" />;
+    default:
+      return <Circle className="w-3.5 h-3.5 text-muted-foreground/30 shrink-0" />;
+  }
+}
+
+const Playlists = () => {
+  const { profile } = useAuth();
+  const spotifyConnected = profile?.spotify_connected ?? false;
+  const {
+    playlists,
+    likedSongs,
+    likedCount,
+    followedArtists,
+    savedAlbums,
+    albumCount,
+    loading,
+    syncing,
+    syncStages,
+    allDone,
+    lastSyncResult,
+    lastSyncedLabel,
+    resync,
+  } = useSpotifyLibrary();
+
+  const handleResync = async (forceFullSync = false) => {
+    try {
+      await resync(forceFullSync);
+    } catch (e: any) {
+      toast.error("Sync failed", { description: e.message });
+    }
+  };
+
+  const prevSyncing = useRef(syncing);
+  useEffect(() => {
+    if (prevSyncing.current && !syncing && lastSyncResult) {
+      const r = lastSyncResult;
+      const mode = r.sync_mode === "incremental" ? "Quick sync" : "Full sync";
+      const parts: string[] = [];
+      if (r.liked_songs_added > 0) parts.push(`+${r.liked_songs_added} songs`);
+      if (r.liked_songs_removed > 0) parts.push(`-${r.liked_songs_removed} songs`);
+      if (r.albums_added > 0) parts.push(`+${r.albums_added} albums`);
+      if (r.albums_removed > 0) parts.push(`-${r.albums_removed} albums`);
+      if (r.playlists_changed > 0) parts.push(`${r.playlists_changed} playlists updated`);
+      if (r.playlists_removed > 0) parts.push(`${r.playlists_removed} playlists removed`);
+      if (r.artists_added > 0) parts.push(`+${r.artists_added} artists`);
+      if (r.artists_removed > 0) parts.push(`-${r.artists_removed} artists`);
+      toast.success(`${mode} complete`, {
+        description: parts.length > 0 ? parts.join(" · ") : "Everything is up to date",
+      });
+    }
+    prevSyncing.current = syncing;
+  }, [syncing, lastSyncResult]);
+
+  if (!spotifyConnected) {
+    return (
+      <AppLayout>
+        <div className="max-w-6xl">
+          <div className="flex items-center justify-between mb-8">
+            <div>
+              <h1 className="font-heading text-3xl mb-1">Your Library</h1>
+              <p className="text-muted-foreground">Your full Spotify library — songs, albums, playlists, and artists.</p>
+            </div>
+          </div>
+          <div className="rounded-2xl bg-surface-elevated border border-border/50 p-12 text-center">
+            <Headphones className="w-10 h-10 text-muted-foreground mx-auto mb-4" />
+            <h2 className="font-heading text-xl mb-2">Connect Spotify first</h2>
+            <p className="text-sm text-muted-foreground max-w-sm mx-auto mb-6">
+              Your full library will appear here after you connect Spotify.
+            </p>
+            <Button variant="hero" asChild>
+              <Link to="/settings">Go to Settings</Link>
+            </Button>
+          </div>
+        </div>
+      </AppLayout>
+    );
+  }
+
+  const hasData = playlists.length > 0 || likedCount > 0 || followedArtists.length > 0 || albumCount > 0;
+  const hasAnySyncActivity = syncStages.some(s => s.status !== "pending");
+
+  return (
+    <AppLayout>
+      <div className="max-w-6xl">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-8">
+          <div>
+            <h1 className="font-heading text-3xl mb-1">Your Library</h1>
+            <p className="text-muted-foreground">
+              {likedCount} liked songs
+              {albumCount > 0 && ` · ${albumCount} albums`}
+              {playlists.length > 0 && ` · ${playlists.length} playlists`}
+              {followedArtists.length > 0 && ` · ${followedArtists.length} artists`}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {lastSyncedLabel && !syncing && (
+              <span className="text-xs text-muted-foreground mr-1">Synced {lastSyncedLabel}</span>
+            )}
+            <Button variant="ghost" size="sm" className="rounded-lg gap-1 text-accent" onClick={() => handleResync(false)} disabled={syncing || loading}>
+              <RefreshCw className={`w-3.5 h-3.5 ${syncing ? "animate-spin" : ""}`} />
+              {syncing ? "Syncing…" : "Quick sync"}
+            </Button>
+            <Button variant="ghost" size="sm" className="rounded-lg gap-1 text-muted-foreground" onClick={() => handleResync(true)} disabled={syncing || loading}>
+              Full re-sync
+            </Button>
+          </div>
+        </div>
+
+        {/* Sync progress banner */}
+        {(syncing || (allDone && hasAnySyncActivity)) && (
+          <div className="mb-6 p-4 rounded-xl bg-accent/5 border border-accent/15 space-y-2">
+            <div className="flex items-center gap-2 mb-3">
+              {syncing ? <Loader2 className="w-4 h-4 text-accent animate-spin" /> : <CheckCircle2 className="w-4 h-4 text-accent" />}
+              <span className="text-sm font-medium">{syncing ? "Syncing your Spotify library…" : "Sync complete"}</span>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+              {syncStages.map((s) => (
+                <div key={s.stage} className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs transition-all ${s.status === "active" ? "bg-accent/10 text-foreground font-medium" : s.status === "done" ? "bg-accent/5 text-foreground" : s.status === "error" ? "bg-destructive/10 text-destructive" : "text-muted-foreground/60"}`}>
+                  <StageIcon status={s.status} />
+                  <span className="truncate">{s.label}</span>
+                  {s.detail && s.status === "done" && <span className="text-muted-foreground ml-auto text-[10px] shrink-0">{s.detail}</span>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {loading && !hasData ? (
+          <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-accent" /></div>
+        ) : (
+          <div className="space-y-10">
+
+            {/* Liked Songs — preview card */}
+            <div>
+              <div className="flex items-center gap-3 mb-4">
+                <Heart className="w-5 h-5 text-accent" />
+                <h2 className="font-heading text-xl">Liked Songs</h2>
+                <span className="text-sm text-muted-foreground">({likedCount})</span>
+              </div>
+              <Link to="/liked-songs" className="block group">
+                <div className="rounded-2xl bg-gradient-to-br from-accent/20 to-accent/5 border border-accent/20 p-6 hover:border-accent/40 transition-all">
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <p className="text-2xl font-heading">{likedCount}</p>
+                      <p className="text-sm text-muted-foreground">songs in your library</p>
+                    </div>
+                    <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-accent transition-colors" />
+                  </div>
+                  {likedSongs.length > 0 && (
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                      {likedSongs.slice(0, 4).map((s) => (
+                        <div key={s.id} className="flex items-center gap-2 p-2 rounded-lg bg-background/50">
+                          {s.image_url ? (
+                            <img src={s.image_url} alt="" className="w-8 h-8 rounded object-cover" loading="lazy" />
+                          ) : (
+                            <div className="w-8 h-8 rounded bg-secondary flex items-center justify-center"><Music className="w-3 h-3 text-muted-foreground" /></div>
+                          )}
+                          <div className="min-w-0">
+                            <p className="text-xs font-medium truncate">{s.track_name}</p>
+                            <p className="text-[10px] text-muted-foreground truncate">{s.artist_name}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </Link>
+            </div>
+
+            {/* Saved Albums — horizontal scroll */}
+            {savedAlbums.length > 0 && (
+              <HorizontalRow title="Saved Albums" icon={<Disc3 className="w-5 h-5 text-accent" />} count={albumCount}>
+                {savedAlbums.map((album) => (
+                  <Link key={album.id} to={`/albums/${album.id}`} className="shrink-0 w-40 snap-start group">
+                    <div className="aspect-square rounded-xl bg-secondary overflow-hidden mb-2 relative">
+                      {album.image_url ? (
+                        <img src={album.image_url} alt={album.album_name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" loading="lazy" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center"><Disc3 className="w-10 h-10 text-muted-foreground" /></div>
+                      )}
+                      {album.album_type && (
+                        <span className="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-muted/80 text-muted-foreground capitalize">{album.album_type}</span>
+                      )}
+                    </div>
+                    <p className="text-sm font-medium truncate group-hover:text-accent transition-colors">{album.album_name}</p>
+                    <p className="text-xs text-muted-foreground truncate">{album.artist_name}</p>
+                    <p className="text-[10px] text-muted-foreground/60">{album.total_tracks} tracks{album.release_date ? ` · ${album.release_date.slice(0, 4)}` : ""}</p>
+                  </Link>
+                ))}
+              </HorizontalRow>
+            )}
+
+            {/* Playlists — horizontal scroll */}
+            {playlists.length > 0 && (
+              <HorizontalRow title="Playlists" icon={<ListMusic className="w-5 h-5 text-accent" />} count={playlists.length}>
+                {playlists.map((pl) => (
+                  <Link key={pl.id} to={`/playlists/${pl.id}`} className="shrink-0 w-44 snap-start group">
+                    <div className="aspect-square rounded-xl bg-secondary overflow-hidden mb-2 relative">
+                      {pl.image_url ? (
+                        <img src={pl.image_url} alt={pl.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" loading="lazy" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center"><ListMusic className="w-10 h-10 text-muted-foreground" /></div>
+                      )}
+                      <div className="absolute top-1.5 right-1.5 flex flex-col gap-0.5 items-end">
+                        {pl.is_owned_by_user && <span className="px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-accent/90 text-accent-foreground">Yours</span>}
+                        {pl.is_collaborative && <span className="px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-primary/80 text-primary-foreground">Collab</span>}
+                        {!pl.is_owned_by_user && !pl.is_collaborative && <span className="px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-muted/80 text-muted-foreground">Saved</span>}
+                      </div>
+                    </div>
+                    <p className="text-sm font-medium truncate group-hover:text-accent transition-colors">{pl.name}</p>
+                    <p className="text-xs text-muted-foreground truncate">{pl.track_count} tracks{pl.owner_display_name && !pl.is_owned_by_user ? ` · ${pl.owner_display_name}` : ""}</p>
+                  </Link>
+                ))}
+              </HorizontalRow>
+            )}
+
+            {/* Followed Artists — horizontal scroll */}
+            {followedArtists.length > 0 && (
+              <HorizontalRow title="Followed Artists" icon={<Users className="w-5 h-5 text-accent" />} count={followedArtists.length}>
+                {followedArtists.map((artist) => (
+                  <div key={artist.id} className="shrink-0 w-32 snap-start text-center">
+                    {artist.image_url ? (
+                      <img src={artist.image_url} alt={artist.artist_name} className="w-24 h-24 rounded-full object-cover mx-auto mb-2" loading="lazy" />
+                    ) : (
+                      <div className="w-24 h-24 rounded-full bg-secondary flex items-center justify-center mx-auto mb-2">
+                        <Users className="w-8 h-8 text-muted-foreground" />
+                      </div>
+                    )}
+                    <p className="text-xs font-medium truncate">{artist.artist_name}</p>
+                    {artist.genres.length > 0 && <p className="text-[10px] text-muted-foreground truncate">{artist.genres[0]}</p>}
+                  </div>
+                ))}
+              </HorizontalRow>
+            )}
+
+            {/* CTA */}
+            <div className="text-center pt-4">
+              <Button variant="hero" asChild>
+                <Link to="/discover"><Sparkles className="w-4 h-4 mr-2" /> Discover New Music</Link>
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+    </AppLayout>
+  );
+};
+
+export default Playlists;
