@@ -86,8 +86,9 @@ export function useSpotify() {
       const { data: sessionData } = await supabase.auth.getSession();
       const token = sessionData?.session?.access_token;
 
+      const redirectUri = `${window.location.origin}/spotify-callback`;
       const res = await supabase.functions.invoke("spotify-auth-callback", {
-        body: { code, code_verifier: codeVerifier },
+        body: { code, code_verifier: codeVerifier, redirect_uri: redirectUri },
       });
 
       if (res.error || res.data?.error) {
