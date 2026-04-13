@@ -1,4 +1,4 @@
-import { Music2, LayoutDashboard, ListMusic, Settings, Upload, LogOut, Sparkles, History } from "lucide-react";
+import { Music2, LayoutDashboard, ListMusic, Settings, Upload, LogOut, Sparkles, History, Brain } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
@@ -7,6 +7,7 @@ import { supabase } from "@/integrations/supabase/client";
 const navItems = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/dashboard" },
   { icon: ListMusic, label: "Playlists", path: "/playlists" },
+  { icon: Brain, label: "Liked Intelligence", path: "/liked-intelligence" },
   { icon: Sparkles, label: "Discover", path: "/discover" },
   { icon: History, label: "History", path: "/history" },
   { icon: Upload, label: "Sync", path: "/sync" },

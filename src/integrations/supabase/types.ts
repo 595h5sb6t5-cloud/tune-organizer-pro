@@ -53,37 +53,160 @@ export type Database = {
         }
         Relationships: []
       }
+      liked_song_cluster_tracks: {
+        Row: {
+          cluster_id: string
+          confidence_score: number | null
+          created_at: string
+          id: string
+          liked_song_id: string
+          spotify_track_id: string
+          user_id: string
+        }
+        Insert: {
+          cluster_id: string
+          confidence_score?: number | null
+          created_at?: string
+          id?: string
+          liked_song_id: string
+          spotify_track_id: string
+          user_id: string
+        }
+        Update: {
+          cluster_id?: string
+          confidence_score?: number | null
+          created_at?: string
+          id?: string
+          liked_song_id?: string
+          spotify_track_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "liked_song_cluster_tracks_cluster_id_fkey"
+            columns: ["cluster_id"]
+            isOneToOne: false
+            referencedRelation: "liked_song_clusters"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "liked_song_cluster_tracks_liked_song_id_fkey"
+            columns: ["liked_song_id"]
+            isOneToOne: false
+            referencedRelation: "liked_songs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      liked_song_clusters: {
+        Row: {
+          analysis_model: string | null
+          color_hex: string | null
+          created_at: string
+          description: string | null
+          energy_level: string | null
+          era_range: string | null
+          id: string
+          mood_tags: string[] | null
+          name: string
+          sort_order: number
+          tempo_range: string | null
+          track_count: number
+          updated_at: string
+          user_id: string
+          vibe_description: string | null
+        }
+        Insert: {
+          analysis_model?: string | null
+          color_hex?: string | null
+          created_at?: string
+          description?: string | null
+          energy_level?: string | null
+          era_range?: string | null
+          id?: string
+          mood_tags?: string[] | null
+          name: string
+          sort_order?: number
+          tempo_range?: string | null
+          track_count?: number
+          updated_at?: string
+          user_id: string
+          vibe_description?: string | null
+        }
+        Update: {
+          analysis_model?: string | null
+          color_hex?: string | null
+          created_at?: string
+          description?: string | null
+          energy_level?: string | null
+          era_range?: string | null
+          id?: string
+          mood_tags?: string[] | null
+          name?: string
+          sort_order?: number
+          tempo_range?: string | null
+          track_count?: number
+          updated_at?: string
+          user_id?: string
+          vibe_description?: string | null
+        }
+        Relationships: []
+      }
       liked_songs: {
         Row: {
           added_at: string | null
           album_name: string | null
+          analyzed_at: string | null
           artist_name: string
+          atmosphere: string | null
           created_at: string
+          energy: string | null
+          era: string | null
+          genre_tags: string[] | null
           id: string
           image_url: string | null
+          mood: string | null
+          production_style: string | null
           spotify_track_id: string
+          tempo_estimate: string | null
           track_name: string
           user_id: string
         }
         Insert: {
           added_at?: string | null
           album_name?: string | null
+          analyzed_at?: string | null
           artist_name: string
+          atmosphere?: string | null
           created_at?: string
+          energy?: string | null
+          era?: string | null
+          genre_tags?: string[] | null
           id?: string
           image_url?: string | null
+          mood?: string | null
+          production_style?: string | null
           spotify_track_id: string
+          tempo_estimate?: string | null
           track_name: string
           user_id: string
         }
         Update: {
           added_at?: string | null
           album_name?: string | null
+          analyzed_at?: string | null
           artist_name?: string
+          atmosphere?: string | null
           created_at?: string
+          energy?: string | null
+          era?: string | null
+          genre_tags?: string[] | null
           id?: string
           image_url?: string | null
+          mood?: string | null
+          production_style?: string | null
           spotify_track_id?: string
+          tempo_estimate?: string | null
           track_name?: string
           user_id?: string
         }
