@@ -329,10 +329,11 @@ Deno.serve(async (req) => {
       playlistIdMap.set(p.spotify_playlist_id, p.id);
     }
 
+    // Import tracks for up to 50 playlists, prioritizing owned ones
     const sortedPlaylists = [...playlists].sort((a, b) => {
       if (a.is_owned !== b.is_owned) return a.is_owned ? -1 : 1;
       return b.track_count - a.track_count;
-    }).slice(0, 20);
+    }).slice(0, 50);
 
     let totalPlaylistTracks = 0;
 
