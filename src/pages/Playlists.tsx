@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { Brain, Heart, Loader2, Music, RefreshCw, Sparkles, Headphones, Play, ListMusic, ExternalLink, Check, Upload, Plus } from "lucide-react";
+import { Brain, Heart, Loader2, Music, RefreshCw, Sparkles, Headphones, Play, ListMusic, ExternalLink, Check, Upload, Plus, Pencil } from "lucide-react";
 import AppLayout from "@/components/app/AppLayout";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -9,6 +9,7 @@ import { useLikedSongClusters, type LikedSongCluster } from "@/hooks/use-liked-s
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import CreatePlaylistDialog from "@/components/app/CreatePlaylistDialog";
+import PlaylistEditor from "@/components/app/PlaylistEditor";
 
 const Playlists = () => {
   const { profile } = useAuth();
@@ -26,6 +27,7 @@ const Playlists = () => {
   } = useLikedSongClusters();
 
   const [selectedCluster, setSelectedCluster] = useState<LikedSongCluster | null>(null);
+  const [editingCluster, setEditingCluster] = useState<LikedSongCluster | null>(null);
   const [exportingId, setExportingId] = useState<string | null>(null);
 
   const handleAnalyze = async () => {
@@ -115,6 +117,23 @@ const Playlists = () => {
     );
   }
 
+  // Editing mode
+  if (editingCluster) {
+    return (
+      <AppLayout>
+        <PlaylistEditor
+          cluster={editingCluster}
+          onClose={() => setEditingCluster(null)}
+          onSaved={async () => {
+            setEditingCluster(null);
+            setSelectedCluster(null);
+            await refresh();
+          }}
+        />
+      </AppLayout>
+    );
+  }
+
   // Detail view for a selected playlist
   if (selectedCluster) {
     const isExported = !!selectedCluster.spotify_playlist_id;
@@ -154,8 +173,16 @@ const Playlists = () => {
                 ))}
               </div>
 
-              {/* Export buttons */}
+              {/* Action buttons */}
               <div className="flex gap-2 mt-4">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="rounded-lg gap-1.5"
+                  onClick={() => setEditingCluster(selectedCluster)}
+                >
+                  <Pencil className="w-3.5 h-3.5" /> Edit Playlist
+                </Button>
                 <Button
                   variant={isExported ? "outline" : "hero"}
                   size="sm"
@@ -190,6 +217,19 @@ const Playlists = () => {
                 <span className="text-xs font-medium text-accent uppercase tracking-wider">Why these songs belong together</span>
               </div>
               <p className="text-sm text-muted-foreground leading-relaxed">{selectedCluster.ai_explanation}</p>
+            </div>
+          )}
+
+          {/* Short playlist suggestion */}
+          {selectedCluster.tracks.length < 8 && (
+            <div className="rounded-xl bg-accent/5 border border-accent/20 p-4 mb-6 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium">This playlist is short</p>
+                <p className="text-xs text-muted-foreground">Open the editor to add matching songs from your library.</p>
+              </div>
+              <Button variant="outline" size="sm" className="rounded-lg gap-1.5 text-xs" onClick={() => setEditingCluster(selectedCluster)}>
+                <Plus className="w-3.5 h-3.5" /> Expand Playlist
+              </Button>
             </div>
           )}
 

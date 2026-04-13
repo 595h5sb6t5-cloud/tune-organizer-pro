@@ -1,0 +1,1 @@
+ALTER TABLE public.liked_song_cluster_tracks ADD COLUMN IF NOT EXISTS position integer NOT NULL DEFAULT 0;
