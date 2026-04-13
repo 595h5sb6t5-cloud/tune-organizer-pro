@@ -438,13 +438,13 @@ Deno.serve(async (req) => {
 
       const { data: unan } = await sb.from("liked_songs")
         .select("id, spotify_track_id, track_name, artist_name, album_name, image_url, audio_tempo, audio_energy, audio_valence, audio_danceability, audio_acousticness, audio_instrumentalness, audio_speechiness, audio_loudness, audio_liveness")
-        .eq("user_id", user.id).is("analyzed_at", null)
+        .eq("user_id", user.id).is("groove_feel", null)
         .order("added_at", { ascending: false }).limit(batchSize);
 
       const songs = unan || [];
       if (songs.length === 0) {
         const { count: ac } = await sb.from("liked_songs").select("id", { count: "exact", head: true })
-          .eq("user_id", user.id).not("analyzed_at", "is", null);
+          .eq("user_id", user.id).not("groove_feel", "is", null);
         return json({ success: true, done: true, tracks_analyzed_this_batch: 0, total_analyzed: ac ?? 0, total_liked_songs: t });
       }
 
@@ -485,7 +485,7 @@ Deno.serve(async (req) => {
       }
 
       const { count: an } = await sb.from("liked_songs").select("id", { count: "exact", head: true })
-        .eq("user_id", user.id).not("analyzed_at", "is", null);
+        .eq("user_id", user.id).not("groove_feel", "is", null);
       return json({ success: true, done: (an ?? 0) >= t, tracks_analyzed_this_batch: ts.length, total_analyzed: an ?? 0, total_liked_songs: t });
     }
 
