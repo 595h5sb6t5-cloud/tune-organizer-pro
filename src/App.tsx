@@ -9,6 +9,7 @@ import { FloatingPlayer } from "./components/app/FloatingPlayer";
 import Index from "./pages/Index.tsx";
 import Auth from "./pages/Auth.tsx";
 import Dashboard from "./pages/Dashboard.tsx";
+import Library from "./pages/Library.tsx";
 import Playlists from "./pages/Playlists.tsx";
 import PlaylistDetail from "./pages/PlaylistDetail.tsx";
 import LikedSongs from "./pages/LikedSongs.tsx";
@@ -35,6 +36,7 @@ const App = () => (
           <Route path="/" element={<Index />} />
           <Route path="/auth" element={<Auth />} />
           <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/library" element={<Library />} />
           <Route path="/playlists" element={<Playlists />} />
           <Route path="/playlists/:id" element={<PlaylistDetail />} />
           <Route path="/liked-songs" element={<LikedSongs />} />

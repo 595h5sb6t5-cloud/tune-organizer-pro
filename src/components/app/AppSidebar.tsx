@@ -1,4 +1,4 @@
-import { Music2, LayoutDashboard, ListMusic, Settings, Upload, LogOut, Sparkles, History, Brain } from "lucide-react";
+import { Music2, LayoutDashboard, Library, ListMusic, Settings, Upload, LogOut, Sparkles, History } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
@@ -6,8 +6,8 @@ import { supabase } from "@/integrations/supabase/client";
 
 const navItems = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/dashboard" },
+  { icon: Library, label: "Library", path: "/library" },
   { icon: ListMusic, label: "Playlists", path: "/playlists" },
-  { icon: Brain, label: "Liked Intelligence", path: "/liked-intelligence" },
   { icon: Sparkles, label: "Discover", path: "/discover" },
   { icon: History, label: "History", path: "/history" },
   { icon: Upload, label: "Sync", path: "/sync" },
@@ -43,7 +43,7 @@ const AppSidebar = () => {
 
       <nav className="flex-1 p-3 space-y-1">
         {navItems.map((item) => {
-          const isActive = location.pathname === item.path;
+          const isActive = location.pathname === item.path || (item.path === "/library" && location.pathname.startsWith("/library"));
           return (
             <Link
               key={item.path}
