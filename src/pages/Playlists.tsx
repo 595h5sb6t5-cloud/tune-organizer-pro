@@ -1,30 +1,48 @@
 import AppLayout from "@/components/app/AppLayout";
 import { Button } from "@/components/ui/button";
-import { ListMusic, Sparkles, Headphones, Music, RefreshCw, Loader2, Heart } from "lucide-react";
+import { ListMusic, Sparkles, Headphones, Music, RefreshCw, Loader2, Heart, Users, CheckCircle2, AlertCircle } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useAuth } from "@/hooks/use-auth";
-import { useSpotifyLibrary } from "@/hooks/use-spotify-library";
-import { supabase } from "@/integrations/supabase/client";
-import { useState } from "react";
+import { useSpotifyLibrary, type SyncPhase } from "@/hooks/use-spotify-library";
 import { toast } from "sonner";
+
+const SYNC_PHASE_LABELS: Record<SyncPhase, string> = {
+  idle: "",
+  starting: "Starting sync…",
+  liked_songs: "Syncing liked songs…",
+  playlists: "Updating playlists…",
+  artists: "Importing followed artists…",
+  complete: "Sync complete!",
+  error: "Sync failed",
+};
 
 const Playlists = () => {
   const { profile } = useAuth();
   const spotifyConnected = profile?.spotify_connected ?? false;
-  const { playlists, likedSongs, likedCount, loading, refresh } = useSpotifyLibrary();
-  const [syncing, setSyncing] = useState(false);
+  const {
+    playlists,
+    likedSongs,
+    likedCount,
+    followedArtists,
+    loading,
+    syncing,
+    syncPhase,
+    lastSyncResult,
+    resync,
+  } = useSpotifyLibrary();
 
-  const handleResync = async () => {
-    setSyncing(true);
+  const handleResync = async (forceFullSync = false) => {
     try {
-      const res = await supabase.functions.invoke("spotify-import-tracks");
-      if (res.error) throw new Error(res.error.message);
-      await refresh();
-      toast.success("Library synced successfully");
+      await resync(forceFullSync);
+      const result = lastSyncResult;
+      const mode = result?.sync_mode === "incremental" ? "Quick sync" : "Full sync";
+      toast.success(`${mode} complete`, {
+        description: result
+          ? `${result.liked_songs ?? 0} new songs · ${result.playlists ?? 0} playlists · ${result.followed_artists ?? 0} artists`
+          : undefined,
+      });
     } catch (e: any) {
       toast.error("Sync failed", { description: e.message });
-    } finally {
-      setSyncing(false);
     }
   };
 
@@ -53,6 +71,8 @@ const Playlists = () => {
     );
   }
 
+  const hasData = playlists.length > 0 || likedCount > 0;
+
   return (
     <AppLayout>
       <div className="max-w-5xl">
@@ -61,21 +81,48 @@ const Playlists = () => {
             <h1 className="font-heading text-3xl mb-1">Your Library</h1>
             <p className="text-muted-foreground">
               {playlists.length} playlists · {likedCount} liked songs
+              {followedArtists.length > 0 && ` · ${followedArtists.length} artists`}
             </p>
           </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="rounded-lg gap-1 text-accent"
-            onClick={handleResync}
-            disabled={syncing || loading}
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${syncing ? "animate-spin" : ""}`} />
-            {syncing ? "Syncing…" : "Re-sync"}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="rounded-lg gap-1 text-accent"
+              onClick={() => handleResync(false)}
+              disabled={syncing || loading}
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${syncing ? "animate-spin" : ""}`} />
+              {syncing ? "Syncing…" : "Quick sync"}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="rounded-lg gap-1 text-muted-foreground"
+              onClick={() => handleResync(true)}
+              disabled={syncing || loading}
+            >
+              Full re-sync
+            </Button>
+          </div>
         </div>
 
-        {loading ? (
+        {/* Sync progress banner */}
+        {syncing && syncPhase !== "idle" && (
+          <div className="mb-6 p-3 rounded-xl bg-accent/10 border border-accent/20 flex items-center gap-3">
+            {syncPhase === "complete" ? (
+              <CheckCircle2 className="w-4 h-4 text-accent shrink-0" />
+            ) : syncPhase === "error" ? (
+              <AlertCircle className="w-4 h-4 text-destructive shrink-0" />
+            ) : (
+              <Loader2 className="w-4 h-4 text-accent animate-spin shrink-0" />
+            )}
+            <span className="text-sm font-medium">{SYNC_PHASE_LABELS[syncPhase]}</span>
+          </div>
+        )}
+
+        {/* Show existing data while syncing, or show loading only on first load with no data */}
+        {loading && !hasData ? (
           <div className="flex justify-center py-20">
             <Loader2 className="w-8 h-8 animate-spin text-accent" />
           </div>
@@ -182,6 +229,44 @@ const Playlists = () => {
                 </div>
               )}
             </div>
+
+            {/* Followed Artists section */}
+            {followedArtists.length > 0 && (
+              <div>
+                <div className="flex items-center gap-3 mb-4">
+                  <Users className="w-5 h-5 text-accent" />
+                  <h2 className="font-heading text-xl">Followed Artists</h2>
+                  <span className="text-sm text-muted-foreground">({followedArtists.length})</span>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+                  {followedArtists.slice(0, 18).map((artist) => (
+                    <div key={artist.id} className="p-3 rounded-xl bg-surface-elevated border border-border/50 text-center">
+                      {artist.image_url ? (
+                        <img
+                          src={artist.image_url}
+                          alt={artist.artist_name}
+                          className="w-16 h-16 rounded-full object-cover mx-auto mb-2"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <div className="w-16 h-16 rounded-full bg-secondary flex items-center justify-center mx-auto mb-2">
+                          <Users className="w-6 h-6 text-muted-foreground" />
+                        </div>
+                      )}
+                      <p className="text-xs font-medium truncate">{artist.artist_name}</p>
+                      {artist.genres.length > 0 && (
+                        <p className="text-[10px] text-muted-foreground truncate mt-0.5">{artist.genres[0]}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                {followedArtists.length > 18 && (
+                  <p className="text-xs text-muted-foreground mt-3 text-center">
+                    Showing 18 of {followedArtists.length} followed artists
+                  </p>
+                )}
+              </div>
+            )}
 
             {/* CTA */}
             <div className="text-center pt-4">
