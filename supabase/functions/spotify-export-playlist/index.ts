@@ -67,16 +67,20 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: "Spotify token expired. Please reconnect Spotify in Settings." }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // Check if this cluster was already exported
-    const { data: cluster } = await supabase
-      .from("liked_song_clusters")
-      .select("spotify_playlist_id")
-      .eq("id", cluster_id)
-      .eq("user_id", user.id)
-      .single();
-
-    let spotifyPlaylistId = cluster?.spotify_playlist_id;
+    // Determine the target Spotify playlist ID
+    let spotifyPlaylistId: string | null = directSpotifyPlaylistId || null;
     let isUpdate = false;
+
+    // If no direct Spotify playlist ID, check cluster for previously exported playlist
+    if (!spotifyPlaylistId && cluster_id) {
+      const { data: cluster } = await supabase
+        .from("liked_song_clusters")
+        .select("spotify_playlist_id")
+        .eq("id", cluster_id)
+        .eq("user_id", user.id)
+        .single();
+      spotifyPlaylistId = cluster?.spotify_playlist_id || null;
+    }
 
     if (spotifyPlaylistId) {
       // Update existing playlist — clear tracks and re-add
