@@ -114,13 +114,13 @@ function parseJsonLike(value: unknown): any {
 
 function sanitizeCategories(categories: any[]): any[] {
   return categories
-    .filter((category) => category && typeof category === "object")
-    .map((category, index) => ({
+    .filter((category: any) => category && typeof category === "object")
+    .map((category: any, index: number) => ({
       id: typeof category.id === "string" && category.id.trim() ? category.id : `category-${index + 1}`,
       title: typeof category.title === "string" && category.title.trim() ? category.title : `Recommendations ${index + 1}`,
       subtitle: typeof category.subtitle === "string" ? category.subtitle : "",
       recommendations: Array.isArray(category.recommendations)
-        ? category.recommendations.filter((recommendation) => recommendation && typeof recommendation === "object")
+        ? category.recommendations.filter((recommendation: any) => recommendation && typeof recommendation === "object")
         : [],
     }));
 }
