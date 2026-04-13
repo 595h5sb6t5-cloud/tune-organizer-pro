@@ -221,10 +221,9 @@ export function useDashboardStats() {
         supabase.from("liked_songs").select("artist_name").eq("user_id", user.id).gte("added_at", new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()).order("added_at", { ascending: false }).limit(100),
       ]);
 
-      // Count artists
+      // Count artists — artistsRows is already an array from fetchAllRows
       const artistCounts = new Map<string, number>();
-      for (const row of artistsRes.data || []) {
-        // Handle multi-artist strings
+      for (const row of artistsRows) {
         const names = (row.artist_name as string).split(", ");
         for (const name of names) {
           const key = name.trim().toLowerCase();
@@ -240,32 +239,32 @@ export function useDashboardStats() {
         }));
 
       // Count genres (flatten arrays)
-      const genreRows: { tag: string }[] = [];
-      for (const row of genresRes.data || []) {
+      const genreTagRows: { tag: string }[] = [];
+      for (const row of genresRows) {
         const tags = row.genre_tags as string[] | null;
         if (tags) {
           for (const t of tags) {
-            if (t) genreRows.push({ tag: t });
+            if (t) genreTagRows.push({ tag: t });
           }
         }
       }
-      const topGenres = countTags(genreRows).slice(0, 12).map(g => ({ genre: g.tag, count: g.count }));
+      const topGenres = countTags(genreTagRows).slice(0, 12).map(g => ({ genre: g.tag, count: g.count }));
 
       // Count moods
-      const moodRows = (moodsRes.data || []).map(r => ({ tag: r.mood as string }));
-      const moods = countTags(moodRows).slice(0, 10).map(m => ({ mood: m.tag, count: m.count }));
+      const moodTagRows = moodsRows.map(r => ({ tag: r.mood as string }));
+      const moods = countTags(moodTagRows).slice(0, 10).map(m => ({ mood: m.tag, count: m.count }));
 
       // Count energy
-      const energyRows = (energyRes.data || []).map(r => ({ tag: r.energy as string }));
-      const energyLevels = countTags(energyRows).slice(0, 6).map(e => ({ energy: e.tag, count: e.count }));
+      const energyTagRows = energyRows.map(r => ({ tag: r.energy as string }));
+      const energyLevels = countTags(energyTagRows).slice(0, 6).map(e => ({ energy: e.tag, count: e.count }));
 
       // Count tempos
-      const tempoRows = (temposRes.data || []).map(r => ({ tag: r.tempo_estimate as string }));
-      const tempos = countTags(tempoRows).slice(0, 8).map(t => ({ tempo: t.tag, count: t.count }));
+      const tempoTagRows = temposRows.map(r => ({ tag: r.tempo_estimate as string }));
+      const tempos = countTags(tempoTagRows).slice(0, 8).map(t => ({ tempo: t.tag, count: t.count }));
 
       // Count atmospheres
-      const atmosphereRows = (atmospheresRes.data || []).map(r => ({ tag: r.atmosphere as string }));
-      const atmospheres = countTags(atmosphereRows).slice(0, 8).map(a => ({ atmosphere: a.tag, count: a.count }));
+      const atmosphereTagRows = atmospheresRows.map(r => ({ tag: r.atmosphere as string }));
+      const atmospheres = countTags(atmosphereTagRows).slice(0, 8).map(a => ({ atmosphere: a.tag, count: a.count }));
 
       // Clusters
       const clusters: ClusterInfo[] = (clustersRes.data || []).map((c: any) => ({
@@ -279,13 +278,12 @@ export function useDashboardStats() {
       }));
 
       // Recommendation stats
-      const recs = recsRes.data || [];
-      const totalRecommendations = recs.length;
-      const acceptedRecommendations = recs.filter((r: any) => r.status === "accepted").length;
-      const dismissedRecommendations = recs.filter((r: any) => r.status === "dismissed").length;
+      const totalRecommendations = recsRows.length;
+      const acceptedRecommendations = recsRows.filter((r: any) => r.status === "accepted").length;
+      const dismissedRecommendations = recsRows.filter((r: any) => r.status === "dismissed").length;
 
-      // Audio feature averages
-      const audioData = audioAvgRes.data || [];
+      // Audio feature averages — audioAvgRows is already an array
+      const audioData = audioAvgRows;
       let avgTempo: number | null = null;
       let avgEnergy: number | null = null;
       let avgValence: number | null = null;
