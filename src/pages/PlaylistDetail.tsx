@@ -12,12 +12,14 @@ const PlaylistDetail = () => {
   const allRecs = getRecommendationsForPlaylist(playlist.id).filter((r) => r.status === "pending");
 
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
-  const [acceptedIds, setAcceptedIds] = useState<Set<string>>(new Set());
+  const [acceptedRecs, setAcceptedRecs] = useState<Recommendation[]>([]);
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
   const [syncing, setSyncing] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
 
+  const acceptedIds = new Set(acceptedRecs.map((r) => r.id));
   const visibleRecs = allRecs.filter((r) => !dismissedIds.has(r.id) && !acceptedIds.has(r.id));
+  const allTracks = [...playlist.tracks, ...acceptedRecs.map((r) => r.track)];
 
   const handleSync = () => {
     setSyncing(true);
@@ -44,7 +46,7 @@ const PlaylistDetail = () => {
   };
 
   const handleAddRec = (rec: Recommendation) => {
-    setAcceptedIds((prev) => new Set(prev).add(rec.id));
+    setAcceptedRecs((prev) => [...prev, rec]);
     toast.success(`Added "${rec.track.title}" to ${playlist.name}`);
   };
 
@@ -84,7 +86,7 @@ const PlaylistDetail = () => {
             <h1 className="font-heading text-4xl mb-1">{playlist.name}</h1>
             <p className="text-muted-foreground mb-4">{playlist.description}</p>
             <div className="flex items-center gap-6 text-sm text-muted-foreground mb-4">
-              <span>{playlist.trackCount + acceptedIds.size} tracks</span>
+              <span>{allTracks.length} tracks</span>
               <span>{playlist.mood}</span>
               <span>{playlist.avgTempo} BPM avg</span>
               <span className="text-accent font-medium">{playlist.cohesionScore}% cohesion</span>
@@ -115,28 +117,34 @@ const PlaylistDetail = () => {
             <span>Mood</span>
             <span />
           </div>
-          {playlist.tracks.map((track, i) => (
-            <div
-              key={track.id}
-              className="group grid grid-cols-[40px_1fr_1fr_80px_80px_40px] gap-4 px-5 py-3 items-center hover:bg-secondary/30 transition-colors"
-            >
-              <span className="text-sm text-muted-foreground group-hover:hidden">{i + 1}</span>
-              <Play className="w-4 h-4 text-accent hidden group-hover:block" />
-              <div>
-                <p className="text-sm font-medium truncate">{track.title}</p>
-                <p className="text-xs text-muted-foreground">{track.artist}</p>
-              </div>
-              <p className="text-sm text-muted-foreground truncate">{track.album}</p>
-              <p className="text-sm text-muted-foreground">{track.tempo}</p>
-              <p className="text-xs text-muted-foreground">{track.mood}</p>
-              <button
-                className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
-                onClick={() => toast("Track options", { description: `Options for "${track.title}" coming soon.` })}
+          {allTracks.map((track, i) => {
+            const isNew = acceptedRecs.some((r) => r.track.id === track.id);
+            return (
+              <div
+                key={track.id}
+                className={`group grid grid-cols-[40px_1fr_1fr_80px_80px_40px] gap-4 px-5 py-3 items-center hover:bg-secondary/30 transition-colors ${isNew ? "bg-accent/5" : ""}`}
               >
-                <MoreHorizontal className="w-4 h-4" />
-              </button>
-            </div>
-          ))}
+                <span className="text-sm text-muted-foreground group-hover:hidden">{i + 1}</span>
+                <Play className="w-4 h-4 text-accent hidden group-hover:block" />
+                <div>
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-medium truncate">{track.title}</p>
+                    {isNew && <span className="px-1.5 py-0.5 rounded text-[10px] bg-accent/10 text-accent font-medium">New</span>}
+                  </div>
+                  <p className="text-xs text-muted-foreground">{track.artist}</p>
+                </div>
+                <p className="text-sm text-muted-foreground truncate">{track.album}</p>
+                <p className="text-sm text-muted-foreground">{track.tempo}</p>
+                <p className="text-xs text-muted-foreground">{track.mood}</p>
+                <button
+                  className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
+                  onClick={() => toast("Track options", { description: `Options for "${track.title}" coming soon.` })}
+                >
+                  <MoreHorizontal className="w-4 h-4" />
+                </button>
+              </div>
+            );
+          })}
         </div>
 
         {/* Suggested Additions */}
