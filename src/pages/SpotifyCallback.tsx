@@ -1,6 +1,6 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Loader2, CheckCircle2, AlertCircle, Music } from "lucide-react";
+import { Loader2, CheckCircle2, AlertCircle, Music, LogIn } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useSpotify } from "@/hooks/use-spotify";
@@ -9,12 +9,18 @@ import { useAuth } from "@/hooks/use-auth";
 const SPOTIFY_OAUTH_DONE_KEY = "spotify-oauth-complete";
 const SPOTIFY_OAUTH_ERROR_KEY = "spotify-oauth-error";
 const SPOTIFY_RETURN_PATH_KEY = "spotify-return-path";
+const SPOTIFY_PENDING_CALLBACK_KEY = "spotify-pending-callback";
+
+function logCallback(step: string, details: Record<string, unknown>) {
+  console.info(`[SpotifyCallback] ${step}`, details);
+}
 
 const SpotifyCallback = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { user, loading } = useAuth();
   const { status, error, importCount, handleCallback, startAuth } = useSpotify();
+  const [sessionMissing, setSessionMissing] = useState(false);
 
   const code = searchParams.get("code");
   const state = searchParams.get("state");
@@ -24,21 +30,56 @@ const SpotifyCallback = () => {
   const requestedReturnPath = searchParams.get("returnPath");
   const returnPath = localStorage.getItem(SPOTIFY_RETURN_PATH_KEY) || requestedReturnPath || "/settings";
 
+  // Store return path
   useEffect(() => {
     if (!requestedReturnPath) return;
     localStorage.setItem(SPOTIFY_RETURN_PATH_KEY, requestedReturnPath);
   }, [requestedReturnPath]);
 
+  // Handle missing session: store pending callback and redirect to login
+  useEffect(() => {
+    if (loading || authError || initiate) return;
+
+    // We have a code but no user session
+    if (code && !user) {
+      logCallback("session_missing", {
+        has_code: true,
+        has_state: Boolean(state),
+        reason: "User session missing or expired during Spotify redirect",
+      });
+
+      // Preserve Spotify authorization so user doesn't have to restart
+      const pendingState = JSON.stringify({
+        code,
+        state,
+        returnPath,
+        savedAt: Date.now(),
+      });
+      localStorage.setItem(SPOTIFY_PENDING_CALLBACK_KEY, pendingState);
+
+      setSessionMissing(true);
+    }
+  }, [loading, authError, initiate, code, state, user, returnPath]);
+
+  // Normal callback: user is present and code exists
   useEffect(() => {
     if (loading || authError || initiate || !code || !user || status !== "idle") return;
+
+    logCallback("session_found", { user_id: user.id, has_code: true });
+
+    // Clear any pending state since we're processing now
+    localStorage.removeItem(SPOTIFY_PENDING_CALLBACK_KEY);
+
     void handleCallback(code, state);
   }, [loading, authError, initiate, code, state, user, status, handleCallback]);
 
+  // Initiate flow (origin handoff)
   useEffect(() => {
     if (!initiate || loading || authError || code || !user || status !== "idle") return;
     void startAuth(requestedReturnPath || returnPath);
   }, [initiate, loading, authError, code, user, status, startAuth, requestedReturnPath, returnPath]);
 
+  // Complete: notify opener or navigate
   useEffect(() => {
     if (status !== "complete") return;
 
@@ -59,6 +100,7 @@ const SpotifyCallback = () => {
     return () => window.clearTimeout(timer);
   }, [status, importCount, navigate, returnPath]);
 
+  // Error: notify opener
   useEffect(() => {
     const message = authErrorDescription || authError || error;
     if (!message) return;
@@ -70,16 +112,27 @@ const SpotifyCallback = () => {
     }
   }, [authError, authErrorDescription, error]);
 
+  const handleGoToLogin = () => {
+    logCallback("redirect_to_login", {
+      pending_callback_saved: true,
+      return_after_login: "/spotify-callback",
+    });
+    navigate("/auth?redirect=/spotify-callback", { replace: true });
+  };
+
   const handleBack = () => {
     localStorage.removeItem(SPOTIFY_RETURN_PATH_KEY);
+    localStorage.removeItem(SPOTIFY_PENDING_CALLBACK_KEY);
     navigate(returnPath, { replace: true });
   };
 
-  const displayError = authErrorDescription || authError || error || (!loading && !user
-    ? "You need to be signed in to finish connecting Spotify."
-    : !loading && !code
-      ? "Spotify did not return an authorization code. Please try again."
-      : null);
+  const displayError = authErrorDescription || authError || error || (
+    !loading && !user && !sessionMissing
+      ? null // Don't show dead-end error; sessionMissing state handles this
+      : !loading && !code && !initiate
+        ? "Spotify did not return an authorization code. Please try again."
+        : null
+  );
 
   return (
     <div className="min-h-screen bg-background flex flex-col items-center justify-center px-4">
@@ -90,7 +143,20 @@ const SpotifyCallback = () => {
 
       <Card className="w-full max-w-md border-border/60 shadow-lg">
         <CardContent className="p-8 text-center space-y-4">
-          {displayError ? (
+          {/* Session missing: prompt sign-in instead of dead-end error */}
+          {sessionMissing && !user ? (
+            <>
+              <LogIn className="h-12 w-12 text-accent mx-auto" />
+              <h2 className="font-instrument-serif text-xl">Sign in to finish connecting</h2>
+              <p className="text-sm text-muted-foreground">
+                Please sign in to Tempo first, then we'll finish connecting Spotify. Your Spotify authorization has been saved.
+              </p>
+              <Button variant="hero" onClick={handleGoToLogin}>Sign in to Tempo</Button>
+              <Button variant="ghost" size="sm" onClick={handleBack} className="text-muted-foreground">
+                Cancel
+              </Button>
+            </>
+          ) : displayError ? (
             <>
               <AlertCircle className="h-12 w-12 text-destructive mx-auto" />
               <h2 className="font-instrument-serif text-xl">Spotify Connection Failed</h2>
@@ -117,7 +183,7 @@ const SpotifyCallback = () => {
             <>
               <Loader2 className="h-12 w-12 text-accent mx-auto animate-spin" />
               <h2 className="font-instrument-serif text-xl">Importing songs…</h2>
-              <p className="text-sm text-muted-foreground">We’re bringing in your saved Spotify tracks for recommendations and playlist creation.</p>
+              <p className="text-sm text-muted-foreground">We're bringing in your saved Spotify tracks for recommendations and playlist creation.</p>
             </>
           ) : status === "complete" ? (
             <>
