@@ -120,27 +120,31 @@ const PlaylistDetail = () => {
           {allTracks.map((track, i) => {
             const isNew = acceptedRecs.some((r) => r.track.id === track.id);
             return (
-            <div
-              key={track.id}
-              className="group grid grid-cols-[40px_1fr_1fr_80px_80px_40px] gap-4 px-5 py-3 items-center hover:bg-secondary/30 transition-colors"
-            >
-              <span className="text-sm text-muted-foreground group-hover:hidden">{i + 1}</span>
-              <Play className="w-4 h-4 text-accent hidden group-hover:block" />
-              <div>
-                <p className="text-sm font-medium truncate">{track.title}</p>
-                <p className="text-xs text-muted-foreground">{track.artist}</p>
-              </div>
-              <p className="text-sm text-muted-foreground truncate">{track.album}</p>
-              <p className="text-sm text-muted-foreground">{track.tempo}</p>
-              <p className="text-xs text-muted-foreground">{track.mood}</p>
-              <button
-                className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
-                onClick={() => toast("Track options", { description: `Options for "${track.title}" coming soon.` })}
+              <div
+                key={track.id}
+                className={`group grid grid-cols-[40px_1fr_1fr_80px_80px_40px] gap-4 px-5 py-3 items-center hover:bg-secondary/30 transition-colors ${isNew ? "bg-accent/5" : ""}`}
               >
-                <MoreHorizontal className="w-4 h-4" />
-              </button>
-            </div>
-          ))}
+                <span className="text-sm text-muted-foreground group-hover:hidden">{i + 1}</span>
+                <Play className="w-4 h-4 text-accent hidden group-hover:block" />
+                <div>
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-medium truncate">{track.title}</p>
+                    {isNew && <span className="px-1.5 py-0.5 rounded text-[10px] bg-accent/10 text-accent font-medium">New</span>}
+                  </div>
+                  <p className="text-xs text-muted-foreground">{track.artist}</p>
+                </div>
+                <p className="text-sm text-muted-foreground truncate">{track.album}</p>
+                <p className="text-sm text-muted-foreground">{track.tempo}</p>
+                <p className="text-xs text-muted-foreground">{track.mood}</p>
+                <button
+                  className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
+                  onClick={() => toast("Track options", { description: `Options for "${track.title}" coming soon.` })}
+                >
+                  <MoreHorizontal className="w-4 h-4" />
+                </button>
+              </div>
+            );
+          })}
         </div>
 
         {/* Suggested Additions */}
