@@ -1,8 +1,10 @@
 import AppLayout from "@/components/app/AppLayout";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import { CheckCircle2 } from "lucide-react";
+import { CheckCircle2, Loader2 } from "lucide-react";
 import { useConnections } from "@/hooks/use-connections";
+import { useSpotify } from "@/hooks/use-spotify";
+import { useAuth } from "@/hooks/use-auth";
 import { useState } from "react";
 
 const Settings = () => {
