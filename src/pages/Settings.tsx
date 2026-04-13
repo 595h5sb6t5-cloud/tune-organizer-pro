@@ -24,9 +24,16 @@ const Settings = () => {
               </div>
               <Button variant="ghost" size="sm" className="rounded-lg text-destructive">Disconnect</Button>
             </div>
-            <Button variant="secondary" size="sm" className="rounded-lg mt-3 w-full">
-              Connect Apple Music
-            </Button>
+            <div className="flex items-center justify-between p-4 rounded-xl bg-secondary/50 mt-3">
+              <div className="flex items-center gap-3">
+                <span className="text-xl">🍎</span>
+                <div>
+                  <p className="text-sm font-medium">Apple Music</p>
+                  <p className="text-xs text-muted-foreground">Not connected</p>
+                </div>
+              </div>
+              <Button variant="hero" size="sm" className="rounded-lg">Connect</Button>
+            </div>
           </div>
 
           {/* Playlist preferences */}

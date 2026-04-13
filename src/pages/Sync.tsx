@@ -13,20 +13,34 @@ const Sync = () => {
         </div>
 
         {/* Connected platform */}
-        <div className="p-5 rounded-2xl bg-surface-elevated border border-border/50 mb-6 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-xl bg-[#1DB954]/10 flex items-center justify-center text-xl">
-              🎵
+        <div className="space-y-3 mb-6">
+          <div className="p-5 rounded-2xl bg-surface-elevated border border-border/50 flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 rounded-xl bg-[#1DB954]/10 flex items-center justify-center text-xl">
+                🎵
+              </div>
+              <div>
+                <p className="font-medium">Spotify</p>
+                <p className="text-sm text-muted-foreground">Connected as jordan.d@email.com</p>
+              </div>
             </div>
-            <div>
-              <p className="font-medium">Spotify</p>
-              <p className="text-sm text-muted-foreground">Connected as jordan.d@email.com</p>
-            </div>
+            <span className="inline-flex items-center gap-1 text-sm text-accent">
+              <CheckCircle2 className="w-4 h-4" />
+              Connected
+            </span>
           </div>
-          <span className="inline-flex items-center gap-1 text-sm text-accent">
-            <CheckCircle2 className="w-4 h-4" />
-            Connected
-          </span>
+          <div className="p-5 rounded-2xl bg-surface-elevated border border-border/50 flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 rounded-xl bg-[#FC3C44]/10 flex items-center justify-center text-xl">
+                🍎
+              </div>
+              <div>
+                <p className="font-medium">Apple Music</p>
+                <p className="text-sm text-muted-foreground">Not connected</p>
+              </div>
+            </div>
+            <Button variant="hero" size="sm" className="rounded-lg">Connect</Button>
+          </div>
         </div>
 
         {/* Playlist sync list */}
