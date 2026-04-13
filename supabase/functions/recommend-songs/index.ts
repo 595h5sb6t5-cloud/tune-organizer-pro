@@ -6,6 +6,60 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+function extractJson(raw: string): any {
+  let cleaned = raw.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
+  const start = cleaned.search(/[\{\[]/);
+  if (start === -1) throw new Error("No JSON found in response");
+  cleaned = cleaned.substring(start);
+
+  const root = cleaned[0];
+  const rootClose = root === "[" ? "]" : "}";
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  let end = -1;
+
+  for (let i = 0; i < cleaned.length; i++) {
+    const ch = cleaned[i];
+    if (escape) { escape = false; continue; }
+    if (ch === "\\") { escape = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === root) depth++;
+    if (ch === rootClose) {
+      depth--;
+      if (depth === 0) { end = i + 1; break; }
+    }
+  }
+
+  if (end !== -1) cleaned = cleaned.slice(0, end);
+
+  try { return JSON.parse(cleaned); } catch { /* fall through to repair */ }
+
+  const opens = { "{": 0, "[": 0 };
+  inString = false; escape = false;
+  for (const ch of cleaned) {
+    if (escape) { escape = false; continue; }
+    if (ch === "\\") { escape = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === "{") opens["{"]++;
+    if (ch === "}") opens["{"]--;
+    if (ch === "[") opens["["]++;
+    if (ch === "]") opens["["]--;
+  }
+  if (inString) cleaned += '"';
+  cleaned = cleaned
+    .replace(/,\s*"[^"]*"?\s*:?\s*"?[^"]*$/, "")
+    .replace(/,\s*\{[^}]*$/, "")
+    .replace(/,\s*\[[^\]]*$/, "")
+    .replace(/,\s*$/, "");
+  for (let i = 0; i < opens["["]; i++) cleaned += "]";
+  for (let i = 0; i < opens["{"]; i++) cleaned += "}";
+  cleaned = cleaned.replace(/[\x00-\x1F\x7F]/g, " ").replace(/,\s*}/g, "}").replace(/,\s*]/g, "]");
+  return JSON.parse(cleaned);
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -40,7 +94,7 @@ serve(async (req) => {
 
     const artists = [...new Set(tracks.map((t: any) => t.artist))].join(", ");
 
-    // Build vibe context section — this is the real intelligence
+    // Build vibe context section
     let vibeSection = "";
     if (vibeContext) {
       vibeSection = `
@@ -155,35 +209,58 @@ ${tasteContext}
 EXCLUDE (user already has these):
 ${excludeList}
 
-Generate exactly ${count} recommendations. Return this JSON:
-{
-  "recommendations": [
-    {
-      "title": "Song Title",
-      "artist": "Artist Name",
-      "album": "Album Name",
-      "year": 2020,
-      "genre": "Specific Subgenre",
-      "mood": "Primary Mood",
-      "matchScore": 88,
-      "reason": "One-line summary of why this fits the playlist",
-      "aiExplanation": "2-3 sentences explaining WHY this song belongs using specific audio characteristics. Reference tempo, energy level, valence, production style, rhythmic feel, instrumentation, and emotional tone. Example: 'At 85 BPM with 0.3 valence and atmospheric production, this track shares the same nocturnal sonic space as the playlist. The reverb-heavy vocal treatment and subdued bass frequencies mirror the dark, contemplative energy that defines this collection.'",
-      "moodTags": ["Tag1", "Tag2", "Tag3"],
-      "popularityTier": "deep-cut",
-      "insertAfterTrack": "Name of existing track it should go after",
-      "insertExplanation": "Explain the sonic transition — how this track picks up from the previous one and flows into the next",
-      "sonicConnection": "The specific sonic element that connects this to the playlist DNA (e.g. 'the same reverb-heavy guitar tone found throughout the playlist')",
-      "compatibilityBreakdown": {
-        "mood": 90,
-        "production": 85,
-        "energy": 88,
-        "emotion": 92,
-        "flow": 80,
-        "freshness": 85
-      }
-    }
-  ]
-}`;
+Generate exactly ${count} recommendations using the save_playlist_recommendations tool. You MUST call the tool function.`;
+
+    const tools = [
+      {
+        type: "function",
+        function: {
+          name: "save_playlist_recommendations",
+          description: "Save curated playlist-specific recommendations",
+          parameters: {
+            type: "object",
+            properties: {
+              recommendations: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    title: { type: "string" },
+                    artist: { type: "string" },
+                    album: { type: "string" },
+                    year: { type: "integer" },
+                    genre: { type: "string" },
+                    mood: { type: "string" },
+                    matchScore: { type: "integer" },
+                    reason: { type: "string" },
+                    aiExplanation: { type: "string" },
+                    moodTags: { type: "array", items: { type: "string" } },
+                    popularityTier: { type: "string", enum: ["deep-cut", "mid", "well-known"] },
+                    insertAfterTrack: { type: "string" },
+                    insertExplanation: { type: "string" },
+                    sonicConnection: { type: "string" },
+                    compatibilityBreakdown: {
+                      type: "object",
+                      properties: {
+                        mood: { type: "integer" },
+                        production: { type: "integer" },
+                        energy: { type: "integer" },
+                        emotion: { type: "integer" },
+                        flow: { type: "integer" },
+                        freshness: { type: "integer" },
+                      },
+                      required: ["mood", "production", "energy", "emotion", "flow", "freshness"],
+                    },
+                  },
+                  required: ["title", "artist", "album", "matchScore", "reason", "aiExplanation", "moodTags", "popularityTier", "compatibilityBreakdown"],
+                },
+              },
+            },
+            required: ["recommendations"],
+          },
+        },
+      },
+    ];
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -197,6 +274,8 @@ Generate exactly ${count} recommendations. Return this JSON:
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
         ],
+        tools,
+        tool_choice: { type: "function", function: { name: "save_playlist_recommendations" } },
         temperature: 0.65,
       }),
     });
@@ -216,16 +295,49 @@ Generate exactly ${count} recommendations. Return this JSON:
     }
 
     const data = await response.json();
-    const content = data.choices?.[0]?.message?.content;
-    if (!content) throw new Error("No content in AI response");
+    const message = data.choices?.[0]?.message ?? {};
 
-    let parsed;
-    try {
-      const cleaned = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-      parsed = JSON.parse(cleaned);
-    } catch {
-      console.error("Failed to parse AI response:", content);
-      throw new Error("Failed to parse AI recommendations");
+    // Try tool call arguments first, then content
+    const toolArgs = message.tool_calls?.[0]?.function?.arguments;
+    const content = typeof message.content === "string"
+      ? message.content
+      : Array.isArray(message.content)
+        ? message.content.map((part: any) => typeof part?.text === "string" ? part.text : "").join("\n")
+        : "";
+
+    let parsed: any = null;
+
+    for (const source of [toolArgs, content]) {
+      if (!source) continue;
+      try {
+        const raw = typeof source === "string" ? source : source;
+        let candidate: any;
+        if (typeof raw === "string") {
+          try { candidate = JSON.parse(raw); } catch { candidate = extractJson(raw); }
+        } else {
+          candidate = raw;
+        }
+
+        // Normalize: could be { recommendations: [...] } or just [...]
+        if (Array.isArray(candidate)) {
+          parsed = { recommendations: candidate };
+        } else if (candidate?.recommendations && Array.isArray(candidate.recommendations)) {
+          parsed = candidate;
+        } else if (candidate?.arguments?.recommendations) {
+          parsed = candidate.arguments;
+        }
+        if (parsed) break;
+      } catch (err) {
+        console.warn("Failed to parse source:", err);
+      }
+    }
+
+    if (!parsed) {
+      console.warn("Unable to parse AI playlist recommendations, returning empty", {
+        hasToolCall: Boolean(toolArgs),
+        hasContent: Boolean(content),
+      });
+      parsed = { recommendations: [] };
     }
 
     return new Response(JSON.stringify(parsed), {
