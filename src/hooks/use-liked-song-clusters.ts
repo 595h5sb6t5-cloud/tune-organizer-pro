@@ -96,7 +96,7 @@ export function useLikedSongClusters() {
     setLikedCount(totalSongs);
     setProgress(prev => ({ ...prev, totalAnalyzed, totalSongs }));
 
-    const clusterData = await fetchAllRows("liked_song_clusters", user.id,
+    const clusterData = await fetchAllFromTable("liked_song_clusters", user.id,
       "id, name, description, vibe_description, ai_explanation, mood_tags, color_hex, energy_level, tempo_range, era_range, track_count, sort_order, cover_tracks, spotify_playlist_id, spotify_exported_at, spotify_playlist_url");
 
     if (!clusterData.length) {
@@ -251,7 +251,7 @@ export function useLikedSongClusters() {
       setProgress(prev => ({ ...prev, phase: "saving", statusMessage: "Building playlists from sonic worlds…" }));
 
       // Clear old clusters
-      const existingClusters = await fetchAllRows("liked_song_clusters", user.id, "id");
+      const existingClusters = await fetchAllFromTable("liked_song_clusters", user.id, "id");
       if (existingClusters.length) {
         const ids = existingClusters.map(c => c.id);
         for (let i = 0; i < ids.length; i += 50) {
