@@ -61,7 +61,7 @@ export function useLikedSongClusters() {
     // Get clusters
     const { data: clusterData } = await supabase
       .from("liked_song_clusters")
-      .select("id, name, description, vibe_description, mood_tags, color_hex, energy_level, tempo_range, era_range, track_count, sort_order")
+      .select("id, name, description, vibe_description, ai_explanation, mood_tags, color_hex, energy_level, tempo_range, era_range, track_count, sort_order, cover_tracks")
       .eq("user_id", user.id)
       .order("sort_order");
 
