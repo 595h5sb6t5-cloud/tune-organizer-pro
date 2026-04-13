@@ -14,6 +14,7 @@ import Discover from "./pages/Discover.tsx";
 import RecommendationHistory from "./pages/RecommendationHistory.tsx";
 import Sync from "./pages/Sync.tsx";
 import Settings from "./pages/Settings.tsx";
+import SpotifyCallback from "./pages/SpotifyCallback.tsx";
 import NotFound from "./pages/NotFound.tsx";
 
 const queryClient = new QueryClient();
@@ -36,6 +37,7 @@ const App = () => (
           <Route path="/history" element={<RecommendationHistory />} />
           <Route path="/sync" element={<Sync />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/spotify-callback" element={<SpotifyCallback />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
