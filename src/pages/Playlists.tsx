@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import AppLayout from "@/components/app/AppLayout";
 import { Button } from "@/components/ui/button";
-import { ListMusic, Sparkles, Headphones, Music, RefreshCw, Loader2, Heart, Users, CheckCircle2, AlertCircle, Circle } from "lucide-react";
+import { ListMusic, Sparkles, Headphones, Music, RefreshCw, Loader2, Heart, Users, CheckCircle2, AlertCircle, Circle, Disc3 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useAuth } from "@/hooks/use-auth";
 import { useSpotifyLibrary, type SyncStageState } from "@/hooks/use-spotify-library";
@@ -30,6 +30,8 @@ const Playlists = () => {
     likedSongs,
     likedCount,
     followedArtists,
+    savedAlbums,
+    albumCount,
     loading,
     syncing,
     syncStages,
@@ -47,7 +49,6 @@ const Playlists = () => {
     }
   };
 
-  // Show toast when sync finishes
   const prevSyncing = useRef(syncing);
   useEffect(() => {
     if (prevSyncing.current && !syncing && lastSyncResult) {
@@ -56,6 +57,8 @@ const Playlists = () => {
       const parts: string[] = [];
       if (r.liked_songs_added > 0) parts.push(`+${r.liked_songs_added} songs`);
       if (r.liked_songs_removed > 0) parts.push(`-${r.liked_songs_removed} songs`);
+      if (r.albums_added > 0) parts.push(`+${r.albums_added} albums`);
+      if (r.albums_removed > 0) parts.push(`-${r.albums_removed} albums`);
       if (r.playlists_changed > 0) parts.push(`${r.playlists_changed} playlists updated`);
       if (r.playlists_removed > 0) parts.push(`${r.playlists_removed} playlists removed`);
       if (r.artists_added > 0) parts.push(`+${r.artists_added} artists`);
@@ -74,14 +77,14 @@ const Playlists = () => {
           <div className="flex items-center justify-between mb-8">
             <div>
               <h1 className="font-heading text-3xl mb-1">Your Library</h1>
-              <p className="text-muted-foreground">Playlists and liked songs from Spotify.</p>
+              <p className="text-muted-foreground">Your full Spotify library — songs, albums, playlists, and artists.</p>
             </div>
           </div>
           <div className="rounded-2xl bg-surface-elevated border border-border/50 p-12 text-center">
             <Headphones className="w-10 h-10 text-muted-foreground mx-auto mb-4" />
             <h2 className="font-heading text-xl mb-2">Connect Spotify first</h2>
             <p className="text-sm text-muted-foreground max-w-sm mx-auto mb-6">
-              Your playlists and liked songs will appear here after you connect Spotify.
+              Your full library will appear here after you connect Spotify.
             </p>
             <Button variant="hero" asChild>
               <Link to="/settings">Go to Settings</Link>
@@ -92,7 +95,7 @@ const Playlists = () => {
     );
   }
 
-  const hasData = playlists.length > 0 || likedCount > 0 || followedArtists.length > 0;
+  const hasData = playlists.length > 0 || likedCount > 0 || followedArtists.length > 0 || albumCount > 0;
   const hasAnySyncActivity = syncStages.some(s => s.status !== "pending");
 
   return (
@@ -102,7 +105,9 @@ const Playlists = () => {
           <div>
             <h1 className="font-heading text-3xl mb-1">Your Library</h1>
             <p className="text-muted-foreground">
-              {playlists.length} playlists · {likedCount} liked songs
+              {likedCount} liked songs
+              {albumCount > 0 && ` · ${albumCount} albums`}
+              {playlists.length > 0 && ` · ${playlists.length} playlists`}
               {followedArtists.length > 0 && ` · ${followedArtists.length} artists`}
             </p>
           </div>
@@ -145,7 +150,7 @@ const Playlists = () => {
                 {syncing ? "Syncing your Spotify library…" : "Sync complete"}
               </span>
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
               {syncStages.map((s) => (
                 <div
                   key={s.stage}
@@ -170,7 +175,6 @@ const Playlists = () => {
           </div>
         )}
 
-        {/* Show existing data while syncing, or show loading only on first load with no data */}
         {loading && !hasData ? (
           <div className="flex justify-center py-20">
             <Loader2 className="w-8 h-8 animate-spin text-accent" />
@@ -217,11 +221,62 @@ const Playlists = () => {
               )}
             </div>
 
+            {/* Saved Albums section */}
+            <div>
+              <div className="flex items-center gap-3 mb-4">
+                <Disc3 className="w-5 h-5 text-accent" />
+                <h2 className="font-heading text-xl">Saved Albums</h2>
+                <span className="text-sm text-muted-foreground">({albumCount})</span>
+              </div>
+
+              {savedAlbums.length === 0 ? (
+                <div className="rounded-2xl bg-surface-elevated border border-border/50 p-8 text-center">
+                  <Disc3 className="w-8 h-8 text-muted-foreground mx-auto mb-3" />
+                  <p className="text-sm text-muted-foreground">No saved albums imported yet.</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                  {savedAlbums.slice(0, 16).map((album) => (
+                    <div key={album.id} className="rounded-2xl bg-surface-elevated border border-border/50 overflow-hidden">
+                      <div className="aspect-square bg-secondary relative overflow-hidden">
+                        {album.image_url ? (
+                          <img src={album.image_url} alt={album.album_name} className="w-full h-full object-cover" loading="lazy" />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center">
+                            <Disc3 className="w-12 h-12 text-muted-foreground" />
+                          </div>
+                        )}
+                        {album.album_type && (
+                          <span className="absolute top-2 right-2 px-2 py-0.5 rounded-full text-[10px] font-medium bg-muted/80 text-muted-foreground capitalize">
+                            {album.album_type}
+                          </span>
+                        )}
+                      </div>
+                      <div className="p-3">
+                        <p className="text-sm font-medium truncate">{album.album_name}</p>
+                        <p className="text-xs text-muted-foreground truncate mt-0.5">{album.artist_name}</p>
+                        <p className="text-[10px] text-muted-foreground/60 mt-1">
+                          {album.total_tracks} tracks
+                          {album.release_date && ` · ${album.release_date.slice(0, 4)}`}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {albumCount > 16 && (
+                <p className="text-xs text-muted-foreground mt-3 text-center">
+                  Showing 16 of {albumCount} saved albums
+                </p>
+              )}
+            </div>
+
             {/* Spotify Playlists section */}
             <div>
               <div className="flex items-center gap-3 mb-4">
                 <ListMusic className="w-5 h-5 text-accent" />
-                <h2 className="font-heading text-xl">Spotify Playlists</h2>
+                <h2 className="font-heading text-xl">Playlists</h2>
                 <span className="text-sm text-muted-foreground">({playlists.length})</span>
               </div>
 
