@@ -321,7 +321,7 @@ export default function CreatePlaylistDialog({ onPlaylistCreated }: Props) {
                       </div>
                       <div className="flex items-center gap-1 flex-shrink-0">
                         {info?.preview_url && (
-                          <AudioPreviewButton previewUrl={info.preview_url} size="sm" />
+                          <AudioPreviewButton trackId={`rec-${idx}`} previewUrl={info.preview_url} size="sm" />
                         )}
                         <Button
                           variant="ghost"
