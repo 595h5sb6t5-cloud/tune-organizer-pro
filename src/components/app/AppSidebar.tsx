@@ -1,5 +1,6 @@
 import { Music2, LayoutDashboard, ListMusic, Settings, Upload, LogOut, Sparkles, History } from "lucide-react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 
 const navItems = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/dashboard" },
@@ -12,6 +13,12 @@ const navItems = [
 
 const AppSidebar = () => {
   const location = useLocation();
+  const navigate = useNavigate();
+
+  const handleLogout = () => {
+    toast.success("Logged out successfully");
+    navigate("/");
+  };
 
   return (
     <aside className="fixed left-0 top-0 bottom-0 w-60 bg-surface-elevated border-r border-border flex flex-col z-40">
@@ -53,7 +60,11 @@ const AppSidebar = () => {
             <p className="text-sm font-medium truncate">Jordan D.</p>
             <p className="text-xs text-muted-foreground">Premium</p>
           </div>
-          <button className="text-muted-foreground hover:text-foreground transition-colors">
+          <button
+            onClick={handleLogout}
+            className="text-muted-foreground hover:text-foreground transition-colors"
+            title="Log out"
+          >
             <LogOut className="w-4 h-4" />
           </button>
         </div>

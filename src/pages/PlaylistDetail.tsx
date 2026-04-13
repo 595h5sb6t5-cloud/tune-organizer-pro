@@ -1,11 +1,18 @@
 import AppLayout from "@/components/app/AppLayout";
-import { samplePlaylists, type Recommendation } from "@/lib/sample-data";
+import { samplePlaylists, type Recommendation, type Track } from "@/lib/sample-data";
 import { Button } from "@/components/ui/button";
 import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, Upload, RefreshCw, Shuffle, Play, MoreHorizontal, Plus, X, Bookmark, Sparkles, Loader2, Gem, TrendingUp, Music } from "lucide-react";
-import { useState, useEffect } from "react";
+import { ArrowLeft, Upload, RefreshCw, Shuffle, Play, MoreHorizontal, Plus, X, Bookmark, Sparkles, Loader2, Gem, TrendingUp, Music, Trash2, ArrowRightLeft, Pencil, Check } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
 import { toast } from "sonner";
 import { useAIRecommendations } from "@/hooks/use-ai-recommendations";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 
 const tierConfig = {
   "deep-cut": { label: "Deep Cut", icon: Gem, className: "text-accent bg-accent/10" },
@@ -17,6 +24,11 @@ const PlaylistDetail = () => {
   const { id } = useParams();
   const playlist = samplePlaylists.find((p) => p.id === id) ?? samplePlaylists[0];
 
+  const [localTracks, setLocalTracks] = useState<Track[]>(playlist.tracks);
+  const [playlistName, setPlaylistName] = useState(playlist.name);
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [editNameValue, setEditNameValue] = useState(playlist.name);
+
   const {
     recommendations: aiRecs,
     loading: aiLoading,
@@ -26,17 +38,16 @@ const PlaylistDetail = () => {
     recordDismissed,
   } = useAIRecommendations({
     playlistId: playlist.id,
-    playlistName: playlist.name,
+    playlistName: playlistName,
     playlistMood: playlist.mood,
     playlistDescription: playlist.description,
-    tracks: playlist.tracks,
+    tracks: localTracks,
   });
 
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
   const [acceptedRecs, setAcceptedRecs] = useState<Recommendation[]>([]);
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
   const [syncing, setSyncing] = useState(false);
-  const [regenerating, setRegenerating] = useState(false);
   const [expandedRecId, setExpandedRecId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -45,9 +56,19 @@ const PlaylistDetail = () => {
     }
   }, [hasLoaded, aiLoading, generate]);
 
+  // Reset state when playlist changes
+  useEffect(() => {
+    setLocalTracks(playlist.tracks);
+    setPlaylistName(playlist.name);
+    setEditNameValue(playlist.name);
+    setDismissedIds(new Set());
+    setAcceptedRecs([]);
+    setSavedIds(new Set());
+  }, [playlist.id]);
+
   const acceptedIds = new Set(acceptedRecs.map((r) => r.id));
   const visibleRecs = aiRecs.filter((r) => !dismissedIds.has(r.id) && !acceptedIds.has(r.id));
-  const allTracks = [...playlist.tracks, ...acceptedRecs.map((r) => r.track)];
+  const allTracks = [...localTracks, ...acceptedRecs.map((r) => r.track)];
 
   const handleSync = () => {
     setSyncing(true);
@@ -55,28 +76,31 @@ const PlaylistDetail = () => {
     setTimeout(() => {
       setSyncing(false);
       toast.dismiss();
-      toast.success(`"${playlist.name}" synced to Spotify!`);
+      toast.success(`"${playlistName}" synced to Spotify!`);
     }, 2000);
   };
 
-  const handleRegenerate = () => {
-    setRegenerating(true);
-    toast.loading("Regenerating playlist…");
-    setTimeout(() => {
-      setRegenerating(false);
-      toast.dismiss();
-      toast.success(`"${playlist.name}" regenerated with fresh picks!`);
-    }, 2500);
-  };
-
-  const handleShuffle = () => {
+  const handleShuffle = useCallback(() => {
+    const shuffled = [...allTracks];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    // Split back into local tracks and accepted
+    const originalIds = new Set(playlist.tracks.map((t) => t.id));
+    const newLocal = shuffled.filter((t) => originalIds.has(t.id));
+    const newAccepted = shuffled.filter((t) => !originalIds.has(t.id));
+    setLocalTracks(newLocal);
+    setAcceptedRecs((prev) =>
+      newAccepted.map((t) => prev.find((r) => r.track.id === t.id)!).filter(Boolean)
+    );
     toast.success("Playlist order shuffled!");
-  };
+  }, [allTracks, playlist.tracks]);
 
   const handleAddRec = (rec: Recommendation) => {
     setAcceptedRecs((prev) => [...prev, rec]);
     recordAccepted(rec.track);
-    toast.success(`Added "${rec.track.title}" to ${playlist.name}`);
+    toast.success(`Added "${rec.track.title}" to ${playlistName}`);
   };
 
   const handleDismissRec = (rec: Recommendation) => {
@@ -104,6 +128,30 @@ const PlaylistDetail = () => {
     generate();
   };
 
+  const handleRemoveTrack = (track: Track) => {
+    // Check if it's an accepted rec
+    const recMatch = acceptedRecs.find((r) => r.track.id === track.id);
+    if (recMatch) {
+      setAcceptedRecs((prev) => prev.filter((r) => r.track.id !== track.id));
+    } else {
+      setLocalTracks((prev) => prev.filter((t) => t.id !== track.id));
+    }
+    toast(`Removed "${track.title}" from playlist`);
+  };
+
+  const handleSaveName = () => {
+    if (editNameValue.trim()) {
+      setPlaylistName(editNameValue.trim());
+      setIsEditingName(false);
+      toast.success(`Playlist renamed to "${editNameValue.trim()}"`);
+    }
+  };
+
+  const handleCancelEditName = () => {
+    setEditNameValue(playlistName);
+    setIsEditingName(false);
+  };
+
   return (
     <AppLayout>
       <div className="max-w-4xl">
@@ -118,7 +166,38 @@ const PlaylistDetail = () => {
             {playlist.emoji}
           </div>
           <div className="flex-1">
-            <h1 className="font-heading text-4xl mb-1">{playlist.name}</h1>
+            {isEditingName ? (
+              <div className="flex items-center gap-2 mb-1">
+                <input
+                  type="text"
+                  value={editNameValue}
+                  onChange={(e) => setEditNameValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSaveName();
+                    if (e.key === "Escape") handleCancelEditName();
+                  }}
+                  className="font-heading text-4xl bg-transparent border-b-2 border-accent outline-none w-full"
+                  autoFocus
+                />
+                <Button variant="ghost" size="icon" className="rounded-lg" onClick={handleSaveName}>
+                  <Check className="w-4 h-4 text-accent" />
+                </Button>
+                <Button variant="ghost" size="icon" className="rounded-lg" onClick={handleCancelEditName}>
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 mb-1 group">
+                <h1 className="font-heading text-4xl">{playlistName}</h1>
+                <button
+                  onClick={() => setIsEditingName(true)}
+                  className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
+                  title="Rename playlist"
+                >
+                  <Pencil className="w-4 h-4" />
+                </button>
+              </div>
+            )}
             <p className="text-muted-foreground mb-4">{playlist.description}</p>
             <div className="flex items-center gap-6 text-sm text-muted-foreground mb-4">
               <span>{allTracks.length} tracks</span>
@@ -127,15 +206,15 @@ const PlaylistDetail = () => {
               <span className="text-accent font-medium">{playlist.cohesionScore}% cohesion</span>
             </div>
             <div className="flex gap-3">
-              <Button variant="hero" className="rounded-xl gap-2" onClick={handleSync} disabled={syncing}>
+              <Button variant="hero" className="rounded-xl gap-2" onClick={handleSync} disabled={syncing || allTracks.length === 0}>
                 {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
                 {syncing ? "Syncing…" : "Sync to Spotify"}
               </Button>
-              <Button variant="secondary" className="rounded-xl gap-2" onClick={handleRegenerate} disabled={regenerating}>
-                <RefreshCw className={`w-4 h-4 ${regenerating ? "animate-spin" : ""}`} />
-                {regenerating ? "Regenerating…" : "Regenerate"}
+              <Button variant="secondary" className="rounded-xl gap-2" onClick={handleRefreshRecs} disabled={aiLoading}>
+                <RefreshCw className={`w-4 h-4 ${aiLoading ? "animate-spin" : ""}`} />
+                {aiLoading ? "Loading…" : "New Suggestions"}
               </Button>
-              <Button variant="ghost" size="icon" className="rounded-xl" onClick={handleShuffle}>
+              <Button variant="ghost" size="icon" className="rounded-xl" onClick={handleShuffle} disabled={allTracks.length < 2} title="Shuffle track order">
                 <Shuffle className="w-4 h-4" />
               </Button>
             </div>
@@ -152,34 +231,55 @@ const PlaylistDetail = () => {
             <span>Mood</span>
             <span />
           </div>
-          {allTracks.map((track, i) => {
-            const isNew = acceptedRecs.some((r) => r.track.id === track.id);
-            return (
-              <div
-                key={track.id}
-                className={`group grid grid-cols-[40px_1fr_1fr_80px_80px_40px] gap-4 px-5 py-3 items-center hover:bg-secondary/30 transition-colors ${isNew ? "bg-accent/5" : ""}`}
-              >
-                <span className="text-sm text-muted-foreground group-hover:hidden">{i + 1}</span>
-                <Play className="w-4 h-4 text-accent hidden group-hover:block" />
-                <div>
-                  <div className="flex items-center gap-2">
-                    <p className="text-sm font-medium truncate">{track.title}</p>
-                    {isNew && <span className="px-1.5 py-0.5 rounded text-[10px] bg-accent/10 text-accent font-medium">New</span>}
-                  </div>
-                  <p className="text-xs text-muted-foreground">{track.artist}</p>
-                </div>
-                <p className="text-sm text-muted-foreground truncate">{track.album}</p>
-                <p className="text-sm text-muted-foreground">{track.tempo}</p>
-                <p className="text-xs text-muted-foreground">{track.mood}</p>
-                <button
-                  className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
-                  onClick={() => toast("Track options", { description: `Options for "${track.title}" coming soon.` })}
+          {allTracks.length === 0 ? (
+            <div className="text-center py-12">
+              <p className="text-sm text-muted-foreground">No tracks in this playlist. Add some from the suggestions below!</p>
+            </div>
+          ) : (
+            allTracks.map((track, i) => {
+              const isNew = acceptedRecs.some((r) => r.track.id === track.id);
+              return (
+                <div
+                  key={track.id}
+                  className={`group grid grid-cols-[40px_1fr_1fr_80px_80px_40px] gap-4 px-5 py-3 items-center hover:bg-secondary/30 transition-colors ${isNew ? "bg-accent/5" : ""}`}
                 >
-                  <MoreHorizontal className="w-4 h-4" />
-                </button>
-              </div>
-            );
-          })}
+                  <span className="text-sm text-muted-foreground group-hover:hidden">{i + 1}</span>
+                  <Play className="w-4 h-4 text-accent hidden group-hover:block" />
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-medium truncate">{track.title}</p>
+                      {isNew && <span className="px-1.5 py-0.5 rounded text-[10px] bg-accent/10 text-accent font-medium">New</span>}
+                    </div>
+                    <p className="text-xs text-muted-foreground">{track.artist}</p>
+                  </div>
+                  <p className="text-sm text-muted-foreground truncate">{track.album}</p>
+                  <p className="text-sm text-muted-foreground">{track.tempo}</p>
+                  <p className="text-xs text-muted-foreground">{track.mood}</p>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground">
+                        <MoreHorizontal className="w-4 h-4" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-48">
+                      <DropdownMenuItem onClick={() => toast.success(`Now playing "${track.title}"`)}>
+                        <Play className="w-3.5 h-3.5 mr-2" />
+                        Play
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        onClick={() => handleRemoveTrack(track)}
+                        className="text-destructive focus:text-destructive"
+                      >
+                        <Trash2 className="w-3.5 h-3.5 mr-2" />
+                        Remove from playlist
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              );
+            })
+          )}
         </div>
 
         {/* AI Suggested Additions */}

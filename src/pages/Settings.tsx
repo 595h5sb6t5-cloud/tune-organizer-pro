@@ -2,6 +2,7 @@ import AppLayout from "@/components/app/AppLayout";
 import { Button } from "@/components/ui/button";
 import { useState } from "react";
 import { toast } from "sonner";
+import { CheckCircle2 } from "lucide-react";
 
 const Settings = () => {
   const [spotifyConnected, setSpotifyConnected] = useState(true);
@@ -9,6 +10,26 @@ const Settings = () => {
   const [overlapMode, setOverlapMode] = useState(false);
   const [excludeExplicit, setExcludeExplicit] = useState(false);
   const [visibility, setVisibility] = useState<"Private" | "Public">("Private");
+  const [connectingSpotify, setConnectingSpotify] = useState(false);
+  const [connectingApple, setConnectingApple] = useState(false);
+
+  const handleConnectSpotify = () => {
+    setConnectingSpotify(true);
+    setTimeout(() => {
+      setSpotifyConnected(true);
+      setConnectingSpotify(false);
+      toast.success("Spotify connected!");
+    }, 1500);
+  };
+
+  const handleConnectApple = () => {
+    setConnectingApple(true);
+    setTimeout(() => {
+      setAppleConnected(true);
+      setConnectingApple(false);
+      toast.success("Apple Music connected!");
+    }, 1500);
+  };
 
   return (
     <AppLayout>
@@ -49,12 +70,10 @@ const Settings = () => {
                   variant="hero"
                   size="sm"
                   className="rounded-lg"
-                  onClick={() => {
-                    setSpotifyConnected(true);
-                    toast.success("Spotify connected!");
-                  }}
+                  onClick={handleConnectSpotify}
+                  disabled={connectingSpotify}
                 >
-                  Connect
+                  {connectingSpotify ? "Connecting…" : "Connect"}
                 </Button>
               )}
             </div>
@@ -85,12 +104,10 @@ const Settings = () => {
                   variant="hero"
                   size="sm"
                   className="rounded-lg"
-                  onClick={() => {
-                    setAppleConnected(true);
-                    toast.success("Apple Music connected!");
-                  }}
+                  onClick={handleConnectApple}
+                  disabled={connectingApple}
                 >
-                  Connect
+                  {connectingApple ? "Connecting…" : "Connect"}
                 </Button>
               )}
             </div>
@@ -113,6 +130,8 @@ const Settings = () => {
                   className={`w-10 h-6 rounded-full relative cursor-pointer transition-colors ${
                     overlapMode ? "bg-accent" : "bg-secondary"
                   }`}
+                  role="switch"
+                  aria-checked={overlapMode}
                 >
                   <div
                     className={`w-4 h-4 rounded-full bg-primary-foreground absolute top-1 transition-all ${
@@ -134,6 +153,8 @@ const Settings = () => {
                   className={`w-10 h-6 rounded-full relative cursor-pointer transition-colors ${
                     excludeExplicit ? "bg-accent" : "bg-secondary"
                   }`}
+                  role="switch"
+                  aria-checked={excludeExplicit}
                 >
                   <div
                     className={`w-4 h-4 rounded-full bg-primary-foreground absolute top-1 transition-all ${
@@ -163,15 +184,18 @@ const Settings = () => {
 
           {/* Subscription */}
           <div className="p-6 rounded-2xl bg-primary text-primary-foreground">
-            <h3 className="font-heading text-lg mb-2">Premium Plan</h3>
+            <div className="flex items-center gap-2 mb-2">
+              <h3 className="font-heading text-lg">Premium Plan</h3>
+              <CheckCircle2 className="w-4 h-4 text-accent" />
+            </div>
             <p className="text-sm opacity-80 mb-4">Unlimited imports, playlists, and exports. Renews Jan 15, 2027.</p>
             <Button
               variant="warm"
               size="sm"
-              className="rounded-lg"
-              onClick={() => toast("Subscription management coming soon")}
+              className="rounded-lg opacity-60 cursor-not-allowed"
+              disabled
             >
-              Manage Subscription
+              Manage Subscription — Coming Soon
             </Button>
           </div>
         </div>
