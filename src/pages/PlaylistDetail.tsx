@@ -1,15 +1,23 @@
 import AppLayout from "@/components/app/AppLayout";
-import { samplePlaylists, getRecommendationsForPlaylist, type Recommendation } from "@/lib/sample-data";
+import { samplePlaylists, type Recommendation } from "@/lib/sample-data";
 import { Button } from "@/components/ui/button";
 import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, Upload, RefreshCw, Shuffle, Play, MoreHorizontal, Plus, X, Bookmark, Sparkles, Loader2, Check } from "lucide-react";
-import { useState } from "react";
+import { ArrowLeft, Upload, RefreshCw, Shuffle, Play, MoreHorizontal, Plus, X, Bookmark, Sparkles, Loader2 } from "lucide-react";
+import { useState, useEffect } from "react";
 import { toast } from "sonner";
+import { useAIRecommendations } from "@/hooks/use-ai-recommendations";
 
 const PlaylistDetail = () => {
   const { id } = useParams();
   const playlist = samplePlaylists.find((p) => p.id === id) ?? samplePlaylists[0];
-  const allRecs = getRecommendationsForPlaylist(playlist.id).filter((r) => r.status === "pending");
+
+  const { recommendations: aiRecs, loading: aiLoading, hasLoaded, generate } = useAIRecommendations({
+    playlistId: playlist.id,
+    playlistName: playlist.name,
+    playlistMood: playlist.mood,
+    playlistDescription: playlist.description,
+    tracks: playlist.tracks,
+  });
 
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
   const [acceptedRecs, setAcceptedRecs] = useState<Recommendation[]>([]);
@@ -17,8 +25,15 @@ const PlaylistDetail = () => {
   const [syncing, setSyncing] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
 
+  // Auto-generate on first visit
+  useEffect(() => {
+    if (!hasLoaded && !aiLoading) {
+      generate();
+    }
+  }, [hasLoaded, aiLoading, generate]);
+
   const acceptedIds = new Set(acceptedRecs.map((r) => r.id));
-  const visibleRecs = allRecs.filter((r) => !dismissedIds.has(r.id) && !acceptedIds.has(r.id));
+  const visibleRecs = aiRecs.filter((r) => !dismissedIds.has(r.id) && !acceptedIds.has(r.id));
   const allTracks = [...playlist.tracks, ...acceptedRecs.map((r) => r.track)];
 
   const handleSync = () => {
@@ -67,6 +82,11 @@ const PlaylistDetail = () => {
       toast.success(`Saved "${rec.track.title}" for later`);
       return next;
     });
+  };
+
+  const handleRefreshRecs = () => {
+    setDismissedIds(new Set());
+    generate();
   };
 
   return (
@@ -147,53 +167,83 @@ const PlaylistDetail = () => {
           })}
         </div>
 
-        {/* Suggested Additions */}
-        {visibleRecs.length > 0 && (
-          <div>
-            <div className="flex items-center gap-2 mb-4">
+        {/* AI Suggested Additions */}
+        <div>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
               <Sparkles className="w-5 h-5 text-accent" />
               <h2 className="font-heading text-2xl">Suggested Additions</h2>
-              <span className="text-xs text-muted-foreground ml-1">({visibleRecs.length} songs)</span>
+              {!aiLoading && visibleRecs.length > 0 && (
+                <span className="text-xs text-muted-foreground ml-1">({visibleRecs.length} songs)</span>
+              )}
             </div>
-            <p className="text-sm text-muted-foreground mb-4">Songs we think belong in this playlist based on your taste.</p>
-            <div className="space-y-2">
-              {visibleRecs.map((rec) => (
-                <div
-                  key={rec.id}
-                  className="group flex items-center gap-4 p-4 rounded-2xl bg-surface-elevated border border-border/50 hover:border-accent/30 hover:shadow-sm transition-all"
-                >
-                  <div className="w-10 h-10 rounded-xl bg-secondary flex items-center justify-center text-base flex-shrink-0">
-                    🎵
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-0.5">
-                      <p className="text-sm font-medium truncate">{rec.track.title}</p>
-                      <span className="text-xs font-medium text-accent">{rec.matchScore}% match</span>
-                    </div>
-                    <p className="text-xs text-muted-foreground">{rec.track.artist} · {rec.track.album}</p>
-                    <p className="text-xs text-muted-foreground mt-1">{rec.reason}</p>
-                  </div>
-                  <div className="flex gap-1.5 flex-wrap justify-end">
-                    {rec.moodTags.map((tag) => (
-                      <span key={tag} className="px-2 py-0.5 rounded-full text-[10px] bg-secondary text-muted-foreground">{tag}</span>
-                    ))}
-                  </div>
-                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-                    <Button variant="ghost" size="icon" className="w-8 h-8 rounded-lg text-accent hover:text-accent" title="Add to playlist" onClick={() => handleAddRec(rec)}>
-                      <Plus className="w-4 h-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon" className={`w-8 h-8 rounded-lg ${savedIds.has(rec.id) ? "text-warm" : ""}`} title="Save for later" onClick={() => handleSaveRec(rec)}>
-                      <Bookmark className={`w-4 h-4 ${savedIds.has(rec.id) ? "fill-current" : ""}`} />
-                    </Button>
-                    <Button variant="ghost" size="icon" className="w-8 h-8 rounded-lg text-muted-foreground" title="Dismiss" onClick={() => handleDismissRec(rec)}>
-                      <X className="w-4 h-4" />
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="rounded-lg gap-1 text-accent"
+              onClick={handleRefreshRecs}
+              disabled={aiLoading}
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${aiLoading ? "animate-spin" : ""}`} />
+              {aiLoading ? "Generating…" : "Refresh"}
+            </Button>
           </div>
-        )}
+
+          {aiLoading ? (
+            <div className="flex flex-col items-center justify-center py-12 gap-3">
+              <Loader2 className="w-6 h-6 animate-spin text-accent" />
+              <p className="text-sm text-muted-foreground">AI is finding perfect songs for this playlist…</p>
+            </div>
+          ) : visibleRecs.length > 0 ? (
+            <>
+              <p className="text-sm text-muted-foreground mb-4">AI-powered picks that match this playlist's vibe.</p>
+              <div className="space-y-2">
+                {visibleRecs.map((rec) => (
+                  <div
+                    key={rec.id}
+                    className="group flex items-center gap-4 p-4 rounded-2xl bg-surface-elevated border border-border/50 hover:border-accent/30 hover:shadow-sm transition-all"
+                  >
+                    <div className="w-10 h-10 rounded-xl bg-secondary flex items-center justify-center text-base flex-shrink-0">
+                      🎵
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <p className="text-sm font-medium truncate">{rec.track.title}</p>
+                        <span className="text-xs font-medium text-accent">{rec.matchScore}% match</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground">{rec.track.artist} · {rec.track.album}</p>
+                      <p className="text-xs text-muted-foreground mt-1">{rec.reason}</p>
+                    </div>
+                    <div className="flex gap-1.5 flex-wrap justify-end">
+                      {rec.moodTags.map((tag) => (
+                        <span key={tag} className="px-2 py-0.5 rounded-full text-[10px] bg-secondary text-muted-foreground">{tag}</span>
+                      ))}
+                    </div>
+                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                      <Button variant="ghost" size="icon" className="w-8 h-8 rounded-lg text-accent hover:text-accent" title="Add to playlist" onClick={() => handleAddRec(rec)}>
+                        <Plus className="w-4 h-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className={`w-8 h-8 rounded-lg ${savedIds.has(rec.id) ? "text-warm" : ""}`} title="Save for later" onClick={() => handleSaveRec(rec)}>
+                        <Bookmark className={`w-4 h-4 ${savedIds.has(rec.id) ? "fill-current" : ""}`} />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="w-8 h-8 rounded-lg text-muted-foreground" title="Dismiss" onClick={() => handleDismissRec(rec)}>
+                        <X className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : hasLoaded ? (
+            <div className="text-center py-12">
+              <p className="text-sm text-muted-foreground mb-3">All suggestions reviewed! Want more?</p>
+              <Button variant="secondary" className="rounded-xl gap-2" onClick={handleRefreshRecs}>
+                <Sparkles className="w-4 h-4" />
+                Generate More
+              </Button>
+            </div>
+          ) : null}
+        </div>
       </div>
     </AppLayout>
   );
