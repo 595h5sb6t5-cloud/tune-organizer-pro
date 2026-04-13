@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { Brain, Heart, Loader2, Music, RefreshCw, Sparkles, Headphones, Play, ListMusic, ExternalLink, Check, Upload } from "lucide-react";
+import { Brain, Heart, Loader2, Music, RefreshCw, Sparkles, Headphones, Play, ListMusic, ExternalLink, Check, Upload, Plus } from "lucide-react";
 import AppLayout from "@/components/app/AppLayout";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -8,6 +8,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useLikedSongClusters, type LikedSongCluster } from "@/hooks/use-liked-song-clusters";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import CreatePlaylistDialog from "@/components/app/CreatePlaylistDialog";
 
 const Playlists = () => {
   const { profile } = useAuth();
@@ -239,6 +240,7 @@ const Playlists = () => {
             </p>
           </div>
           <div className="flex items-center gap-2">
+            <CreatePlaylistDialog onPlaylistCreated={refresh} />
             {hasAnalyzed && (
               <Button variant="outline" size="sm" className="rounded-lg gap-1 text-xs" onClick={handleRebuildAll} disabled={analyzing}>
                 {analyzing ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Rebuilding…</> : <><RefreshCw className="w-3.5 h-3.5" /> Rebuild All</>}
