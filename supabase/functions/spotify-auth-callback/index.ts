@@ -149,17 +149,14 @@ Deno.serve(async (req) => {
     step = "runtime_config";
     const clientId = Deno.env.get("SPOTIFY_CLIENT_ID")?.trim();
     const clientSecret = Deno.env.get("SPOTIFY_CLIENT_SECRET")?.trim();
-    const redirectUri = Deno.env.get("SPOTIFY_REDIRECT_URI")?.trim();
     const signingSecret = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")?.trim() || Deno.env.get("LOVABLE_API_KEY")?.trim();
     const runtimeDiagnostics = {
       has_client_id: Boolean(clientId),
       has_client_secret: Boolean(clientSecret),
-      has_redirect_uri: Boolean(redirectUri),
       has_signing_secret: Boolean(signingSecret),
-      configured_redirect_uri: redirectUri ?? null,
     };
 
-    if (!clientId || !clientSecret || !redirectUri || !signingSecret) {
+    if (!clientId || !clientSecret || !signingSecret) {
       return fail(step, "Spotify credentials are not fully configured.", 500, {
         diagnostics: runtimeDiagnostics,
       });
@@ -204,14 +201,9 @@ Deno.serve(async (req) => {
       });
     }
 
-    if (statePayload.redirect_uri !== redirectUri) {
-      return fail(step, "Spotify redirect URI inside authorization state does not match the configured callback.", 400, {
-        diagnostics: {
-          state_redirect_uri: statePayload.redirect_uri,
-          configured_redirect_uri: redirectUri,
-        },
-      });
-    }
+    // Use the redirect_uri from the signed state — it was set during auth-start
+    // and must match what Spotify received in the authorization request
+    const redirectUri = statePayload.redirect_uri;
 
     step = "token_exchange";
     const tokenRes = await fetch("https://accounts.spotify.com/api/token", {
