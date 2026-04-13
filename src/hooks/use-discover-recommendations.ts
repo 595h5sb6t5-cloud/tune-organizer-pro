@@ -159,6 +159,7 @@ export function useDiscoverRecommendations() {
           discoveryMode,
           knownSongs,
           playlists,
+          savedAlbums: albumsSummary,
           audioProfile,
           tasteSignals: {
             topGenres: topN(genreTagCounts, 10),

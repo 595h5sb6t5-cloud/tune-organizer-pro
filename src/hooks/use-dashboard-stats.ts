@@ -46,6 +46,7 @@ export interface DashboardStats {
   // Library overview
   totalLikedSongs: number;
   totalPlaylists: number;
+  totalSavedAlbums: number;
   totalFollowedArtists: number;
   totalAnalyzedSongs: number;
   totalClusters: number;
@@ -93,6 +94,7 @@ export interface DashboardStats {
 const EMPTY_STATS: DashboardStats = {
   totalLikedSongs: 0,
   totalPlaylists: 0,
+  totalSavedAlbums: 0,
   totalFollowedArtists: 0,
   totalAnalyzedSongs: 0,
   totalClusters: 0,
