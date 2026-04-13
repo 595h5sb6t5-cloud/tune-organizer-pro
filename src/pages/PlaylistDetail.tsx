@@ -1,12 +1,13 @@
 import AppLayout from "@/components/app/AppLayout";
-import { samplePlaylists, type Recommendation, type Track } from "@/lib/sample-data";
 import { Button } from "@/components/ui/button";
 import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, Upload, RefreshCw, Shuffle, Play, MoreHorizontal, Plus, X, Bookmark, Sparkles, Loader2, Gem, TrendingUp, Music, Trash2, Pencil, Check } from "lucide-react";
+import { ArrowLeft, RefreshCw, Play, MoreHorizontal, Plus, X, Bookmark, Sparkles, Loader2, Gem, TrendingUp, Music, Trash2, Brain, Eye, EyeOff, Zap, Clock, Palette, Target, Shield, Lightbulb, MapPin } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
 import { toast } from "sonner";
-import { useAIRecommendations } from "@/hooks/use-ai-recommendations";
-import { useConnections } from "@/hooks/use-connections";
+import { useAuth } from "@/hooks/use-auth";
+import { usePlaylistVibe, type PlaylistVibeAnalysis } from "@/hooks/use-playlist-vibe";
+import { supabase } from "@/integrations/supabase/client";
+import { useKnownTracks } from "@/hooks/use-known-tracks";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -15,149 +16,313 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 
+interface PlaylistTrack {
+  id: string;
+  spotify_track_id: string;
+  track_name: string;
+  artist_name: string;
+  album_name: string | null;
+  image_url: string | null;
+  position: number;
+}
+
+interface SpotifyPlaylistInfo {
+  id: string;
+  name: string;
+  description: string | null;
+  image_url: string | null;
+  track_count: number;
+}
+
+interface VibeRecommendation {
+  id: string;
+  title: string;
+  artist: string;
+  album: string;
+  matchScore: number;
+  reason: string;
+  moodTags: string[];
+  insertAfterTrack: string | null;
+  insertExplanation: string | null;
+  popularityTier: "deep-cut" | "mid" | "well-known";
+}
+
 const tierConfig = {
   "deep-cut": { label: "Deep Cut", icon: Gem, className: "text-accent bg-accent/10" },
   "mid": { label: "Mid", icon: Music, className: "text-muted-foreground bg-secondary" },
   "well-known": { label: "Known", icon: TrendingUp, className: "text-warm bg-warm/10" },
 };
 
+/* ─── Playlist DNA Component ─── */
+function PlaylistDNA({ vibe, analyzing, onAnalyze }: {
+  vibe: PlaylistVibeAnalysis | null;
+  analyzing: boolean;
+  onAnalyze: () => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  if (!vibe && !analyzing) {
+    return (
+      <div className="rounded-2xl border border-border/50 bg-surface-elevated p-6 mb-8">
+        <div className="flex items-center gap-3 mb-4">
+          <Brain className="w-5 h-5 text-accent" />
+          <h2 className="font-heading text-xl">AI Playlist Identity</h2>
+        </div>
+        <p className="text-sm text-muted-foreground mb-4">
+          Let Tempo AI analyze the true vibe, mood, and identity of this playlist — going far beyond genre labels.
+        </p>
+        <Button variant="hero" className="rounded-xl gap-2" onClick={onAnalyze}>
+          <Sparkles className="w-4 h-4" />
+          Analyze Playlist DNA
+        </Button>
+      </div>
+    );
+  }
+
+  if (analyzing) {
+    return (
+      <div className="rounded-2xl border border-border/50 bg-surface-elevated p-6 mb-8">
+        <div className="flex items-center gap-3 mb-4">
+          <Loader2 className="w-5 h-5 text-accent animate-spin" />
+          <h2 className="font-heading text-xl">Analyzing Playlist DNA…</h2>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          AI is deeply analyzing mood, atmosphere, production style, rhythm, and emotional arc…
+        </p>
+      </div>
+    );
+  }
+
+  if (!vibe) return null;
+
+  const vibeColor = vibe.vibe_color_hex || "#6366f1";
+
+  return (
+    <div className="rounded-2xl border border-border/50 overflow-hidden mb-8" style={{ borderTopColor: vibeColor, borderTopWidth: 3 }}>
+      {/* Header */}
+      <div className="p-6 bg-surface-elevated">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: vibeColor + "20" }}>
+              <Brain className="w-5 h-5" style={{ color: vibeColor }} />
+            </div>
+            <div>
+              <h2 className="font-heading text-xl">AI Playlist Identity</h2>
+              <p className="text-xs text-muted-foreground">Deep vibe analysis by Tempo AI</p>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="ghost" size="sm" className="rounded-lg gap-1 text-xs" onClick={() => setExpanded(!expanded)}>
+              {expanded ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+              {expanded ? "Less" : "More"}
+            </Button>
+            <Button variant="ghost" size="sm" className="rounded-lg gap-1 text-xs text-accent" onClick={onAnalyze}>
+              <RefreshCw className="w-3.5 h-3.5" />
+              Re-analyze
+            </Button>
+          </div>
+        </div>
+
+        {/* Primary vibe */}
+        <div className="mb-4">
+          <span className="inline-block px-3 py-1.5 rounded-full text-sm font-medium" style={{ backgroundColor: vibeColor + "20", color: vibeColor }}>
+            {vibe.primary_vibe}
+          </span>
+        </div>
+
+        {/* Secondary vibes */}
+        {vibe.secondary_vibes?.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mb-4">
+            {vibe.secondary_vibes.map((v) => (
+              <span key={v} className="px-2 py-0.5 rounded-full text-[11px] bg-secondary text-muted-foreground">{v}</span>
+            ))}
+          </div>
+        )}
+
+        {/* AI explanation */}
+        <p className="text-sm text-foreground/80 leading-relaxed">{vibe.ai_explanation}</p>
+      </div>
+
+      {/* Expanded details */}
+      {expanded && (
+        <div className="border-t border-border/30 p-6 bg-card">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {vibe.mood_summary && (
+              <VibeDetail icon={<Palette className="w-4 h-4" />} title="Mood & Emotion" content={vibe.mood_summary} />
+            )}
+            {vibe.energy_summary && (
+              <VibeDetail icon={<Zap className="w-4 h-4" />} title="Energy Profile" content={vibe.energy_summary} />
+            )}
+            {vibe.tempo_summary && (
+              <VibeDetail icon={<Clock className="w-4 h-4" />} title="Tempo & Rhythm" content={vibe.tempo_summary} />
+            )}
+            {vibe.production_summary && (
+              <VibeDetail icon={<Music className="w-4 h-4" />} title="Production Style" content={vibe.production_summary} />
+            )}
+            {vibe.structural_flow && (
+              <VibeDetail icon={<TrendingUp className="w-4 h-4" />} title="Structural Flow" content={vibe.structural_flow} />
+            )}
+            {vibe.listening_context && (
+              <VibeDetail icon={<Target className="w-4 h-4" />} title="Listening Context" content={vibe.listening_context} />
+            )}
+            {vibe.cohesion_description && (
+              <VibeDetail icon={<Shield className="w-4 h-4" />} title="What Makes It Cohesive" content={vibe.cohesion_description} />
+            )}
+            {vibe.what_belongs && (
+              <VibeDetail icon={<Lightbulb className="w-4 h-4" />} title="What Belongs Here" content={vibe.what_belongs} />
+            )}
+            {vibe.what_breaks_it && (
+              <VibeDetail icon={<X className="w-4 h-4" />} title="What Breaks The Vibe" content={vibe.what_breaks_it} color="text-destructive/70" />
+            )}
+            {vibe.era_summary && (
+              <VibeDetail icon={<Clock className="w-4 h-4" />} title="Era" content={vibe.era_summary} />
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function VibeDetail({ icon, title, content, color }: { icon: React.ReactNode; title: string; content: string; color?: string }) {
+  return (
+    <div>
+      <div className={`flex items-center gap-2 mb-1.5 ${color || "text-accent"}`}>
+        {icon}
+        <span className="text-xs font-medium uppercase tracking-wider">{title}</span>
+      </div>
+      <p className="text-sm text-foreground/70 leading-relaxed">{content}</p>
+    </div>
+  );
+}
+
+/* ─── Main Page ─── */
 const PlaylistDetail = () => {
   const { id } = useParams();
-  const playlist = samplePlaylists.find((p) => p.id === id) ?? samplePlaylists[0];
-  const { connections } = useConnections();
+  const { user } = useAuth();
+  const { knownTrackIds, isKnown } = useKnownTracks();
 
-  const [localTracks, setLocalTracks] = useState<Track[]>(playlist.tracks);
-  const [playlistName, setPlaylistName] = useState(playlist.name);
-  const [isEditingName, setIsEditingName] = useState(false);
-  const [editNameValue, setEditNameValue] = useState(playlist.name);
+  // Playlist data from DB
+  const [playlist, setPlaylist] = useState<SpotifyPlaylistInfo | null>(null);
+  const [tracks, setTracks] = useState<PlaylistTrack[]>([]);
+  const [loadingPlaylist, setLoadingPlaylist] = useState(true);
 
-  const {
-    recommendations: aiRecs,
-    loading: aiLoading,
-    hasLoaded,
-    generate,
-    recordAccepted,
-    recordDismissed,
-  } = useAIRecommendations({
-    playlistId: playlist.id,
-    playlistName: playlistName,
-    playlistMood: playlist.mood,
-    playlistDescription: playlist.description,
-    tracks: localTracks,
-  });
+  // Vibe intelligence
+  const { vibe, loading: vibeLoading, analyzing, analyze } = usePlaylistVibe(id);
 
+  // Recommendations
+  const [recs, setRecs] = useState<VibeRecommendation[]>([]);
+  const [recsLoading, setRecsLoading] = useState(false);
+  const [recsLoaded, setRecsLoaded] = useState(false);
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
-  const [acceptedRecs, setAcceptedRecs] = useState<Recommendation[]>([]);
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
-  const [syncing, setSyncing] = useState(false);
   const [expandedRecId, setExpandedRecId] = useState<string | null>(null);
 
+  // Load playlist + tracks
   useEffect(() => {
-    if (!hasLoaded && !aiLoading) {
-      generate();
-    }
-  }, [hasLoaded, aiLoading, generate]);
-
-  // Reset state when playlist changes
-  useEffect(() => {
-    setLocalTracks(playlist.tracks);
-    setPlaylistName(playlist.name);
-    setEditNameValue(playlist.name);
-    setDismissedIds(new Set());
-    setAcceptedRecs([]);
-    setSavedIds(new Set());
-  }, [playlist.id]);
-
-  const acceptedIds = new Set(acceptedRecs.map((r) => r.id));
-  const visibleRecs = aiRecs.filter((r) => !dismissedIds.has(r.id) && !acceptedIds.has(r.id));
-  const allTracks = [...localTracks, ...acceptedRecs.map((r) => r.track)];
-
-  const hasConnectedPlatform = connections.spotify.connected;
-  const syncTarget = "Spotify";
-
-  const handleSync = () => {
-    if (!hasConnectedPlatform) {
-      toast.error("No platform connected", { description: "Connect Spotify in Settings first." });
-      return;
-    }
-    setSyncing(true);
-    toast.loading(`Syncing to ${syncTarget}…`);
-    setTimeout(() => {
-      setSyncing(false);
-      toast.dismiss();
-      toast.success(`"${playlistName}" synced to ${syncTarget}!`);
-    }, 2000);
-  };
-
-  const handleShuffle = useCallback(() => {
-    const shuffled = [...allTracks];
-    for (let i = shuffled.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-    }
-    const originalIds = new Set(playlist.tracks.map((t) => t.id));
-    const newLocal = shuffled.filter((t) => originalIds.has(t.id));
-    const newAccepted = shuffled.filter((t) => !originalIds.has(t.id));
-    setLocalTracks(newLocal);
-    setAcceptedRecs((prev) =>
-      newAccepted.map((t) => prev.find((r) => r.track.id === t.id)!).filter(Boolean)
-    );
-    toast.success("Playlist order shuffled!");
-  }, [allTracks, playlist.tracks]);
-
-  const handleAddRec = (rec: Recommendation) => {
-    setAcceptedRecs((prev) => [...prev, rec]);
-    recordAccepted(rec.track);
-    toast.success(`Added "${rec.track.title}" to ${playlistName}`);
-  };
-
-  const handleDismissRec = (rec: Recommendation) => {
-    setDismissedIds((prev) => new Set(prev).add(rec.id));
-    recordDismissed(rec.track);
-    toast("Dismissed", { description: `"${rec.track.title}" removed from suggestions.` });
-  };
-
-  const handleSaveRec = (rec: Recommendation) => {
-    setSavedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(rec.id)) {
-        next.delete(rec.id);
-        toast("Removed from saved");
-        return next;
-      }
-      next.add(rec.id);
-      toast.success(`Saved "${rec.track.title}" for later`);
-      return next;
+    if (!id || !user) return;
+    setLoadingPlaylist(true);
+    Promise.all([
+      supabase.from("spotify_playlists").select("id, name, description, image_url, track_count").eq("id", id).single(),
+      supabase.from("spotify_playlist_tracks").select("id, spotify_track_id, track_name, artist_name, album_name, image_url, position").eq("playlist_id", id).eq("user_id", user.id).order("position"),
+    ]).then(([plRes, trRes]) => {
+      if (plRes.data) setPlaylist(plRes.data as SpotifyPlaylistInfo);
+      setTracks((trRes.data as PlaylistTrack[]) || []);
+      setLoadingPlaylist(false);
     });
-  };
+  }, [id, user]);
 
-  const handleRefreshRecs = () => {
-    setDismissedIds(new Set());
-    generate();
-  };
-
-  const handleRemoveTrack = (track: Track) => {
-    const recMatch = acceptedRecs.find((r) => r.track.id === track.id);
-    if (recMatch) {
-      setAcceptedRecs((prev) => prev.filter((r) => r.track.id !== track.id));
-    } else {
-      setLocalTracks((prev) => prev.filter((t) => t.id !== track.id));
+  // Generate vibe-aware recommendations
+  const generateRecs = useCallback(async () => {
+    if (!playlist || tracks.length === 0) return;
+    setRecsLoading(true);
+    try {
+      const knownSongs = Array.from(knownTrackIds).slice(0, 500);
+      const { data, error } = await supabase.functions.invoke("recommend-songs", {
+        body: {
+          playlistName: playlist.name,
+          playlistMood: vibe?.primary_vibe || "mixed",
+          playlistDescription: vibe?.ai_explanation || playlist.description || "",
+          tracks: tracks.slice(0, 50).map(t => ({
+            title: t.track_name,
+            artist: t.artist_name,
+            genre: "",
+            mood: vibe?.primary_vibe || "",
+            tempo: 0,
+            energy: 0,
+            valence: 0,
+            acousticness: 0,
+            danceability: 0,
+            year: 0,
+          })),
+          discoveryMode: "balanced",
+          existingLibrary: knownSongs.map(id => ({ spotifyId: id })),
+          vibeContext: vibe ? {
+            primaryVibe: vibe.primary_vibe,
+            secondaryVibes: vibe.secondary_vibes,
+            whatBelongs: vibe.what_belongs,
+            whatBreaksIt: vibe.what_breaks_it,
+            listeningContext: vibe.listening_context,
+          } : null,
+          count: 8,
+        },
+      });
+      if (error) throw new Error(error.message);
+      const recommendations: VibeRecommendation[] = (data?.recommendations || []).map((r: any, i: number) => ({
+        id: `vibe-rec-${i}-${Date.now()}`,
+        title: r.title,
+        artist: r.artist,
+        album: r.album || "Unknown",
+        matchScore: r.matchScore || 80,
+        reason: r.reason || "Fits the playlist vibe",
+        moodTags: r.moodTags || [],
+        insertAfterTrack: r.insertAfterTrack || null,
+        insertExplanation: r.insertExplanation || null,
+        popularityTier: r.popularityTier || "mid",
+      }));
+      // Filter out known tracks
+      const filtered = recommendations.filter(r => !isKnown(r.title, r.artist));
+      setRecs(filtered);
+      setRecsLoaded(true);
+    } catch (err: any) {
+      console.error("Rec error:", err);
+      toast.error("Failed to generate recommendations", { description: err.message });
+    } finally {
+      setRecsLoading(false);
     }
-    toast(`Removed "${track.title}" from playlist`);
+  }, [playlist, tracks, vibe, knownTrackIds, isKnown]);
+
+  const handleAnalyze = () => {
+    if (!playlist) return;
+    analyze(playlist.name, tracks.map(t => ({
+      track_name: t.track_name,
+      artist_name: t.artist_name,
+      album_name: t.album_name || undefined,
+    })));
   };
 
-  const handleSaveName = () => {
-    if (editNameValue.trim()) {
-      setPlaylistName(editNameValue.trim());
-      setIsEditingName(false);
-      toast.success(`Playlist renamed to "${editNameValue.trim()}"`);
-    }
-  };
+  const visibleRecs = recs.filter(r => !dismissedIds.has(r.id));
 
-  const handleCancelEditName = () => {
-    setEditNameValue(playlistName);
-    setIsEditingName(false);
-  };
+  if (loadingPlaylist) {
+    return (
+      <AppLayout>
+        <div className="flex items-center justify-center py-20">
+          <Loader2 className="w-6 h-6 animate-spin text-accent" />
+        </div>
+      </AppLayout>
+    );
+  }
+
+  if (!playlist) {
+    return (
+      <AppLayout>
+        <div className="text-center py-20">
+          <p className="text-muted-foreground">Playlist not found.</p>
+          <Link to="/playlists" className="text-accent hover:underline mt-2 block text-sm">Back to playlists</Link>
+        </div>
+      </AppLayout>
+    );
+  }
 
   return (
     <AppLayout>
@@ -169,136 +334,63 @@ const PlaylistDetail = () => {
 
         {/* Playlist header */}
         <div className="flex gap-6 mb-8">
-          <div className="w-32 h-32 rounded-2xl bg-secondary flex items-center justify-center text-6xl flex-shrink-0">
-            {playlist.emoji}
-          </div>
+          {playlist.image_url ? (
+            <img src={playlist.image_url} alt={playlist.name} className="w-32 h-32 rounded-2xl object-cover flex-shrink-0" />
+          ) : (
+            <div className="w-32 h-32 rounded-2xl bg-secondary flex items-center justify-center text-5xl flex-shrink-0">🎵</div>
+          )}
           <div className="flex-1">
-            {isEditingName ? (
-              <div className="flex items-center gap-2 mb-1">
-                <input
-                  type="text"
-                  value={editNameValue}
-                  onChange={(e) => setEditNameValue(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") handleSaveName();
-                    if (e.key === "Escape") handleCancelEditName();
-                  }}
-                  className="font-heading text-4xl bg-transparent border-b-2 border-accent outline-none w-full"
-                  autoFocus
-                />
-                <Button variant="ghost" size="icon" className="rounded-lg" onClick={handleSaveName}>
-                  <Check className="w-4 h-4 text-accent" />
-                </Button>
-                <Button variant="ghost" size="icon" className="rounded-lg" onClick={handleCancelEditName}>
-                  <X className="w-4 h-4" />
-                </Button>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2 mb-1 group">
-                <h1 className="font-heading text-4xl">{playlistName}</h1>
-                <button
-                  onClick={() => setIsEditingName(true)}
-                  className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
-                  title="Rename playlist"
-                >
-                  <Pencil className="w-4 h-4" />
-                </button>
-              </div>
+            <h1 className="font-heading text-4xl mb-1">{playlist.name}</h1>
+            {playlist.description && (
+              <p className="text-muted-foreground text-sm mb-3">{playlist.description}</p>
             )}
-            <p className="text-muted-foreground mb-4">{playlist.description}</p>
-            <div className="flex items-center gap-6 text-sm text-muted-foreground mb-4">
-              <span>{allTracks.length} tracks</span>
-              <span>{playlist.mood}</span>
-              <span>{playlist.avgTempo} BPM avg</span>
-              <span className="text-accent font-medium">{playlist.cohesionScore}% cohesion</span>
+            <div className="flex items-center gap-4 text-sm text-muted-foreground mb-4">
+              <span>{tracks.length} tracks</span>
+              {vibe && (
+                <span className="text-accent font-medium">{vibe.primary_vibe}</span>
+              )}
             </div>
             <div className="flex gap-3 flex-wrap">
-              <Button
-                variant="hero"
-                className="rounded-xl gap-2"
-                onClick={handleSync}
-                disabled={syncing || allTracks.length === 0 || !hasConnectedPlatform}
-                title={!hasConnectedPlatform ? "Connect a platform in Settings first" : undefined}
-              >
-                {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-                {syncing ? "Syncing…" : `Sync to ${hasConnectedPlatform ? syncTarget : "…"}`}
-              </Button>
-              {!hasConnectedPlatform && (
-                <Link to="/settings" className="text-xs text-destructive self-center hover:underline">
-                  Connect a platform first →
-                </Link>
-              )}
-              <Button variant="secondary" className="rounded-xl gap-2" onClick={handleRefreshRecs} disabled={aiLoading}>
-                <RefreshCw className={`w-4 h-4 ${aiLoading ? "animate-spin" : ""}`} />
-                {aiLoading ? "Loading…" : "New Suggestions"}
-              </Button>
-              <Button variant="ghost" size="icon" className="rounded-xl" onClick={handleShuffle} disabled={allTracks.length < 2} title="Shuffle track order">
-                <Shuffle className="w-4 h-4" />
+              <Button variant="hero" className="rounded-xl gap-2" onClick={generateRecs} disabled={recsLoading || tracks.length === 0}>
+                {recsLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                {recsLoading ? "Finding songs…" : "Get Recommendations"}
               </Button>
             </div>
           </div>
         </div>
 
+        {/* AI Playlist Identity / DNA */}
+        <PlaylistDNA vibe={vibe} analyzing={analyzing} onAnalyze={handleAnalyze} />
+
         {/* Track list */}
         <div className="rounded-2xl border border-border/50 overflow-hidden mb-8">
-          <div className="grid grid-cols-[40px_1fr_1fr_80px_80px_40px] gap-4 px-5 py-3 text-xs text-muted-foreground border-b border-border/50 bg-secondary/30">
+          <div className="grid grid-cols-[40px_1fr_1fr_40px] gap-4 px-5 py-3 text-xs text-muted-foreground border-b border-border/50 bg-secondary/30">
             <span>#</span>
             <span>Title</span>
             <span>Album</span>
-            <span>BPM</span>
-            <span>Mood</span>
             <span />
           </div>
-          {allTracks.length === 0 ? (
+          {tracks.length === 0 ? (
             <div className="text-center py-12">
-              <p className="text-sm text-muted-foreground">No tracks in this playlist. Add some from the suggestions below!</p>
+              <p className="text-sm text-muted-foreground">No tracks imported yet. Re-sync your library to load tracks.</p>
             </div>
           ) : (
-            allTracks.map((track, i) => {
-              const isNew = acceptedRecs.some((r) => r.track.id === track.id);
-              return (
-                <div
-                  key={track.id}
-                  className={`group grid grid-cols-[40px_1fr_1fr_80px_80px_40px] gap-4 px-5 py-3 items-center hover:bg-secondary/30 transition-colors ${isNew ? "bg-accent/5" : ""}`}
-                >
-                  <span className="text-sm text-muted-foreground group-hover:hidden">{i + 1}</span>
-                  <button className="hidden group-hover:block text-accent" onClick={() => toast.success(`Now playing "${track.title}"`)}>
-                    <Play className="w-4 h-4" />
-                  </button>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-medium truncate">{track.title}</p>
-                      {isNew && <span className="px-1.5 py-0.5 rounded text-[10px] bg-accent/10 text-accent font-medium">New</span>}
-                    </div>
-                    <p className="text-xs text-muted-foreground">{track.artist}</p>
+            tracks.map((track, i) => (
+              <div key={track.id} className="group grid grid-cols-[40px_1fr_1fr_40px] gap-4 px-5 py-3 items-center hover:bg-secondary/30 transition-colors">
+                <span className="text-sm text-muted-foreground">{i + 1}</span>
+                <div className="flex items-center gap-3 min-w-0">
+                  {track.image_url && (
+                    <img src={track.image_url} alt="" className="w-8 h-8 rounded flex-shrink-0" />
+                  )}
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">{track.track_name}</p>
+                    <p className="text-xs text-muted-foreground truncate">{track.artist_name}</p>
                   </div>
-                  <p className="text-sm text-muted-foreground truncate">{track.album}</p>
-                  <p className="text-sm text-muted-foreground">{track.tempo}</p>
-                  <p className="text-xs text-muted-foreground">{track.mood}</p>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <button className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground">
-                        <MoreHorizontal className="w-4 h-4" />
-                      </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-48">
-                      <DropdownMenuItem onClick={() => toast.success(`Now playing "${track.title}"`)}>
-                        <Play className="w-3.5 h-3.5 mr-2" />
-                        Play
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        onClick={() => handleRemoveTrack(track)}
-                        className="text-destructive focus:text-destructive"
-                      >
-                        <Trash2 className="w-3.5 h-3.5 mr-2" />
-                        Remove from playlist
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
                 </div>
-              );
-            })
+                <p className="text-sm text-muted-foreground truncate">{track.album_name || "—"}</p>
+                <div />
+              </div>
+            ))
           )}
         </div>
 
@@ -308,57 +400,53 @@ const PlaylistDetail = () => {
             <div className="flex items-center gap-2">
               <Sparkles className="w-5 h-5 text-accent" />
               <h2 className="font-heading text-2xl">Suggested Additions</h2>
-              {!aiLoading && visibleRecs.length > 0 && (
+              {!recsLoading && visibleRecs.length > 0 && (
                 <span className="text-xs text-muted-foreground ml-1">({visibleRecs.length} songs)</span>
               )}
             </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="rounded-lg gap-1 text-accent"
-              onClick={handleRefreshRecs}
-              disabled={aiLoading}
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${aiLoading ? "animate-spin" : ""}`} />
-              {aiLoading ? "Generating…" : "Refresh"}
+            <Button variant="ghost" size="sm" className="rounded-lg gap-1 text-accent" onClick={generateRecs} disabled={recsLoading}>
+              <RefreshCw className={`w-3.5 h-3.5 ${recsLoading ? "animate-spin" : ""}`} />
+              {recsLoading ? "Generating…" : "Refresh"}
             </Button>
           </div>
 
-          {aiLoading ? (
+          {recsLoading ? (
             <div className="flex flex-col items-center justify-center py-12 gap-3">
               <Loader2 className="w-6 h-6 animate-spin text-accent" />
-              <p className="text-sm text-muted-foreground">AI is analyzing sonic profiles and finding compatible songs…</p>
+              <p className="text-sm text-muted-foreground">AI is analyzing vibe compatibility and finding perfect matches…</p>
             </div>
           ) : visibleRecs.length > 0 ? (
             <>
-              <p className="text-sm text-muted-foreground mb-4">Curated by AI based on mood, tempo, energy, and genre compatibility — not popularity.</p>
+              <p className="text-sm text-muted-foreground mb-4">
+                Curated by AI based on playlist vibe, mood, energy, and flow — not just genre or popularity.
+              </p>
               <div className="space-y-3">
                 {visibleRecs.map((rec) => {
                   const tier = tierConfig[rec.popularityTier || "mid"];
                   const TierIcon = tier.icon;
                   const isExpanded = expandedRecId === rec.id;
-                  const breakdown = rec.compatibilityBreakdown;
 
                   return (
-                    <div
-                      key={rec.id}
-                      className="rounded-2xl bg-surface-elevated border border-border/50 hover:border-accent/30 hover:shadow-sm transition-all overflow-hidden"
-                    >
+                    <div key={rec.id} className="rounded-2xl bg-surface-elevated border border-border/50 hover:border-accent/30 hover:shadow-sm transition-all overflow-hidden">
                       <div className="group flex items-center gap-4 p-4">
-                        <div className="w-10 h-10 rounded-xl bg-secondary flex items-center justify-center text-base flex-shrink-0">
-                          🎵
-                        </div>
+                        <div className="w-10 h-10 rounded-xl bg-secondary flex items-center justify-center text-base flex-shrink-0">🎵</div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 mb-0.5">
-                            <p className="text-sm font-medium truncate">{rec.track.title}</p>
+                            <p className="text-sm font-medium truncate">{rec.title}</p>
                             <span className="text-xs font-medium text-accent">{rec.matchScore}%</span>
                             <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${tier.className}`}>
                               <TierIcon className="w-2.5 h-2.5" />
                               {tier.label}
                             </span>
                           </div>
-                          <p className="text-xs text-muted-foreground">{rec.track.artist} · {rec.track.album} ({rec.track.year})</p>
+                          <p className="text-xs text-muted-foreground">{rec.artist} · {rec.album}</p>
                           <p className="text-xs text-muted-foreground mt-1">{rec.reason}</p>
+                          {rec.insertExplanation && (
+                            <button onClick={() => setExpandedRecId(isExpanded ? null : rec.id)} className="text-[10px] text-accent hover:underline mt-1 flex items-center gap-1">
+                              <MapPin className="w-2.5 h-2.5" />
+                              {isExpanded ? "Hide placement" : "View suggested placement"}
+                            </button>
+                          )}
                         </div>
                         <div className="flex flex-col items-end gap-1.5">
                           <div className="flex gap-1 flex-wrap justify-end">
@@ -366,57 +454,43 @@ const PlaylistDetail = () => {
                               <span key={tag} className="px-2 py-0.5 rounded-full text-[10px] bg-secondary text-muted-foreground">{tag}</span>
                             ))}
                           </div>
-                          {breakdown && (
-                            <button
-                              onClick={() => setExpandedRecId(isExpanded ? null : rec.id)}
-                              className="text-[10px] text-accent hover:underline"
-                            >
-                              {isExpanded ? "Hide details" : "View compatibility"}
-                            </button>
-                          )}
                         </div>
                         <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-                          <Button variant="ghost" size="icon" className="w-8 h-8 rounded-lg text-accent hover:text-accent" title="Add to playlist" onClick={() => handleAddRec(rec)}>
+                          <Button variant="ghost" size="icon" className="w-8 h-8 rounded-lg text-accent hover:text-accent" title="Add to playlist" onClick={() => toast.success(`"${rec.title}" would be added`)}>
                             <Plus className="w-4 h-4" />
                           </Button>
-                          <Button variant="ghost" size="icon" className={`w-8 h-8 rounded-lg ${savedIds.has(rec.id) ? "text-warm" : ""}`} title="Save for later" onClick={() => handleSaveRec(rec)}>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className={`w-8 h-8 rounded-lg ${savedIds.has(rec.id) ? "text-warm" : ""}`}
+                            title="Save for later"
+                            onClick={() => {
+                              setSavedIds(prev => {
+                                const next = new Set(prev);
+                                next.has(rec.id) ? next.delete(rec.id) : next.add(rec.id);
+                                return next;
+                              });
+                            }}
+                          >
                             <Bookmark className={`w-4 h-4 ${savedIds.has(rec.id) ? "fill-current" : ""}`} />
                           </Button>
-                          <Button variant="ghost" size="icon" className="w-8 h-8 rounded-lg text-muted-foreground" title="Dismiss" onClick={() => handleDismissRec(rec)}>
+                          <Button variant="ghost" size="icon" className="w-8 h-8 rounded-lg text-muted-foreground" title="Dismiss" onClick={() => setDismissedIds(prev => new Set(prev).add(rec.id))}>
                             <X className="w-4 h-4" />
                           </Button>
                         </div>
                       </div>
 
-                      {/* Compatibility breakdown */}
-                      {isExpanded && breakdown && (
+                      {/* Insertion point detail */}
+                      {isExpanded && rec.insertExplanation && (
                         <div className="px-4 pb-4 pt-0 border-t border-border/30">
-                          <div className="grid grid-cols-3 gap-3 pt-3">
-                            {Object.entries(breakdown).map(([key, value]) => {
-                              const labels: Record<string, string> = {
-                                mood: "Mood",
-                                tempo: "Tempo",
-                                energy: "Energy",
-                                genre: "Genre",
-                                artistNetwork: "Artist Network",
-                                era: "Era",
-                              };
-                              const numValue = Number(value);
-                              return (
-                                <div key={key}>
-                                  <div className="flex justify-between text-[11px] mb-1">
-                                    <span className="text-muted-foreground">{labels[key] || key}</span>
-                                    <span className="font-medium">{numValue}%</span>
-                                  </div>
-                                  <div className="h-1.5 rounded-full bg-secondary overflow-hidden">
-                                    <div
-                                      className={`h-full rounded-full transition-all ${numValue >= 85 ? "bg-accent" : numValue >= 70 ? "bg-warm" : "bg-muted-foreground/40"}`}
-                                      style={{ width: `${numValue}%` }}
-                                    />
-                                  </div>
-                                </div>
-                              );
-                            })}
+                          <div className="pt-3 flex items-start gap-2">
+                            <MapPin className="w-4 h-4 text-accent flex-shrink-0 mt-0.5" />
+                            <div>
+                              {rec.insertAfterTrack && (
+                                <p className="text-xs font-medium mb-0.5">Suggested position: after "{rec.insertAfterTrack}"</p>
+                              )}
+                              <p className="text-xs text-muted-foreground">{rec.insertExplanation}</p>
+                            </div>
                           </div>
                         </div>
                       )}
@@ -425,13 +499,18 @@ const PlaylistDetail = () => {
                 })}
               </div>
             </>
-          ) : hasLoaded ? (
+          ) : recsLoaded ? (
             <div className="text-center py-12">
               <p className="text-sm text-muted-foreground mb-3">All suggestions reviewed! Want more?</p>
-              <Button variant="secondary" className="rounded-xl gap-2" onClick={handleRefreshRecs}>
+              <Button variant="secondary" className="rounded-xl gap-2" onClick={generateRecs}>
                 <Sparkles className="w-4 h-4" />
                 Generate More
               </Button>
+            </div>
+          ) : tracks.length > 0 ? (
+            <div className="text-center py-12 rounded-2xl border border-dashed border-border/50">
+              <Sparkles className="w-8 h-8 text-muted-foreground/40 mx-auto mb-3" />
+              <p className="text-sm text-muted-foreground mb-3">Click "Get Recommendations" above to find songs that match this playlist's vibe.</p>
             </div>
           ) : null}
         </div>
