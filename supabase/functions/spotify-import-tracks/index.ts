@@ -259,7 +259,9 @@ Deno.serve(async (req) => {
       image_url: string | null;
       track_count: number;
       owner_id: string;
+      owner_display_name: string | null;
       is_owned: boolean;
+      is_collaborative: boolean;
       snapshot_id: string | null;
     };
 
@@ -267,7 +269,8 @@ Deno.serve(async (req) => {
     offset = 0;
     total = Infinity;
 
-    while (offset < total && offset < 500) {
+    // Fetch ALL user playlists (owned, saved, collaborative) with full pagination
+    while (offset < total) {
       const data = await spotifyGet(`https://api.spotify.com/v1/me/playlists?limit=50&offset=${offset}`, accessToken);
       total = data.total ?? 0;
       for (const pl of data.items || []) {
@@ -279,11 +282,14 @@ Deno.serve(async (req) => {
           image_url: pl.images?.[0]?.url || null,
           track_count: pl.tracks?.total || 0,
           owner_id: pl.owner?.id || "",
+          owner_display_name: pl.owner?.display_name || null,
           is_owned: pl.owner?.id === spotifyUserId,
+          is_collaborative: pl.collaborative === true,
           snapshot_id: pl.snapshot_id || null,
         });
       }
       offset += 50;
+      if (!data.items || data.items.length === 0) break;
     }
 
     console.info("[spotify-import-tracks] playlists_fetched", { count: playlists.length });
@@ -296,7 +302,9 @@ Deno.serve(async (req) => {
       image_url: pl.image_url,
       track_count: pl.track_count,
       spotify_owner_id: pl.owner_id,
+      owner_display_name: pl.owner_display_name,
       is_owned_by_user: pl.is_owned,
+      is_collaborative: pl.is_collaborative,
       snapshot_id: pl.snapshot_id,
       last_synced_at: new Date().toISOString(),
     }));
@@ -321,10 +329,11 @@ Deno.serve(async (req) => {
       playlistIdMap.set(p.spotify_playlist_id, p.id);
     }
 
+    // Import tracks for up to 50 playlists, prioritizing owned ones
     const sortedPlaylists = [...playlists].sort((a, b) => {
       if (a.is_owned !== b.is_owned) return a.is_owned ? -1 : 1;
       return b.track_count - a.track_count;
-    }).slice(0, 20);
+    }).slice(0, 50);
 
     let totalPlaylistTracks = 0;
 

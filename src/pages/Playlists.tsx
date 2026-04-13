@@ -150,15 +150,29 @@ const Playlists = () => {
                             <ListMusic className="w-12 h-12 text-muted-foreground" />
                           </div>
                         )}
-                        {pl.is_owned_by_user && (
-                          <span className="absolute top-2 right-2 px-2 py-0.5 rounded-full text-[10px] font-medium bg-accent/90 text-accent-foreground">
-                            Your playlist
-                          </span>
-                        )}
+                        <div className="absolute top-2 right-2 flex flex-col gap-1 items-end">
+                          {pl.is_owned_by_user && (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-accent/90 text-accent-foreground">
+                              Created by you
+                            </span>
+                          )}
+                          {pl.is_collaborative && (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-primary/80 text-primary-foreground">
+                              Collaborative
+                            </span>
+                          )}
+                          {!pl.is_owned_by_user && !pl.is_collaborative && (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-muted/80 text-muted-foreground">
+                              Saved
+                            </span>
+                          )}
+                        </div>
                       </div>
                       <div className="p-4">
                         <p className="font-medium truncate group-hover:text-accent transition-colors">{pl.name}</p>
-                        <p className="text-xs text-muted-foreground mt-1">{pl.track_count} tracks</p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {pl.track_count} tracks{pl.owner_display_name && !pl.is_owned_by_user ? ` · by ${pl.owner_display_name}` : ""}
+                        </p>
                         {pl.description && (
                           <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{pl.description}</p>
                         )}

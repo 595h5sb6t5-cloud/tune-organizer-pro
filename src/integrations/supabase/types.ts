@@ -614,9 +614,11 @@ export type Database = {
           description: string | null
           id: string
           image_url: string | null
+          is_collaborative: boolean
           is_owned_by_user: boolean
           last_synced_at: string
           name: string
+          owner_display_name: string | null
           snapshot_id: string | null
           spotify_owner_id: string | null
           spotify_playlist_id: string
@@ -629,9 +631,11 @@ export type Database = {
           description?: string | null
           id?: string
           image_url?: string | null
+          is_collaborative?: boolean
           is_owned_by_user?: boolean
           last_synced_at?: string
           name: string
+          owner_display_name?: string | null
           snapshot_id?: string | null
           spotify_owner_id?: string | null
           spotify_playlist_id: string
@@ -644,9 +648,11 @@ export type Database = {
           description?: string | null
           id?: string
           image_url?: string | null
+          is_collaborative?: boolean
           is_owned_by_user?: boolean
           last_synced_at?: string
           name?: string
+          owner_display_name?: string | null
           snapshot_id?: string | null
           spotify_owner_id?: string | null
           spotify_playlist_id?: string

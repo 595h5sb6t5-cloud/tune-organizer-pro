@@ -10,6 +10,8 @@ export interface SpotifyPlaylist {
   image_url: string | null;
   track_count: number;
   is_owned_by_user: boolean;
+  is_collaborative: boolean;
+  owner_display_name: string | null;
   last_synced_at: string;
 }
 
@@ -45,7 +47,7 @@ export function useSpotifyLibrary() {
     const [playlistRes, likedCountRes, likedRes] = await Promise.all([
       supabase
         .from("spotify_playlists")
-        .select("id, spotify_playlist_id, name, description, image_url, track_count, is_owned_by_user, last_synced_at")
+        .select("id, spotify_playlist_id, name, description, image_url, track_count, is_owned_by_user, is_collaborative, owner_display_name, last_synced_at")
         .eq("user_id", user.id)
         .order("is_owned_by_user", { ascending: false })
         .order("name"),
