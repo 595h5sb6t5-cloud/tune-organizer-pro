@@ -1,7 +1,15 @@
 import AppLayout from "@/components/app/AppLayout";
 import { Button } from "@/components/ui/button";
+import { useState } from "react";
+import { toast } from "sonner";
 
 const Settings = () => {
+  const [spotifyConnected, setSpotifyConnected] = useState(true);
+  const [appleConnected, setAppleConnected] = useState(false);
+  const [overlapMode, setOverlapMode] = useState(false);
+  const [excludeExplicit, setExcludeExplicit] = useState(false);
+  const [visibility, setVisibility] = useState<"Private" | "Public">("Private");
+
   return (
     <AppLayout>
       <div className="max-w-2xl">
@@ -19,20 +27,72 @@ const Settings = () => {
                 <span className="text-xl">🎵</span>
                 <div>
                   <p className="text-sm font-medium">Spotify</p>
-                  <p className="text-xs text-muted-foreground">jordan.d@email.com</p>
+                  <p className="text-xs text-muted-foreground">
+                    {spotifyConnected ? "jordan.d@email.com" : "Not connected"}
+                  </p>
                 </div>
               </div>
-              <Button variant="ghost" size="sm" className="rounded-lg text-destructive">Disconnect</Button>
+              {spotifyConnected ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="rounded-lg text-destructive"
+                  onClick={() => {
+                    setSpotifyConnected(false);
+                    toast("Spotify disconnected");
+                  }}
+                >
+                  Disconnect
+                </Button>
+              ) : (
+                <Button
+                  variant="hero"
+                  size="sm"
+                  className="rounded-lg"
+                  onClick={() => {
+                    setSpotifyConnected(true);
+                    toast.success("Spotify connected!");
+                  }}
+                >
+                  Connect
+                </Button>
+              )}
             </div>
             <div className="flex items-center justify-between p-4 rounded-xl bg-secondary/50 mt-3">
               <div className="flex items-center gap-3">
                 <span className="text-xl">🍎</span>
                 <div>
                   <p className="text-sm font-medium">Apple Music</p>
-                  <p className="text-xs text-muted-foreground">Not connected</p>
+                  <p className="text-xs text-muted-foreground">
+                    {appleConnected ? "jordan@icloud.com" : "Not connected"}
+                  </p>
                 </div>
               </div>
-              <Button variant="hero" size="sm" className="rounded-lg">Connect</Button>
+              {appleConnected ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="rounded-lg text-destructive"
+                  onClick={() => {
+                    setAppleConnected(false);
+                    toast("Apple Music disconnected");
+                  }}
+                >
+                  Disconnect
+                </Button>
+              ) : (
+                <Button
+                  variant="hero"
+                  size="sm"
+                  className="rounded-lg"
+                  onClick={() => {
+                    setAppleConnected(true);
+                    toast.success("Apple Music connected!");
+                  }}
+                >
+                  Connect
+                </Button>
+              )}
             </div>
           </div>
 
@@ -45,25 +105,58 @@ const Settings = () => {
                   <p className="text-sm font-medium">Overlap Mode</p>
                   <p className="text-xs text-muted-foreground">Allow songs in multiple playlists</p>
                 </div>
-                <div className="w-10 h-6 rounded-full bg-secondary relative cursor-pointer">
-                  <div className="w-4 h-4 rounded-full bg-muted-foreground absolute top-1 left-1 transition-all" />
-                </div>
+                <button
+                  onClick={() => {
+                    setOverlapMode(!overlapMode);
+                    toast(overlapMode ? "Overlap mode disabled" : "Overlap mode enabled");
+                  }}
+                  className={`w-10 h-6 rounded-full relative cursor-pointer transition-colors ${
+                    overlapMode ? "bg-accent" : "bg-secondary"
+                  }`}
+                >
+                  <div
+                    className={`w-4 h-4 rounded-full bg-primary-foreground absolute top-1 transition-all ${
+                      overlapMode ? "left-5" : "left-1"
+                    }`}
+                  />
+                </button>
               </div>
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-medium">Exclude Explicit</p>
                   <p className="text-xs text-muted-foreground">Skip explicit tracks from playlists</p>
                 </div>
-                <div className="w-10 h-6 rounded-full bg-secondary relative cursor-pointer">
-                  <div className="w-4 h-4 rounded-full bg-muted-foreground absolute top-1 left-1 transition-all" />
-                </div>
+                <button
+                  onClick={() => {
+                    setExcludeExplicit(!excludeExplicit);
+                    toast(excludeExplicit ? "Explicit tracks included" : "Explicit tracks excluded");
+                  }}
+                  className={`w-10 h-6 rounded-full relative cursor-pointer transition-colors ${
+                    excludeExplicit ? "bg-accent" : "bg-secondary"
+                  }`}
+                >
+                  <div
+                    className={`w-4 h-4 rounded-full bg-primary-foreground absolute top-1 transition-all ${
+                      excludeExplicit ? "left-5" : "left-1"
+                    }`}
+                  />
+                </button>
               </div>
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-medium">Default Playlist Visibility</p>
                   <p className="text-xs text-muted-foreground">Set new playlists to private or public</p>
                 </div>
-                <span className="text-sm text-muted-foreground">Private</span>
+                <button
+                  onClick={() => {
+                    const next = visibility === "Private" ? "Public" : "Private";
+                    setVisibility(next);
+                    toast(`Default visibility: ${next}`);
+                  }}
+                  className="text-sm text-accent hover:underline cursor-pointer"
+                >
+                  {visibility}
+                </button>
               </div>
             </div>
           </div>
@@ -72,7 +165,14 @@ const Settings = () => {
           <div className="p-6 rounded-2xl bg-primary text-primary-foreground">
             <h3 className="font-heading text-lg mb-2">Premium Plan</h3>
             <p className="text-sm opacity-80 mb-4">Unlimited imports, playlists, and exports. Renews Jan 15, 2027.</p>
-            <Button variant="warm" size="sm" className="rounded-lg">Manage Subscription</Button>
+            <Button
+              variant="warm"
+              size="sm"
+              className="rounded-lg"
+              onClick={() => toast("Subscription management coming soon")}
+            >
+              Manage Subscription
+            </Button>
           </div>
         </div>
       </div>

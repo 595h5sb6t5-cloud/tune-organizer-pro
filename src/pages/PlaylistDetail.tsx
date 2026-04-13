@@ -1,13 +1,71 @@
 import AppLayout from "@/components/app/AppLayout";
-import { samplePlaylists, getRecommendationsForPlaylist } from "@/lib/sample-data";
+import { samplePlaylists, getRecommendationsForPlaylist, type Recommendation } from "@/lib/sample-data";
 import { Button } from "@/components/ui/button";
 import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, Upload, RefreshCw, Shuffle, Play, MoreHorizontal, Plus, X, Bookmark, Sparkles } from "lucide-react";
+import { ArrowLeft, Upload, RefreshCw, Shuffle, Play, MoreHorizontal, Plus, X, Bookmark, Sparkles, Loader2, Check } from "lucide-react";
+import { useState } from "react";
+import { toast } from "sonner";
 
 const PlaylistDetail = () => {
   const { id } = useParams();
   const playlist = samplePlaylists.find((p) => p.id === id) ?? samplePlaylists[0];
-  const recommendations = getRecommendationsForPlaylist(playlist.id).filter(r => r.status === "pending");
+  const allRecs = getRecommendationsForPlaylist(playlist.id).filter((r) => r.status === "pending");
+
+  const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
+  const [acceptedIds, setAcceptedIds] = useState<Set<string>>(new Set());
+  const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
+  const [syncing, setSyncing] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
+
+  const visibleRecs = allRecs.filter((r) => !dismissedIds.has(r.id) && !acceptedIds.has(r.id));
+
+  const handleSync = () => {
+    setSyncing(true);
+    toast.loading("Syncing to Spotify…");
+    setTimeout(() => {
+      setSyncing(false);
+      toast.dismiss();
+      toast.success(`"${playlist.name}" synced to Spotify!`);
+    }, 2000);
+  };
+
+  const handleRegenerate = () => {
+    setRegenerating(true);
+    toast.loading("Regenerating playlist…");
+    setTimeout(() => {
+      setRegenerating(false);
+      toast.dismiss();
+      toast.success(`"${playlist.name}" regenerated with fresh picks!`);
+    }, 2500);
+  };
+
+  const handleShuffle = () => {
+    toast.success("Playlist order shuffled!");
+  };
+
+  const handleAddRec = (rec: Recommendation) => {
+    setAcceptedIds((prev) => new Set(prev).add(rec.id));
+    toast.success(`Added "${rec.track.title}" to ${playlist.name}`);
+  };
+
+  const handleDismissRec = (rec: Recommendation) => {
+    setDismissedIds((prev) => new Set(prev).add(rec.id));
+    toast("Dismissed", { description: `"${rec.track.title}" removed from suggestions.` });
+  };
+
+  const handleSaveRec = (rec: Recommendation) => {
+    setSavedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(rec.id)) {
+        next.delete(rec.id);
+        toast("Removed from saved");
+        return next;
+      }
+      next.add(rec.id);
+      toast.success(`Saved "${rec.track.title}" for later`);
+      return next;
+    });
+  };
 
   return (
     <AppLayout>
@@ -26,21 +84,21 @@ const PlaylistDetail = () => {
             <h1 className="font-heading text-4xl mb-1">{playlist.name}</h1>
             <p className="text-muted-foreground mb-4">{playlist.description}</p>
             <div className="flex items-center gap-6 text-sm text-muted-foreground mb-4">
-              <span>{playlist.trackCount} tracks</span>
+              <span>{playlist.trackCount + acceptedIds.size} tracks</span>
               <span>{playlist.mood}</span>
               <span>{playlist.avgTempo} BPM avg</span>
               <span className="text-accent font-medium">{playlist.cohesionScore}% cohesion</span>
             </div>
             <div className="flex gap-3">
-              <Button variant="hero" className="rounded-xl gap-2">
-                <Upload className="w-4 h-4" />
-                Sync to Spotify
+              <Button variant="hero" className="rounded-xl gap-2" onClick={handleSync} disabled={syncing}>
+                {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                {syncing ? "Syncing…" : "Sync to Spotify"}
               </Button>
-              <Button variant="secondary" className="rounded-xl gap-2">
-                <RefreshCw className="w-4 h-4" />
-                Regenerate
+              <Button variant="secondary" className="rounded-xl gap-2" onClick={handleRegenerate} disabled={regenerating}>
+                <RefreshCw className={`w-4 h-4 ${regenerating ? "animate-spin" : ""}`} />
+                {regenerating ? "Regenerating…" : "Regenerate"}
               </Button>
-              <Button variant="ghost" size="icon" className="rounded-xl">
+              <Button variant="ghost" size="icon" className="rounded-xl" onClick={handleShuffle}>
                 <Shuffle className="w-4 h-4" />
               </Button>
             </div>
@@ -71,7 +129,10 @@ const PlaylistDetail = () => {
               <p className="text-sm text-muted-foreground truncate">{track.album}</p>
               <p className="text-sm text-muted-foreground">{track.tempo}</p>
               <p className="text-xs text-muted-foreground">{track.mood}</p>
-              <button className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground">
+              <button
+                className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
+                onClick={() => toast("Track options", { description: `Options for "${track.title}" coming soon.` })}
+              >
                 <MoreHorizontal className="w-4 h-4" />
               </button>
             </div>
@@ -79,16 +140,16 @@ const PlaylistDetail = () => {
         </div>
 
         {/* Suggested Additions */}
-        {recommendations.length > 0 && (
+        {visibleRecs.length > 0 && (
           <div>
             <div className="flex items-center gap-2 mb-4">
               <Sparkles className="w-5 h-5 text-accent" />
               <h2 className="font-heading text-2xl">Suggested Additions</h2>
-              <span className="text-xs text-muted-foreground ml-1">({recommendations.length} songs)</span>
+              <span className="text-xs text-muted-foreground ml-1">({visibleRecs.length} songs)</span>
             </div>
             <p className="text-sm text-muted-foreground mb-4">Songs we think belong in this playlist based on your taste.</p>
             <div className="space-y-2">
-              {recommendations.map((rec) => (
+              {visibleRecs.map((rec) => (
                 <div
                   key={rec.id}
                   className="group flex items-center gap-4 p-4 rounded-2xl bg-surface-elevated border border-border/50 hover:border-accent/30 hover:shadow-sm transition-all"
@@ -110,13 +171,13 @@ const PlaylistDetail = () => {
                     ))}
                   </div>
                   <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-                    <Button variant="ghost" size="icon" className="w-8 h-8 rounded-lg text-accent hover:text-accent" title="Add to playlist">
+                    <Button variant="ghost" size="icon" className="w-8 h-8 rounded-lg text-accent hover:text-accent" title="Add to playlist" onClick={() => handleAddRec(rec)}>
                       <Plus className="w-4 h-4" />
                     </Button>
-                    <Button variant="ghost" size="icon" className="w-8 h-8 rounded-lg" title="Save for later">
-                      <Bookmark className="w-4 h-4" />
+                    <Button variant="ghost" size="icon" className={`w-8 h-8 rounded-lg ${savedIds.has(rec.id) ? "text-warm" : ""}`} title="Save for later" onClick={() => handleSaveRec(rec)}>
+                      <Bookmark className={`w-4 h-4 ${savedIds.has(rec.id) ? "fill-current" : ""}`} />
                     </Button>
-                    <Button variant="ghost" size="icon" className="w-8 h-8 rounded-lg text-muted-foreground" title="Dismiss">
+                    <Button variant="ghost" size="icon" className="w-8 h-8 rounded-lg text-muted-foreground" title="Dismiss" onClick={() => handleDismissRec(rec)}>
                       <X className="w-4 h-4" />
                     </Button>
                   </div>

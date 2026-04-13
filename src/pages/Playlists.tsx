@@ -3,6 +3,7 @@ import { samplePlaylists } from "@/lib/sample-data";
 import { Button } from "@/components/ui/button";
 import { Plus, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
 import { Link } from "react-router-dom";
+import { toast } from "sonner";
 
 const statusBadge = (status: string) => {
   switch (status) {
@@ -26,7 +27,11 @@ const Playlists = () => {
             <h1 className="font-heading text-3xl mb-1">Your Playlists</h1>
             <p className="text-muted-foreground">AI-generated and curated for your library.</p>
           </div>
-          <Button variant="hero" className="rounded-xl gap-2">
+          <Button
+            variant="hero"
+            className="rounded-xl gap-2"
+            onClick={() => toast.success("Generating new playlists…", { description: "AI is analyzing your library for new vibes." })}
+          >
             <Plus className="w-4 h-4" />
             Generate New
           </Button>
