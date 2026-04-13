@@ -684,6 +684,29 @@ const PlaylistDetail = () => {
                               </div>
                             )}
 
+                            {/* Why this song? */}
+                            {rec.aiExplanation && (
+                              <button
+                                onClick={() => setExplainedRecId(explainedRecId === rec.id ? null : rec.id)}
+                                className="flex items-center gap-1 mt-2 text-[11px] font-medium hover:opacity-80 transition-colors"
+                                style={{ color: vibeColor }}
+                              >
+                                <Brain className="w-3 h-3" />
+                                Why this song?
+                                {explainedRecId === rec.id ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                              </button>
+                            )}
+
+                            {explainedRecId === rec.id && rec.aiExplanation && (
+                              <div className="mt-2 rounded-xl border p-3" style={{ backgroundColor: vibeColor + "08", borderColor: vibeColor + "20" }}>
+                                <div className="flex items-center gap-1.5 mb-1.5">
+                                  <Brain className="w-3.5 h-3.5" style={{ color: vibeColor }} />
+                                  <span className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: vibeColor }}>Tempo AI Insight</span>
+                                </div>
+                                <p className="text-xs text-foreground/80 leading-relaxed">{rec.aiExplanation}</p>
+                              </div>
+                            )}
+
                             {/* Compatibility breakdown */}
                             {rec.compatibilityBreakdown && (
                               <CompatibilityBreakdown breakdown={rec.compatibilityBreakdown} color={vibeColor} />
