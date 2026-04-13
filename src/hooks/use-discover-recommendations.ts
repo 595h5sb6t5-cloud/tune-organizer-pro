@@ -80,13 +80,19 @@ export function useDiscoverRecommendations() {
         ],
       } : null;
 
-      // Aggregate mood/genre/atmosphere from liked songs
+      // Aggregate mood/genre/atmosphere + deep tags from liked songs
       const moodCounts: Record<string, number> = {};
       const atmosphereCounts: Record<string, number> = {};
       const prodStyleCounts: Record<string, number> = {};
       const eraCounts: Record<string, number> = {};
       const genreTagCounts: Record<string, number> = {};
       const artistCounts: Record<string, number> = {};
+      const grooveFeelCounts: Record<string, number> = {};
+      const vocalStyleCounts: Record<string, number> = {};
+      const sonicBrightnessCounts: Record<string, number> = {};
+      const spatialQualityCounts: Record<string, number> = {};
+      const rhythmicIdentityCounts: Record<string, number> = {};
+      const sonicTextureCounts: Record<string, number> = {};
 
       for (const s of likedSongs) {
         if (s.mood) moodCounts[s.mood] = (moodCounts[s.mood] || 0) + 1;
@@ -95,6 +101,14 @@ export function useDiscoverRecommendations() {
         if (s.era) eraCounts[s.era] = (eraCounts[s.era] || 0) + 1;
         artistCounts[s.artist_name] = (artistCounts[s.artist_name] || 0) + 1;
         for (const g of s.genre_tags || []) genreTagCounts[g] = (genreTagCounts[g] || 0) + 1;
+        // Deep tags
+        const sa = s as any;
+        if (sa.groove_feel) grooveFeelCounts[sa.groove_feel] = (grooveFeelCounts[sa.groove_feel] || 0) + 1;
+        if (sa.vocal_style) vocalStyleCounts[sa.vocal_style] = (vocalStyleCounts[sa.vocal_style] || 0) + 1;
+        if (sa.sonic_brightness) sonicBrightnessCounts[sa.sonic_brightness] = (sonicBrightnessCounts[sa.sonic_brightness] || 0) + 1;
+        if (sa.spatial_quality) spatialQualityCounts[sa.spatial_quality] = (spatialQualityCounts[sa.spatial_quality] || 0) + 1;
+        if (sa.rhythmic_identity) rhythmicIdentityCounts[sa.rhythmic_identity] = (rhythmicIdentityCounts[sa.rhythmic_identity] || 0) + 1;
+        if (sa.sonic_texture) sonicTextureCounts[sa.sonic_texture] = (sonicTextureCounts[sa.sonic_texture] || 0) + 1;
       }
       for (const t of importedTracks) {
         artistCounts[t.artist_name] = (artistCounts[t.artist_name] || 0) + 1;
