@@ -4,8 +4,18 @@ import { useAuth } from "./use-auth";
 
 const SPOTIFY_AUTH_URL = "https://accounts.spotify.com/authorize";
 const SCOPES = "user-library-read playlist-modify-private playlist-modify-public";
+
 const SPOTIFY_OAUTH_DONE_KEY = "spotify-oauth-complete";
 const SPOTIFY_OAUTH_ERROR_KEY = "spotify-oauth-error";
+const SPOTIFY_PKCE_VERIFIER_KEY = "spotify-pkce-verifier";
+const SPOTIFY_PKCE_STATE_KEY = "spotify-pkce-state";
+const SPOTIFY_REDIRECT_URI_KEY = "spotify-redirect-uri";
+const SPOTIFY_RETURN_PATH_KEY = "spotify-return-path";
+
+type SpotifyConfig = {
+  client_id?: string | null;
+  redirect_uri?: string | null;
+};
 
 function generateRandomString(length: number) {
   const possible = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -26,7 +36,20 @@ function base64encode(input: ArrayBuffer) {
     .replace(/\//g, "_");
 }
 
-export type SpotifyStatus = "idle" | "connecting" | "exchanging" | "importing" | "done" | "error";
+function clearTransientSpotifyKeys() {
+  localStorage.removeItem(SPOTIFY_PKCE_VERIFIER_KEY);
+  localStorage.removeItem(SPOTIFY_PKCE_STATE_KEY);
+  localStorage.removeItem(SPOTIFY_REDIRECT_URI_KEY);
+}
+
+export type SpotifyStatus =
+  | "idle"
+  | "connecting"
+  | "authorizing"
+  | "connected"
+  | "importing"
+  | "complete"
+  | "error";
 
 export function useSpotify() {
   const { user, refreshProfile } = useAuth();
@@ -41,13 +64,14 @@ export function useSpotify() {
           const payload = JSON.parse(event.newValue) as { importCount?: number };
           setImportCount(payload.importCount ?? 0);
           setError(null);
-          setStatus("done");
+          setStatus("complete");
           await refreshProfile();
-          localStorage.removeItem(SPOTIFY_OAUTH_DONE_KEY);
         } catch {
-          setStatus("done");
+          setStatus("complete");
           await refreshProfile();
         }
+
+        localStorage.removeItem(SPOTIFY_OAUTH_DONE_KEY);
       }
 
       if (event.key === SPOTIFY_OAUTH_ERROR_KEY && event.newValue) {
@@ -57,6 +81,7 @@ export function useSpotify() {
         } catch {
           setError("Spotify connection failed.");
         }
+
         setStatus("error");
         localStorage.removeItem(SPOTIFY_OAUTH_ERROR_KEY);
       }
@@ -68,7 +93,7 @@ export function useSpotify() {
       if (event.data.type === SPOTIFY_OAUTH_DONE_KEY) {
         setImportCount(event.data.importCount ?? 0);
         setError(null);
-        setStatus("done");
+        setStatus("complete");
         await refreshProfile();
       }
 
@@ -87,102 +112,137 @@ export function useSpotify() {
     };
   }, [refreshProfile]);
 
-  const startAuth = useCallback(async () => {
+  const startAuth = useCallback(async (returnPath = window.location.pathname) => {
+    if (!user) {
+      setError("Please log in before connecting Spotify.");
+      setStatus("error");
+      return;
+    }
+
     setStatus("connecting");
     setError(null);
+    localStorage.removeItem(SPOTIFY_OAUTH_DONE_KEY);
+    localStorage.removeItem(SPOTIFY_OAUTH_ERROR_KEY);
 
     try {
       const configRes = await supabase.functions.invoke("spotify-config");
-      const clientId = configRes.data?.client_id;
+      const config = (configRes.data ?? {}) as SpotifyConfig;
+      const clientId = config.client_id?.trim();
+      const redirectUri = config.redirect_uri?.trim();
 
-      if (!clientId) {
-        throw new Error("Spotify is not configured. Please contact support.");
+      if (configRes.error) {
+        throw new Error(configRes.error.message || "Unable to load Spotify configuration.");
       }
 
+      if (!clientId || !redirectUri) {
+        throw new Error("Spotify is not fully configured. Missing client ID or redirect URI.");
+      }
+
+      const redirectUrl = new URL(redirectUri);
+      if (redirectUrl.origin !== window.location.origin) {
+        throw new Error(`Spotify is configured for ${redirectUrl.origin}. Open the app on that exact URL to connect your account.`);
+      }
+
+      const state = generateRandomString(24);
       const codeVerifier = generateRandomString(64);
       const hashed = await sha256(codeVerifier);
       const codeChallenge = base64encode(hashed);
-      const redirectUri = `${window.location.origin}/spotify-callback`;
 
-      sessionStorage.setItem("spotify_code_verifier", codeVerifier);
-      sessionStorage.setItem("spotify_return_path", window.location.pathname);
+      localStorage.setItem(SPOTIFY_PKCE_VERIFIER_KEY, codeVerifier);
+      localStorage.setItem(SPOTIFY_PKCE_STATE_KEY, state);
+      localStorage.setItem(SPOTIFY_REDIRECT_URI_KEY, redirectUri);
+      localStorage.setItem(SPOTIFY_RETURN_PATH_KEY, returnPath);
 
       const params = new URLSearchParams({
-        client_id: clientId,
         response_type: "code",
+        client_id: clientId,
         redirect_uri: redirectUri,
+        scope: SCOPES,
         code_challenge_method: "S256",
         code_challenge: codeChallenge,
-        scope: SCOPES,
-        state: generateRandomString(16),
+        state,
       });
 
       const authUrl = `${SPOTIFY_AUTH_URL}?${params.toString()}`;
-      const isEmbeddedPreview = window.self !== window.top;
+      setStatus("authorizing");
 
-      if (isEmbeddedPreview) {
+      if (window.self !== window.top) {
         const popup = window.open(authUrl, "spotify-auth", "popup=yes,width=520,height=760");
 
-        if (popup) {
-          const watcher = window.setInterval(() => {
-            if (popup.closed) {
-              window.clearInterval(watcher);
-              setStatus((current) => (current === "connecting" ? "idle" : current));
-            }
-          }, 500);
+        if (!popup) {
+          window.open(authUrl, "_blank");
           return;
         }
 
-        window.open(authUrl, "_blank", "noopener,noreferrer");
-        setStatus("idle");
+        const watcher = window.setInterval(() => {
+          if (popup.closed) {
+            window.clearInterval(watcher);
+            setStatus((current) => (current === "authorizing" ? "idle" : current));
+          }
+        }, 500);
+
         return;
       }
 
       window.location.assign(authUrl);
     } catch (e) {
       const message = e instanceof Error ? e.message : "Spotify connection failed.";
+      clearTransientSpotifyKeys();
       setError(message);
       setStatus("error");
     }
-  }, []);
+  }, [user]);
 
-  const handleCallback = useCallback(async (code: string) => {
-    const codeVerifier = sessionStorage.getItem("spotify_code_verifier");
+  const handleCallback = useCallback(async (code: string, returnedState: string | null) => {
+    const codeVerifier = localStorage.getItem(SPOTIFY_PKCE_VERIFIER_KEY);
+    const storedState = localStorage.getItem(SPOTIFY_PKCE_STATE_KEY);
 
-    if (!codeVerifier) {
-      setError("Missing code verifier. Please try again.");
+    if (!codeVerifier || !storedState) {
+      setError("Missing Spotify authorization data. Please start the connection again.");
       setStatus("error");
       return;
     }
 
-    setStatus("exchanging");
+    if (!returnedState || returnedState !== storedState) {
+      clearTransientSpotifyKeys();
+      setError("Spotify state validation failed. Please try connecting again.");
+      setStatus("error");
+      return;
+    }
+
+    setStatus("authorizing");
     setError(null);
 
     try {
-      const redirectUri = `${window.location.origin}/spotify-callback`;
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError || !sessionData.session?.access_token) {
+        throw new Error("Your session expired before Spotify could connect. Please log in again and retry.");
+      }
+
       const res = await supabase.functions.invoke("spotify-auth-callback", {
-        body: { code, code_verifier: codeVerifier, redirect_uri: redirectUri },
+        body: { code, code_verifier: codeVerifier },
       });
 
       if (res.error || res.data?.error) {
-        throw new Error(res.data?.error || res.error?.message || "Failed to exchange token");
+        throw new Error(res.data?.error || res.error?.message || "Failed to exchange Spotify authorization code.");
       }
 
-      sessionStorage.removeItem("spotify_code_verifier");
-      setStatus("importing");
-
-      const importRes = await supabase.functions.invoke("spotify-import-tracks");
-      const imported = !importRes.error && !importRes.data?.error ? importRes.data?.imported || 0 : 0;
-
-      if (importRes.error || importRes.data?.error) {
-        console.error("Import error:", importRes.data?.error || importRes.error?.message);
-      }
-
-      setImportCount(imported);
+      setStatus("connected");
       await refreshProfile();
-      setStatus("done");
+
+      setStatus("importing");
+      const importRes = await supabase.functions.invoke("spotify-import-tracks");
+      if (importRes.error || importRes.data?.error) {
+        throw new Error(importRes.data?.error || importRes.error?.message || "Spotify connected but song import failed.");
+      }
+
+      setImportCount(importRes.data?.imported || 0);
+      await refreshProfile();
+      clearTransientSpotifyKeys();
+      setStatus("complete");
     } catch (e) {
       const message = e instanceof Error ? e.message : "Spotify connection failed.";
+      clearTransientSpotifyKeys();
       setError(message);
       setStatus("error");
     }
@@ -197,8 +257,10 @@ export function useSpotify() {
     setStatus("idle");
     setError(null);
     setImportCount(0);
+    clearTransientSpotifyKeys();
     localStorage.removeItem(SPOTIFY_OAUTH_DONE_KEY);
     localStorage.removeItem(SPOTIFY_OAUTH_ERROR_KEY);
+    localStorage.removeItem(SPOTIFY_RETURN_PATH_KEY);
   }, [user, refreshProfile]);
 
   return { status, error, importCount, startAuth, handleCallback, disconnect };

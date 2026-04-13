@@ -1,19 +1,42 @@
+import { useMemo, useState } from "react";
+import { CheckCircle2, Loader2, AlertCircle } from "lucide-react";
 import AppLayout from "@/components/app/AppLayout";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import { CheckCircle2, Loader2 } from "lucide-react";
 import { useConnections } from "@/hooks/use-connections";
-import { useSpotify } from "@/hooks/use-spotify";
+import { useSpotify, type SpotifyStatus } from "@/hooks/use-spotify";
 import { useAuth } from "@/hooks/use-auth";
-import { useState } from "react";
+
+function getSpotifyStatusCopy(status: SpotifyStatus) {
+  switch (status) {
+    case "connecting":
+      return { button: "Connecting…", helper: "Preparing secure Spotify authorization." };
+    case "authorizing":
+      return { button: "Authorizing…", helper: "Waiting for Spotify approval." };
+    case "connected":
+      return { button: "Connected", helper: "Spotify is linked. Starting your library import." };
+    case "importing":
+      return { button: "Importing songs…", helper: "Syncing your saved Spotify tracks." };
+    case "complete":
+      return { button: "Connected", helper: "Import complete. Your Spotify library is ready." };
+    case "error":
+      return { button: "Try again", helper: "Spotify connection failed. Review the message below and retry." };
+    default:
+      return { button: "Connect", helper: "Authorize Spotify to import saved songs and enable playlist creation." };
+  }
+}
 
 const Settings = () => {
-  const { connections, connectSpotify, disconnectSpotify, connectApple, disconnectApple, connectingSpotify, connectingApple } = useConnections();
-  const { startAuth: startSpotifyAuth, disconnect: disconnectSpotifyReal, status: spotifyAuthStatus } = useSpotify();
+  const { connections, connectApple, disconnectApple, connectingApple } = useConnections();
+  const { startAuth: startSpotifyAuth, disconnect: disconnectSpotify, status: spotifyStatus, error: spotifyError } = useSpotify();
   const { profile } = useAuth();
   const [overlapMode, setOverlapMode] = useState(false);
   const [excludeExplicit, setExcludeExplicit] = useState(false);
   const [visibility, setVisibility] = useState<"Private" | "Public">("Private");
+
+  const spotifyConnected = profile?.spotify_connected || spotifyStatus === "connected" || spotifyStatus === "complete";
+  const spotifyBusy = useMemo(() => ["connecting", "authorizing", "importing"].includes(spotifyStatus), [spotifyStatus]);
+  const spotifyCopy = getSpotifyStatusCopy(spotifyStatus);
 
   return (
     <AppLayout>
@@ -24,29 +47,67 @@ const Settings = () => {
         </div>
 
         <div className="space-y-6">
-          {/* Connected accounts */}
           <div className="p-6 rounded-2xl bg-surface-elevated border border-border/50">
             <h3 className="font-heading text-lg mb-4">Connected Accounts</h3>
-            <div className="flex items-center justify-between p-4 rounded-xl bg-secondary/50">
-              <div className="flex items-center gap-3">
-                <span className="text-xl">🎵</span>
-                <div>
-                  <p className="text-sm font-medium">Spotify</p>
-                  <p className="text-xs text-muted-foreground">
-                    {profile?.spotify_connected ? "Connected" : "Not connected"}
-                  </p>
+
+            <div className="p-4 rounded-xl bg-secondary/50 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <span className="text-xl">🎵</span>
+                  <div>
+                    <p className="text-sm font-medium">Spotify</p>
+                    <p className="text-xs text-muted-foreground">
+                      {spotifyConnected ? "Connected" : spotifyCopy.helper}
+                    </p>
+                  </div>
                 </div>
+                {spotifyConnected ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="rounded-lg text-destructive"
+                    onClick={async () => {
+                      await disconnectSpotify();
+                      toast("Spotify disconnected");
+                    }}
+                  >
+                    Disconnect
+                  </Button>
+                ) : (
+                  <Button
+                    variant="hero"
+                    size="sm"
+                    className="rounded-lg"
+                    onClick={() => void startSpotifyAuth("/settings")}
+                    disabled={spotifyBusy}
+                  >
+                    {spotifyBusy ? (
+                      <span className="inline-flex items-center gap-1">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        {spotifyCopy.button}
+                      </span>
+                    ) : (
+                      spotifyCopy.button
+                    )}
+                  </Button>
+                )}
               </div>
-              {profile?.spotify_connected ? (
-                <Button variant="ghost" size="sm" className="rounded-lg text-destructive" onClick={async () => { await disconnectSpotifyReal(); disconnectSpotify(); toast("Spotify disconnected"); }}>
-                  Disconnect
-                </Button>
-              ) : (
-                <Button variant="hero" size="sm" className="rounded-lg" onClick={() => startSpotifyAuth()} disabled={spotifyAuthStatus === "connecting"}>
-                  {spotifyAuthStatus === "connecting" ? <><Loader2 className="h-4 w-4 animate-spin mr-1" /> Connecting…</> : "Connect"}
-                </Button>
+
+              {spotifyStatus === "complete" && (
+                <p className="text-xs text-accent inline-flex items-center gap-1">
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  <span>Spotify connected and library import finished.</span>
+                </p>
+              )}
+
+              {spotifyError && (
+                <p className="text-xs text-destructive inline-flex items-center gap-1">
+                  <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                  <span>{spotifyError}</span>
+                </p>
               )}
             </div>
+
             <div className="flex items-center justify-between p-4 rounded-xl bg-secondary/50 mt-3">
               <div className="flex items-center gap-3">
                 <span className="text-xl">🍎</span>
@@ -69,7 +130,6 @@ const Settings = () => {
             </div>
           </div>
 
-          {/* Playlist preferences */}
           <div className="p-6 rounded-2xl bg-surface-elevated border border-border/50">
             <h3 className="font-heading text-lg mb-4">Playlist Preferences</h3>
             <div className="space-y-4">
@@ -103,7 +163,6 @@ const Settings = () => {
             </div>
           </div>
 
-          {/* Subscription */}
           <div className="p-6 rounded-2xl bg-primary text-primary-foreground">
             <div className="flex items-center gap-2 mb-2">
               <h3 className="font-heading text-lg">Premium Plan</h3>

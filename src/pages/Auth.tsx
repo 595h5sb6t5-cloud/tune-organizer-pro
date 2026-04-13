@@ -1,14 +1,33 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { Music, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
-import { useSpotify } from "@/hooks/use-spotify";
+import { useSpotify, type SpotifyStatus } from "@/hooks/use-spotify";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Music, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
+
+function getSpotifyStatusCopy(status: SpotifyStatus) {
+  switch (status) {
+    case "connecting":
+      return { button: "Connecting…", helper: "Preparing secure Spotify authorization." };
+    case "authorizing":
+      return { button: "Authorizing…", helper: "Waiting for Spotify approval." };
+    case "connected":
+      return { button: "Connected", helper: "Spotify is linked. Starting your library import." };
+    case "importing":
+      return { button: "Importing songs…", helper: "Syncing your saved Spotify tracks." };
+    case "complete":
+      return { button: "Spotify Connected", helper: "Import complete. You can continue onboarding." };
+    case "error":
+      return { button: "Try again", helper: "Spotify connection failed. Review the message below and retry." };
+    default:
+      return { button: "Continue with Spotify", helper: "Authorize Spotify to import your library and create playlists." };
+  }
+}
 
 const Auth = () => {
   const { user, profile, updateProfile } = useAuth();
@@ -102,7 +121,6 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }) {
 
     setLoading(true);
     const params: { password: string; email?: string; phone?: string } = { password };
-
     if (isEmail) params.email = contact.trim();
     else params.phone = contact.trim();
 
@@ -285,15 +303,19 @@ function SignUpForm({ onSuccess }: { onSuccess: () => void }) {
 
 function ConnectCard({ onComplete }: { onComplete: () => void | Promise<void> }) {
   const { updateProfile, profile } = useAuth();
-  const { startAuth: startSpotify, status: spotifyStatus } = useSpotify();
+  const { startAuth: startSpotify, status: spotifyStatus, error: spotifyError } = useSpotify();
   const [connectingApple, setConnectingApple] = useState(false);
   const [appleDone, setAppleDone] = useState(false);
 
-  const spotifyDone = profile?.spotify_connected || spotifyStatus === "done";
+  const spotifyDone = profile?.spotify_connected || spotifyStatus === "connected" || spotifyStatus === "complete";
+  const spotifyBusy = useMemo(
+    () => ["connecting", "authorizing", "importing"].includes(spotifyStatus),
+    [spotifyStatus],
+  );
+  const spotifyCopy = getSpotifyStatusCopy(spotifyStatus);
 
   const handleSpotify = async () => {
-    sessionStorage.setItem("spotify_return_path", "/auth");
-    await startSpotify();
+    await startSpotify("/auth");
   };
 
   const handleApple = async () => {
@@ -320,18 +342,16 @@ function ConnectCard({ onComplete }: { onComplete: () => void | Promise<void> })
             variant="outline"
             className="w-full justify-start gap-3 h-14"
             onClick={handleSpotify}
-            disabled={spotifyStatus === "connecting" || spotifyDone}
+            disabled={spotifyBusy || spotifyDone}
           >
-            {spotifyStatus === "connecting" ? (
+            {spotifyBusy ? (
               <Loader2 className="h-5 w-5 animate-spin text-accent" />
             ) : spotifyDone ? (
               <CheckCircle2 className="h-5 w-5 text-accent" />
             ) : (
               <div className="h-5 w-5 rounded-full bg-accent" />
             )}
-            <span className="flex-1 text-left">
-              {spotifyDone ? "Spotify Connected" : "Continue with Spotify"}
-            </span>
+            <span className="flex-1 text-left">{spotifyDone ? "Spotify Connected" : spotifyCopy.button}</span>
           </Button>
 
           <Button
@@ -351,6 +371,16 @@ function ConnectCard({ onComplete }: { onComplete: () => void | Promise<void> })
               {appleDone ? "Apple Music Connected" : "Continue with Apple Music"}
             </span>
           </Button>
+        </div>
+
+        <div className="space-y-1">
+          <p className="text-xs text-muted-foreground">{spotifyDone ? "Spotify is ready for recommendations and playlist creation." : spotifyCopy.helper}</p>
+          {spotifyError && (
+            <p className="text-xs text-destructive flex items-center gap-1">
+              <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+              <span>{spotifyError}</span>
+            </p>
+          )}
         </div>
 
         <Button variant="ghost" className="w-full text-muted-foreground" onClick={onComplete}>
