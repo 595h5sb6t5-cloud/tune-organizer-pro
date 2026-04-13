@@ -190,30 +190,53 @@ const LikedSongsIntelligence = () => {
                 : `${likedCount} liked songs ready for AI curation`}
             </p>
           </div>
-          <Button
-            variant={hasAnalyzed ? "ghost" : "hero"}
-            size={hasAnalyzed ? "sm" : "lg"}
-            className={hasAnalyzed ? "rounded-lg gap-1 text-accent" : ""}
-            onClick={handleAnalyze}
-            disabled={analyzing}
-          >
-            {analyzing ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                Curating…
-              </>
-            ) : hasAnalyzed ? (
-              <>
-                <RefreshCw className="w-3.5 h-3.5" />
-                Re-generate
-              </>
-            ) : (
-              <>
-                <Sparkles className="w-4 h-4" />
-                Generate Playlists
-              </>
+          <div className="flex items-center gap-2">
+            {hasAnalyzed && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="rounded-lg gap-1 text-xs"
+                onClick={handleRebuildAll}
+                disabled={analyzing}
+              >
+                {analyzing ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    Rebuilding…
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    Rebuild All (Deep)
+                  </>
+                )}
+              </Button>
             )}
-          </Button>
+            <Button
+              variant={hasAnalyzed ? "ghost" : "hero"}
+              size={hasAnalyzed ? "sm" : "lg"}
+              className={hasAnalyzed ? "rounded-lg gap-1 text-accent" : ""}
+              onClick={handleAnalyze}
+              disabled={analyzing}
+            >
+              {analyzing ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Curating…
+                </>
+              ) : hasAnalyzed ? (
+                <>
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  Re-generate
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-4 h-4" />
+                  Generate Playlists
+                </>
+              )}
+            </Button>
+          </div>
         </div>
 
         {error && (
