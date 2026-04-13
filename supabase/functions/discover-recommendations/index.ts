@@ -188,10 +188,9 @@ Generate discovery recommendations using the save_recommendations tool. Categori
 1. "best-for-you" — 3 songs perfectly matching taste DNA
 2. "hidden-gems" — 3 underground/overlooked tracks matching sonic preferences
 3. "sonic-neighbors" — 3 songs from artists/scenes adjacent to the user's taste
-4. "perfect-for-your-playlists" — 3 songs, each targeting a specific existing playlist (set targetPlaylistId and targetPlaylistName)
-5. "try-something-different" — 2 genre-adjacent surprises the user might love
+${playlists.length > 0 ? `4. "perfect-for-your-playlists" — 3 songs, each targeting a specific existing playlist (set targetPlaylistId and targetPlaylistName)\n5. "try-something-different" — 2 genre-adjacent surprises the user might love\n\nAvailable playlist IDs: ${playlists.map((p: any) => `"${p.id}" (${p.name})`).join(", ")}` : `4. "try-something-different" — 3 genre-adjacent surprises the user might love`}
 
-Available playlist IDs: ${playlists.map((p: any) => `"${p.id}" (${p.name})`).join(", ") || "none"}`;
+IMPORTANT: You MUST call the save_recommendations function with your results. Do NOT respond with text.`;
 
     const tools = [
       {
@@ -304,18 +303,31 @@ Available playlist IDs: ${playlists.map((p: any) => `"${p.id}" (${p.name})`).joi
           ? JSON.parse(toolCall.function.arguments)
           : toolCall.function.arguments;
       } catch {
-        console.error("Failed to parse tool call args:", toolCall.function.arguments);
-        throw new Error("Failed to parse AI tool call response");
+        // Try extracting JSON from malformed tool call
+        try {
+          const raw = toolCall.function.arguments as string;
+          const cleaned = raw.replace(/[\x00-\x1F\x7F]/g, ' ').replace(/,\s*}/g, '}').replace(/,\s*]/g, ']');
+          parsed = JSON.parse(cleaned);
+        } catch {
+          console.error("Failed to parse tool call args:", toolCall.function.arguments);
+          throw new Error("Failed to parse AI tool call response");
+        }
       }
     } else {
-      // Fallback to content parsing
-      const content = data.choices?.[0]?.message?.content;
-      if (!content) throw new Error("No content in AI response");
+      // Fallback: AI returned text instead of tool call — generate empty categories
+      const content = data.choices?.[0]?.message?.content || "";
+      console.warn("AI returned text instead of tool call:", content.slice(0, 200));
+      // Try to extract JSON from the text content
       try {
-        parsed = JSON.parse(content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim());
+        const jsonMatch = content.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          parsed = JSON.parse(jsonMatch[0].replace(/,\s*}/g, '}').replace(/,\s*]/g, ']'));
+        } else {
+          // Return empty categories so the UI can handle gracefully
+          parsed = { categories: [] };
+        }
       } catch {
-        console.error("Failed to parse AI content:", content);
-        throw new Error("Failed to parse AI recommendations");
+        parsed = { categories: [] };
       }
     }
 
