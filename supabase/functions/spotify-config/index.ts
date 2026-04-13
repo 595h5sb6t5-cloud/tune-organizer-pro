@@ -12,6 +12,11 @@ function json(body: unknown, status = 200) {
   });
 }
 
+function fail(step: string, error: string, status = 500, diagnostics: Record<string, unknown> = {}) {
+  console.error("[spotify-config]", step, { error, status, ...diagnostics });
+  return json({ error, step, status, diagnostics }, status);
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -19,23 +24,36 @@ Deno.serve(async (req) => {
 
   const clientId = Deno.env.get("SPOTIFY_CLIENT_ID")?.trim() ?? null;
   const redirectUri = Deno.env.get("SPOTIFY_REDIRECT_URI")?.trim() ?? null;
+  const diagnostics = {
+    has_client_id: Boolean(clientId),
+    has_redirect_uri: Boolean(redirectUri),
+    redirect_uri: redirectUri,
+    expected_redirect_uri: EXACT_SPOTIFY_REDIRECT_URI,
+    redirect_uri_matches_exact: redirectUri === EXACT_SPOTIFY_REDIRECT_URI,
+  };
+
+  console.info("[spotify-config] runtime_config", diagnostics);
 
   if (!clientId) {
-    return json({ error: "Spotify client ID is not configured." }, 500);
+    return fail("runtime_config", "Spotify client ID is not configured.", 500, diagnostics);
   }
 
   if (!redirectUri) {
-    return json({ error: "Spotify redirect URI is not configured." }, 500);
+    return fail("runtime_config", "Spotify redirect URI is not configured.", 500, diagnostics);
   }
 
   if (redirectUri !== EXACT_SPOTIFY_REDIRECT_URI) {
-    return json({ error: `Spotify redirect URI mismatch. Expected ${EXACT_SPOTIFY_REDIRECT_URI} but got ${redirectUri}.` }, 500);
+    return fail(
+      "runtime_config",
+      `Spotify redirect URI mismatch. Expected ${EXACT_SPOTIFY_REDIRECT_URI} but got ${redirectUri}.`,
+      500,
+      diagnostics,
+    );
   }
-
-  console.info("[spotify-config] redirect_uri", redirectUri);
 
   return json({
     client_id: clientId,
     redirect_uri: redirectUri,
+    diagnostics,
   });
 });

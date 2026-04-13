@@ -14,18 +14,30 @@ const SpotifyCallback = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { user, loading } = useAuth();
-  const { status, error, importCount, handleCallback } = useSpotify();
+  const { status, error, importCount, handleCallback, startAuth } = useSpotify();
 
   const code = searchParams.get("code");
   const state = searchParams.get("state");
   const authError = searchParams.get("error");
   const authErrorDescription = searchParams.get("error_description");
-  const returnPath = localStorage.getItem(SPOTIFY_RETURN_PATH_KEY) || "/settings";
+  const initiate = searchParams.get("init") === "1";
+  const requestedReturnPath = searchParams.get("returnPath");
+  const returnPath = localStorage.getItem(SPOTIFY_RETURN_PATH_KEY) || requestedReturnPath || "/settings";
 
   useEffect(() => {
-    if (loading || authError || !code || !user || status !== "idle") return;
+    if (!requestedReturnPath) return;
+    localStorage.setItem(SPOTIFY_RETURN_PATH_KEY, requestedReturnPath);
+  }, [requestedReturnPath]);
+
+  useEffect(() => {
+    if (loading || authError || initiate || !code || !user || status !== "idle") return;
     void handleCallback(code, state);
-  }, [loading, authError, code, state, user, status, handleCallback]);
+  }, [loading, authError, initiate, code, state, user, status, handleCallback]);
+
+  useEffect(() => {
+    if (!initiate || loading || authError || code || !user || status !== "idle") return;
+    void startAuth(requestedReturnPath || returnPath);
+  }, [initiate, loading, authError, code, user, status, startAuth, requestedReturnPath, returnPath]);
 
   useEffect(() => {
     if (status !== "complete") return;
@@ -89,7 +101,11 @@ const SpotifyCallback = () => {
             <>
               <Loader2 className="h-12 w-12 text-accent mx-auto animate-spin" />
               <h2 className="font-instrument-serif text-xl">Authorizing Spotify…</h2>
-              <p className="text-sm text-muted-foreground">Validating your callback and exchanging your authorization code.</p>
+              <p className="text-sm text-muted-foreground">
+                {initiate
+                  ? "Preparing the exact Spotify callback domain and secure PKCE redirect."
+                  : "Validating your callback and exchanging your authorization code."}
+              </p>
             </>
           ) : status === "connected" ? (
             <>

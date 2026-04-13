@@ -17,6 +17,25 @@ type SpotifyConfig = {
   client_id?: string | null;
   redirect_uri?: string | null;
   error?: string | null;
+  step?: string | null;
+  status?: number | null;
+  diagnostics?: Record<string, unknown> | null;
+  spotify_status?: number | null;
+  spotify_body?: unknown;
+};
+
+type SpotifyErrorPayload = {
+  error?: string | null;
+  step?: string | null;
+  status?: number | null;
+  diagnostics?: Record<string, unknown> | null;
+  spotify_status?: number | null;
+  spotify_body?: unknown;
+};
+
+type SpotifyFailure = {
+  message: string;
+  payload: SpotifyErrorPayload | null;
 };
 
 function generateRandomString(length: number) {
@@ -46,6 +65,71 @@ function clearTransientSpotifyKeys() {
 
 function logSpotifyOAuth(step: string, details: Record<string, unknown>) {
   console.info(`[Spotify OAuth] ${step}`, details);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function formatSpotifyFailure(payload: SpotifyErrorPayload | null, fallback: string) {
+  if (!payload) return fallback;
+
+  return [
+    payload.step ? `Step ${payload.step}` : null,
+    payload.status ? `HTTP ${payload.status}` : null,
+    payload.error ?? fallback,
+  ]
+    .filter(Boolean)
+    .join(" — ");
+}
+
+function normalizeSpotifyPayload(payload: unknown, fallback: string): SpotifyFailure {
+  if (!isRecord(payload)) {
+    return { message: fallback, payload: null };
+  }
+
+  const normalized: SpotifyErrorPayload = {
+    error: typeof payload.error === "string" ? payload.error : fallback,
+    step: typeof payload.step === "string" ? payload.step : null,
+    status: typeof payload.status === "number" ? payload.status : null,
+    diagnostics: isRecord(payload.diagnostics) ? payload.diagnostics : null,
+    spotify_status: typeof payload.spotify_status === "number" ? payload.spotify_status : null,
+    spotify_body: "spotify_body" in payload ? payload.spotify_body : undefined,
+  };
+
+  return {
+    message: formatSpotifyFailure(normalized, fallback),
+    payload: normalized,
+  };
+}
+
+async function getFunctionFailure(error: unknown, fallback: string): Promise<SpotifyFailure> {
+  if (isRecord(error) && "context" in error && error.context instanceof Response) {
+    const response = error.context;
+    const bodyText = await response.clone().text();
+
+    if (!bodyText) {
+      const payload: SpotifyErrorPayload = { status: response.status, error: fallback };
+      return { message: formatSpotifyFailure(payload, fallback), payload };
+    }
+
+    try {
+      const payload = JSON.parse(bodyText) as SpotifyErrorPayload;
+      payload.status = payload.status ?? response.status;
+      return {
+        message: formatSpotifyFailure(payload, fallback),
+        payload,
+      };
+    } catch {
+      const payload: SpotifyErrorPayload = { status: response.status, error: bodyText };
+      return { message: formatSpotifyFailure(payload, fallback), payload };
+    }
+  }
+
+  return {
+    message: error instanceof Error ? error.message : fallback,
+    payload: null,
+  };
 }
 
 export type SpotifyStatus =
@@ -133,13 +217,35 @@ export function useSpotify() {
 
     try {
       const configRes = await supabase.functions.invoke("spotify-config");
+      if (configRes.error) {
+        const failure = await getFunctionFailure(configRes.error, "Unable to load Spotify configuration.");
+        logSpotifyOAuth("config_error", {
+          message: failure.message,
+          diagnostics: failure.payload ?? null,
+        });
+        throw new Error(failure.message);
+      }
+
       const config = (configRes.data ?? {}) as SpotifyConfig;
+      if (config.error) {
+        const failure = normalizeSpotifyPayload(config, "Unable to load Spotify configuration.");
+        logSpotifyOAuth("config_error", {
+          message: failure.message,
+          diagnostics: failure.payload ?? null,
+        });
+        throw new Error(failure.message);
+      }
+
       const clientId = config.client_id?.trim();
       const redirectUri = config.redirect_uri?.trim();
 
-      if (configRes.error || config.error) {
-        throw new Error(config.error || configRes.error?.message || "Unable to load Spotify configuration.");
-      }
+      logSpotifyOAuth("runtime_config", {
+        current_origin: window.location.origin,
+        configured_redirect_uri: redirectUri ?? null,
+        exact_redirect_uri: EXACT_SPOTIFY_REDIRECT_URI,
+        redirect_uri_matches_exact: redirectUri === EXACT_SPOTIFY_REDIRECT_URI,
+        has_client_id: Boolean(clientId),
+      });
 
       if (!clientId) {
         throw new Error("Spotify is not fully configured. Missing client ID.");
@@ -151,12 +257,18 @@ export function useSpotify() {
 
       const redirectOrigin = new URL(redirectUri).origin;
       if (redirectOrigin !== window.location.origin) {
-        logSpotifyOAuth("origin_mismatch", {
+        const handoffUrl = new URL(EXACT_SPOTIFY_REDIRECT_URI);
+        handoffUrl.searchParams.set("init", "1");
+        handoffUrl.searchParams.set("returnPath", returnPath);
+
+        logSpotifyOAuth("origin_handoff", {
           current_origin: window.location.origin,
           redirect_origin: redirectOrigin,
           redirect_uri: EXACT_SPOTIFY_REDIRECT_URI,
+          handoff_url: handoffUrl.toString(),
         });
-        throw new Error(`Spotify OAuth is locked to ${redirectOrigin}. Open the app on that exact URL to connect Spotify.`);
+        window.location.assign(handoffUrl.toString());
+        return;
       }
 
       const state = generateRandomString(24);
@@ -166,7 +278,16 @@ export function useSpotify() {
 
       localStorage.setItem(SPOTIFY_PKCE_VERIFIER_KEY, codeVerifier);
       localStorage.setItem(SPOTIFY_PKCE_STATE_KEY, state);
+      localStorage.setItem(SPOTIFY_REDIRECT_URI_KEY, EXACT_SPOTIFY_REDIRECT_URI);
       localStorage.setItem(SPOTIFY_RETURN_PATH_KEY, returnPath);
+
+      logSpotifyOAuth("pkce_generated", {
+        redirect_uri: EXACT_SPOTIFY_REDIRECT_URI,
+        has_code_verifier: true,
+        code_verifier_length: codeVerifier.length,
+        has_state: Boolean(state),
+        return_path: returnPath,
+      });
 
       const params = new URLSearchParams({
         response_type: "code",
@@ -180,6 +301,7 @@ export function useSpotify() {
 
       const authUrl = `${SPOTIFY_AUTH_URL}?${params.toString()}`;
       logSpotifyOAuth("authorization_request", {
+        current_origin: window.location.origin,
         redirect_uri: EXACT_SPOTIFY_REDIRECT_URI,
         authorization_url: authUrl,
       });
@@ -210,6 +332,7 @@ export function useSpotify() {
       window.location.assign(authUrl);
     } catch (e) {
       const message = e instanceof Error ? e.message : "Spotify connection failed.";
+      logSpotifyOAuth("start_auth_failure", { message });
       clearTransientSpotifyKeys();
       setError(message);
       setStatus("error");
@@ -219,9 +342,29 @@ export function useSpotify() {
   const handleCallback = useCallback(async (code: string, returnedState: string | null) => {
     const codeVerifier = localStorage.getItem(SPOTIFY_PKCE_VERIFIER_KEY);
     const storedState = localStorage.getItem(SPOTIFY_PKCE_STATE_KEY);
+    const storedRedirectUri = localStorage.getItem(SPOTIFY_REDIRECT_URI_KEY);
 
-    if (!codeVerifier || !storedState) {
+    logSpotifyOAuth("callback_received", {
+      has_code: Boolean(code),
+      has_code_verifier: Boolean(codeVerifier),
+      code_verifier_length: codeVerifier?.length ?? 0,
+      has_stored_state: Boolean(storedState),
+      returned_state_present: Boolean(returnedState),
+      state_matches: Boolean(returnedState && storedState && returnedState === storedState),
+      stored_redirect_uri: storedRedirectUri,
+      exact_redirect_uri: EXACT_SPOTIFY_REDIRECT_URI,
+      redirect_uri_matches: storedRedirectUri === EXACT_SPOTIFY_REDIRECT_URI,
+    });
+
+    if (!codeVerifier || !storedState || !storedRedirectUri) {
       setError("Missing Spotify authorization data. Please start the connection again.");
+      setStatus("error");
+      return;
+    }
+
+    if (storedRedirectUri !== EXACT_SPOTIFY_REDIRECT_URI) {
+      clearTransientSpotifyKeys();
+      setError(`Spotify redirect URI mismatch. Expected ${EXACT_SPOTIFY_REDIRECT_URI} but got ${storedRedirectUri}.`);
       setStatus("error");
       return;
     }
@@ -251,25 +394,61 @@ export function useSpotify() {
         body: { code, code_verifier: codeVerifier, redirect_uri: EXACT_SPOTIFY_REDIRECT_URI },
       });
 
-      if (res.error || res.data?.error) {
-        throw new Error(res.data?.error || res.error?.message || "Failed to exchange Spotify authorization code.");
+      if (res.error) {
+        const failure = await getFunctionFailure(res.error, "Failed to exchange Spotify authorization code.");
+        logSpotifyOAuth("token_exchange_error", {
+          message: failure.message,
+          diagnostics: failure.payload ?? null,
+        });
+        throw new Error(failure.message);
       }
+
+      if (res.data?.error) {
+        const failure = normalizeSpotifyPayload(res.data, "Failed to exchange Spotify authorization code.");
+        logSpotifyOAuth("token_exchange_error", {
+          message: failure.message,
+          diagnostics: failure.payload ?? null,
+        });
+        throw new Error(failure.message);
+      }
+
+      logSpotifyOAuth("token_exchange_success", {
+        diagnostics: isRecord(res.data) ? res.data : { success: true },
+      });
 
       setStatus("connected");
       await refreshProfile();
 
       setStatus("importing");
       const importRes = await supabase.functions.invoke("spotify-import-tracks");
-      if (importRes.error || importRes.data?.error) {
-        throw new Error(importRes.data?.error || importRes.error?.message || "Spotify connected but song import failed.");
+      if (importRes.error) {
+        const failure = await getFunctionFailure(importRes.error, "Spotify connected but song import failed.");
+        logSpotifyOAuth("import_error", {
+          message: failure.message,
+          diagnostics: failure.payload ?? null,
+        });
+        throw new Error(failure.message);
+      }
+
+      if (importRes.data?.error) {
+        const failure = normalizeSpotifyPayload(importRes.data, "Spotify connected but song import failed.");
+        logSpotifyOAuth("import_error", {
+          message: failure.message,
+          diagnostics: failure.payload ?? null,
+        });
+        throw new Error(failure.message);
       }
 
       setImportCount(importRes.data?.imported || 0);
+      logSpotifyOAuth("import_success", {
+        diagnostics: isRecord(importRes.data) ? importRes.data : { imported: importRes.data?.imported ?? 0 },
+      });
       await refreshProfile();
       clearTransientSpotifyKeys();
       setStatus("complete");
     } catch (e) {
       const message = e instanceof Error ? e.message : "Spotify connection failed.";
+      logSpotifyOAuth("callback_failure", { message });
       clearTransientSpotifyKeys();
       setError(message);
       setStatus("error");
