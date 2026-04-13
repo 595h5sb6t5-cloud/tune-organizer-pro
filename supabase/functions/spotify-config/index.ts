@@ -1,4 +1,4 @@
-const EXACT_SPOTIFY_REDIRECT_URI = "https://159079dd-d99f-4e32-b626-b73b50d600ec.lovableproject.com/spotify-callback";
+const EXACT_SPOTIFY_REDIRECT_URI = "https://id-preview--159079dd-d99f-4e32-b626-b73b50d600ec.lovable.app/spotify-callback";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
