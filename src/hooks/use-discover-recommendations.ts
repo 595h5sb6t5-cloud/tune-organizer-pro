@@ -27,8 +27,8 @@ export function useDiscoverRecommendations() {
         importedRes, likedRes, playlistsRes, playlistTracksRes,
         historyRes, clustersRes, vibeRes, tasteRes,
       ] = await Promise.all([
-        supabase.from("imported_tracks").select("track_name, artist_name, album_name").eq("user_id", user.id).limit(300),
-        supabase.from("liked_songs").select("track_name, artist_name, album_name, genre_tags, mood, atmosphere, energy, production_style, era, audio_tempo, audio_energy, audio_valence, audio_danceability, audio_acousticness, audio_instrumentalness, audio_speechiness, audio_loudness").eq("user_id", user.id).limit(500),
+        supabase.from("imported_tracks").select("track_name, artist_name, album_name").eq("user_id", user.id),
+        supabase.from("liked_songs").select("track_name, artist_name, album_name, genre_tags, mood, atmosphere, energy, production_style, era, audio_tempo, audio_energy, audio_valence, audio_danceability, audio_acousticness, audio_instrumentalness, audio_speechiness, audio_loudness").eq("user_id", user.id),
         supabase.from("spotify_playlists").select("spotify_playlist_id, name, description, track_count").eq("user_id", user.id),
         supabase.from("spotify_playlist_tracks").select("track_name, artist_name").eq("user_id", user.id).limit(1000),
         supabase.from("recommendation_history").select("track_title, track_artist, status").eq("user_id", user.id),

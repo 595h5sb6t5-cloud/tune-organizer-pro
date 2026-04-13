@@ -140,6 +140,24 @@ function countTags(rows: { tag: string }[]): { tag: string; count: number }[] {
     .map(v => ({ tag: v.display, count: v.count }));
 }
 
+/** Paginate through all rows to avoid the 1000-row Supabase default limit */
+async function fetchAllRows(query: any): Promise<any[]> {
+  const pageSize = 1000;
+  const allRows: any[] = [];
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await query.range(from, from + pageSize - 1);
+    if (error) throw error;
+    const rows = data || [];
+    allRows.push(...rows);
+    if (rows.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return allRows;
+}
+
 export function useDashboardStats() {
   const { user, profile } = useAuth();
   const spotifyConnected = profile?.spotify_connected ?? false;
@@ -155,22 +173,22 @@ export function useDashboardStats() {
     setLoading(true);
 
     try {
-      // Parallel fetch all data
+      // Parallel fetch all data — use count queries where possible, paginate where we need rows
       const [
         likedCountRes,
         playlistCountRes,
         followedArtistCountRes,
         analyzedCountRes,
         clusterCountRes,
-        artistsRes,
-        genresRes,
-        moodsRes,
-        energyRes,
-        temposRes,
-        atmospheresRes,
+        artistsRows,
+        genresRows,
+        moodsRows,
+        energyRows,
+        temposRows,
+        atmospheresRows,
         clustersRes,
-        recsRes,
-        audioAvgRes,
+        recsRows,
+        audioAvgRows,
         thisMonthRes,
         recentArtistsRes,
       ] = await Promise.all([
@@ -179,34 +197,33 @@ export function useDashboardStats() {
         supabase.from("spotify_followed_artists").select("id", { count: "exact", head: true }).eq("user_id", user.id),
         supabase.from("liked_songs").select("id", { count: "exact", head: true }).eq("user_id", user.id).not("analyzed_at", "is", null),
         supabase.from("liked_song_clusters").select("id", { count: "exact", head: true }).eq("user_id", user.id),
-        // Top artists: fetch all artist names to count
-        supabase.from("liked_songs").select("artist_name").eq("user_id", user.id),
-        // Genres
-        supabase.from("liked_songs").select("genre_tags").eq("user_id", user.id).not("genre_tags", "is", null),
-        // Moods
-        supabase.from("liked_songs").select("mood").eq("user_id", user.id).not("mood", "is", null),
-        // Energy
-        supabase.from("liked_songs").select("energy").eq("user_id", user.id).not("energy", "is", null),
-        // Tempo estimates
-        supabase.from("liked_songs").select("tempo_estimate").eq("user_id", user.id).not("tempo_estimate", "is", null),
-        // Atmospheres
-        supabase.from("liked_songs").select("atmosphere").eq("user_id", user.id).not("atmosphere", "is", null),
+        // Top artists: fetch ALL artist names to count (paginated)
+        fetchAllRows(supabase.from("liked_songs").select("artist_name").eq("user_id", user.id)),
+        // Genres (paginated)
+        fetchAllRows(supabase.from("liked_songs").select("genre_tags").eq("user_id", user.id).not("genre_tags", "is", null)),
+        // Moods (paginated)
+        fetchAllRows(supabase.from("liked_songs").select("mood").eq("user_id", user.id).not("mood", "is", null)),
+        // Energy (paginated)
+        fetchAllRows(supabase.from("liked_songs").select("energy").eq("user_id", user.id).not("energy", "is", null)),
+        // Tempo estimates (paginated)
+        fetchAllRows(supabase.from("liked_songs").select("tempo_estimate").eq("user_id", user.id).not("tempo_estimate", "is", null)),
+        // Atmospheres (paginated)
+        fetchAllRows(supabase.from("liked_songs").select("atmosphere").eq("user_id", user.id).not("atmosphere", "is", null)),
         // Clusters
         supabase.from("liked_song_clusters").select("name, description, vibe_description, mood_tags, energy_level, color_hex, track_count").eq("user_id", user.id).order("track_count", { ascending: false }).limit(10),
-        // Recommendation stats
-        supabase.from("recommendation_history").select("status").eq("user_id", user.id),
-        // Audio features - fetch raw values to compute averages client-side
-        supabase.from("liked_songs").select("audio_tempo, audio_energy, audio_valence, audio_danceability, audio_acousticness").eq("user_id", user.id).not("audio_features_fetched_at", "is", null).limit(1000),
+        // Recommendation stats (paginated)
+        fetchAllRows(supabase.from("recommendation_history").select("status").eq("user_id", user.id)),
+        // Audio features — fetch ALL rows with audio data (paginated)
+        fetchAllRows(supabase.from("liked_songs").select("audio_tempo, audio_energy, audio_valence, audio_danceability, audio_acousticness").eq("user_id", user.id).not("audio_features_fetched_at", "is", null)),
         // Songs this month
         supabase.from("liked_songs").select("id", { count: "exact", head: true }).eq("user_id", user.id).gte("added_at", new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()),
         // Recent new artists (last 30 days)
         supabase.from("liked_songs").select("artist_name").eq("user_id", user.id).gte("added_at", new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()).order("added_at", { ascending: false }).limit(100),
       ]);
 
-      // Count artists
+      // Count artists — artistsRows is already an array from fetchAllRows
       const artistCounts = new Map<string, number>();
-      for (const row of artistsRes.data || []) {
-        // Handle multi-artist strings
+      for (const row of artistsRows) {
         const names = (row.artist_name as string).split(", ");
         for (const name of names) {
           const key = name.trim().toLowerCase();
@@ -222,32 +239,32 @@ export function useDashboardStats() {
         }));
 
       // Count genres (flatten arrays)
-      const genreRows: { tag: string }[] = [];
-      for (const row of genresRes.data || []) {
+      const genreTagRows: { tag: string }[] = [];
+      for (const row of genresRows) {
         const tags = row.genre_tags as string[] | null;
         if (tags) {
           for (const t of tags) {
-            if (t) genreRows.push({ tag: t });
+            if (t) genreTagRows.push({ tag: t });
           }
         }
       }
-      const topGenres = countTags(genreRows).slice(0, 12).map(g => ({ genre: g.tag, count: g.count }));
+      const topGenres = countTags(genreTagRows).slice(0, 12).map(g => ({ genre: g.tag, count: g.count }));
 
       // Count moods
-      const moodRows = (moodsRes.data || []).map(r => ({ tag: r.mood as string }));
-      const moods = countTags(moodRows).slice(0, 10).map(m => ({ mood: m.tag, count: m.count }));
+      const moodTagRows = moodsRows.map(r => ({ tag: r.mood as string }));
+      const moods = countTags(moodTagRows).slice(0, 10).map(m => ({ mood: m.tag, count: m.count }));
 
       // Count energy
-      const energyRows = (energyRes.data || []).map(r => ({ tag: r.energy as string }));
-      const energyLevels = countTags(energyRows).slice(0, 6).map(e => ({ energy: e.tag, count: e.count }));
+      const energyTagRows = energyRows.map(r => ({ tag: r.energy as string }));
+      const energyLevels = countTags(energyTagRows).slice(0, 6).map(e => ({ energy: e.tag, count: e.count }));
 
       // Count tempos
-      const tempoRows = (temposRes.data || []).map(r => ({ tag: r.tempo_estimate as string }));
-      const tempos = countTags(tempoRows).slice(0, 8).map(t => ({ tempo: t.tag, count: t.count }));
+      const tempoTagRows = temposRows.map(r => ({ tag: r.tempo_estimate as string }));
+      const tempos = countTags(tempoTagRows).slice(0, 8).map(t => ({ tempo: t.tag, count: t.count }));
 
       // Count atmospheres
-      const atmosphereRows = (atmospheresRes.data || []).map(r => ({ tag: r.atmosphere as string }));
-      const atmospheres = countTags(atmosphereRows).slice(0, 8).map(a => ({ atmosphere: a.tag, count: a.count }));
+      const atmosphereTagRows = atmospheresRows.map(r => ({ tag: r.atmosphere as string }));
+      const atmospheres = countTags(atmosphereTagRows).slice(0, 8).map(a => ({ atmosphere: a.tag, count: a.count }));
 
       // Clusters
       const clusters: ClusterInfo[] = (clustersRes.data || []).map((c: any) => ({
@@ -261,13 +278,12 @@ export function useDashboardStats() {
       }));
 
       // Recommendation stats
-      const recs = recsRes.data || [];
-      const totalRecommendations = recs.length;
-      const acceptedRecommendations = recs.filter((r: any) => r.status === "accepted").length;
-      const dismissedRecommendations = recs.filter((r: any) => r.status === "dismissed").length;
+      const totalRecommendations = recsRows.length;
+      const acceptedRecommendations = recsRows.filter((r: any) => r.status === "accepted").length;
+      const dismissedRecommendations = recsRows.filter((r: any) => r.status === "dismissed").length;
 
-      // Audio feature averages
-      const audioData = audioAvgRes.data || [];
+      // Audio feature averages — audioAvgRows is already an array
+      const audioData = audioAvgRows;
       let avgTempo: number | null = null;
       let avgEnergy: number | null = null;
       let avgValence: number | null = null;

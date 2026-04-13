@@ -58,6 +58,33 @@ function formatAudioFeatures(s: any): string {
   return parts.length > 0 ? ` [${parts.join(", ")}]` : "";
 }
 
+/**
+ * Fetches ALL liked songs for a user across pagination boundaries.
+ * Supabase default limit is 1000, so we paginate with .range().
+ */
+async function fetchAllLikedSongs(client: any, userId: string, columns: string): Promise<any[]> {
+  const allRows: any[] = [];
+  const pageSize = 1000;
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await client
+      .from("liked_songs")
+      .select(columns)
+      .eq("user_id", userId)
+      .order("added_at", { ascending: false })
+      .range(from, from + pageSize - 1);
+
+    if (error) throw error;
+    const rows = data || [];
+    allRows.push(...rows);
+    if (rows.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return allRows;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -80,20 +107,189 @@ Deno.serve(async (req) => {
     const { data: { user }, error: userError } = await supabase.auth.getUser();
     if (userError || !user) return json({ error: "Invalid session" }, 401);
 
-    const { data: likedSongs, error: lsError } = await supabase
-      .from("liked_songs")
-      .select("id, spotify_track_id, track_name, artist_name, album_name, image_url, audio_tempo, audio_energy, audio_valence, audio_danceability, audio_acousticness, audio_instrumentalness, audio_speechiness, audio_loudness, audio_liveness")
-      .eq("user_id", user.id)
-      .order("added_at", { ascending: false })
-      .limit(200);
+    // Parse request body for batch parameters
+    let batchOffset = 0;
+    let batchSize = 200; // max songs per AI call — fits context window well
+    let mode: "cluster" | "tag_only" = "cluster";
+    try {
+      const body = await req.json();
+      if (typeof body?.offset === "number") batchOffset = body.offset;
+      if (typeof body?.batch_size === "number") batchSize = Math.min(body.batch_size, 200);
+      if (body?.mode === "tag_only") mode = "tag_only";
+    } catch { /* no body is fine */ }
 
-    if (lsError) return json({ error: lsError.message }, 500);
-    if (!likedSongs || likedSongs.length === 0) {
+    // Get total count first
+    const { count: totalLikedSongs } = await supabase
+      .from("liked_songs")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", user.id);
+
+    const total = totalLikedSongs ?? 0;
+    if (total === 0) {
+      return json({ error: "No liked songs found. Import your Spotify library first." }, 400);
+    }
+
+    // For clustering mode (first batch only), we fetch ALL songs to cluster them all at once
+    // For tag_only mode, we fetch a specific batch of unanalyzed songs
+    if (mode === "tag_only") {
+      // Fetch a batch of songs that haven't been analyzed yet
+      const { data: unanalyzed, error: fetchErr } = await supabase
+        .from("liked_songs")
+        .select("id, spotify_track_id, track_name, artist_name, album_name, image_url, audio_tempo, audio_energy, audio_valence, audio_danceability, audio_acousticness, audio_instrumentalness, audio_speechiness, audio_loudness, audio_liveness")
+        .eq("user_id", user.id)
+        .is("analyzed_at", null)
+        .order("added_at", { ascending: false })
+        .limit(batchSize);
+
+      if (fetchErr) return json({ error: fetchErr.message }, 500);
+      const songs = unanalyzed || [];
+
+      if (songs.length === 0) {
+        // Count how many are analyzed
+        const { count: analyzedCount } = await supabase
+          .from("liked_songs")
+          .select("id", { count: "exact", head: true })
+          .eq("user_id", user.id)
+          .not("analyzed_at", "is", null);
+
+        return json({
+          success: true,
+          done: true,
+          tracks_analyzed_this_batch: 0,
+          total_analyzed: analyzedCount ?? 0,
+          total_liked_songs: total,
+        });
+      }
+
+      console.info(`[analyze-liked-songs] tag_only batch: ${songs.length} unanalyzed songs for user ${user.id}`);
+
+      const songList = songs.map((s, i) =>
+        `${i + 1}. "${s.track_name}" – ${s.artist_name}${s.album_name ? ` (${s.album_name})` : ""}${formatAudioFeatures(s)}`
+      ).join("\n");
+
+      const tagPrompt = `Analyze these ${songs.length} songs. For each song, provide genre tags, mood, energy level, tempo estimate, era, atmosphere, and production style.
+
+${songList}
+
+Use the tag_songs function to return your analysis.`;
+
+      const tagResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${LOVABLE_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "google/gemini-2.5-flash",
+          messages: [
+            { role: "system", content: "You are a music analysis engine. Analyze each song and return structured metadata." },
+            { role: "user", content: tagPrompt },
+          ],
+          temperature: 0.3,
+          tools: [{
+            type: "function",
+            function: {
+              name: "tag_songs",
+              description: "Save analysis tags for each song",
+              parameters: {
+                type: "object",
+                properties: {
+                  songs: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        index: { type: "number", description: "1-indexed song number" },
+                        genre_tags: { type: "array", items: { type: "string" } },
+                        mood: { type: "string" },
+                        energy: { type: "string", enum: ["low", "medium-low", "medium", "medium-high", "high"] },
+                        tempo_estimate: { type: "string" },
+                        era: { type: "string" },
+                        atmosphere: { type: "string" },
+                        production_style: { type: "string" },
+                      },
+                      required: ["index", "mood", "energy"],
+                    },
+                  },
+                },
+                required: ["songs"],
+              },
+            },
+          }],
+          tool_choice: { type: "function", function: { name: "tag_songs" } },
+        }),
+      });
+
+      if (!tagResponse.ok) {
+        const text = await tagResponse.text();
+        console.error("AI gateway error:", tagResponse.status, text);
+        if (tagResponse.status === 429) return json({ error: "Rate limit exceeded. Try again in a moment." }, 429);
+        return json({ error: `AI analysis failed: ${tagResponse.status}` }, 500);
+      }
+
+      const tagData = await tagResponse.json();
+      let parsed: any;
+      const toolCall = tagData.choices?.[0]?.message?.tool_calls?.[0];
+      if (toolCall?.function?.arguments) {
+        try { parsed = JSON.parse(toolCall.function.arguments); } catch { parsed = extractJson(toolCall.function.arguments); }
+      } else {
+        const content = tagData.choices?.[0]?.message?.content;
+        if (!content) return json({ error: "Empty AI response" }, 500);
+        parsed = extractJson(content);
+      }
+
+      const taggedSongs = parsed.songs || [];
+      let taggedCount = 0;
+      const nowIso = new Date().toISOString();
+
+      for (const tagged of taggedSongs) {
+        const idx = (tagged.index || 0) - 1;
+        if (idx < 0 || idx >= songs.length) continue;
+
+        const songId = songs[idx].id;
+        await admin.from("liked_songs").update({
+          genre_tags: tagged.genre_tags || [],
+          mood: tagged.mood || null,
+          energy: tagged.energy || null,
+          tempo_estimate: tagged.tempo_estimate || null,
+          era: tagged.era || null,
+          atmosphere: tagged.atmosphere || null,
+          production_style: tagged.production_style || null,
+          analyzed_at: nowIso,
+        }).eq("id", songId);
+        taggedCount++;
+      }
+
+      // Count total analyzed now
+      const { count: analyzedNow } = await supabase
+        .from("liked_songs")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", user.id)
+        .not("analyzed_at", "is", null);
+
+      const totalAnalyzed = analyzedNow ?? 0;
+
+      console.info(`[analyze-liked-songs] tag_only: tagged ${taggedCount} songs, total analyzed: ${totalAnalyzed}/${total}`);
+
+      return json({
+        success: true,
+        done: totalAnalyzed >= total,
+        tracks_analyzed_this_batch: taggedCount,
+        total_analyzed: totalAnalyzed,
+        total_liked_songs: total,
+      });
+    }
+
+    // ── CLUSTER MODE: fetch ALL songs, cluster them all ──
+    const columns = "id, spotify_track_id, track_name, artist_name, album_name, image_url, audio_tempo, audio_energy, audio_valence, audio_danceability, audio_acousticness, audio_instrumentalness, audio_speechiness, audio_loudness, audio_liveness";
+    const likedSongs = await fetchAllLikedSongs(supabase, user.id, columns);
+
+    if (likedSongs.length === 0) {
       return json({ error: "No liked songs found. Import your Spotify library first." }, 400);
     }
 
     const hasAudioFeatures = likedSongs.filter(s => s.audio_energy != null).length;
-    console.info(`[analyze-liked-songs] Analyzing ${likedSongs.length} songs (${hasAudioFeatures} with audio features) for user ${user.id}`);
+    console.info(`[analyze-liked-songs] Clustering ${likedSongs.length} songs (${hasAudioFeatures} with audio features) for user ${user.id}`);
 
     const songList = likedSongs.map((s, i) =>
       `${i + 1}. "${s.track_name}" – ${s.artist_name}${s.album_name ? ` (${s.album_name})` : ""}${formatAudioFeatures(s)}`
@@ -130,33 +326,22 @@ LANGUAGE RULES — CRITICAL:
 - Detect the language of each track (from artist name, track name, and your musical knowledge).
 - By DEFAULT, English songs cluster with English songs. Spanish songs cluster with Spanish songs.
 - Do NOT casually mix Spanish and English in the same playlist. This breaks listening coherence.
-- Only mix languages if there is a VERY strong musical reason AND the playlist still feels intentional (e.g., a global electronic mood, a multilingual late-night aesthetic, a cosmopolitan playlist identity).
+- Only mix languages if there is a VERY strong musical reason AND the playlist still feels intentional.
 - Language mixing should be the EXCEPTION, not the default.
-- For other languages (French, Portuguese, Korean, Japanese, etc.), group by vibe compatibility but still prefer language consistency when possible.
 
 COHERENCE RULES (STRICT):
-- Energy variance within a cluster must be < 0.25 (tighter than before)
+- Energy variance within a cluster must be < 0.25
 - Valence variance within a cluster must be < 0.3
 - Tempo range within a cluster should be < 25 BPM
 - If a cluster violates these, SPLIT it into smaller playlists
 - Genre is ONLY a weak tiebreaker — never the primary signal
-- Do NOT group songs just because they share a broad genre, the same artist, or a superficial tag
-
-FINAL COHERENCE FILTER — before outputting each playlist, verify:
-1. All songs feel like the same musical world
-2. The emotional tone is consistent (no jarring emotional shifts)
-3. Energy spread is not chaotic
-4. Production styles are compatible
-5. Transitions would not feel awkward
-6. Language is consistent (unless intentionally multilingual)
-If ANY song weakens the playlist, remove it and place it elsewhere or create a new cluster.
 
 PLAYLIST NAMING:
 Names must be evocative, aesthetic, 2-3 words. Reflect the SONIC CHARACTER, not genre.
-GOOD: "Midnight Drive", "Dark Velvet", "Golden Groove", "Soft Horizon", "Neon Nights", "Terciopelo Oscuro", "Amanecer Lento"
+GOOD: "Midnight Drive", "Dark Velvet", "Golden Groove", "Soft Horizon", "Neon Nights"
 BAD: "Pop Mix", "Rap Songs", "Rock Playlist", "Spanish Mix", "English Vibes"
 
-Create 5-12 playlists. Every song must appear in exactly one playlist. Favor precision over quantity.
+Create 5-20 playlists (scale with library size). Every song must appear in exactly one playlist. Favor precision over quantity.
 
 Return ONLY valid JSON via the save_playlists function.`;
 
@@ -198,13 +383,13 @@ Use the save_playlists function to return your clustering result.`;
                       mood_tags: { type: "array", items: { type: "string" }, description: "2-4 mood/vibe tags" },
                       color_hex: { type: "string", description: "Hex color matching the playlist mood" },
                       energy_level: { type: "string", enum: ["low", "medium-low", "medium", "medium-high", "high"] },
-                      primary_language: { type: "string", description: "Dominant language of the playlist (e.g. 'English', 'Spanish', 'Mixed')" },
-                      language_consistency: { type: "number", description: "0-1 score of how language-consistent this playlist is. 1.0 = single language, 0.5 = mixed" },
+                      primary_language: { type: "string" },
+                      language_consistency: { type: "number" },
                       tempo_range: { type: "string", description: "e.g. '85-100 BPM'" },
                       era_range: { type: "string" },
-                      avg_energy: { type: "number", description: "Average energy value of songs in this cluster" },
-                      avg_valence: { type: "number", description: "Average valence value of songs in this cluster" },
-                      avg_tempo: { type: "number", description: "Average BPM of songs in this cluster" },
+                      avg_energy: { type: "number" },
+                      avg_valence: { type: "number" },
+                      avg_tempo: { type: "number" },
                       songs: {
                         type: "array",
                         items: {
@@ -355,14 +540,23 @@ Use the save_playlists function to return your clustering result.`;
       }
     }
 
-    console.info(`[analyze-liked-songs] Created ${clusters.length} playlists, assigned ${totalAssigned} tracks (${hasAudioFeatures} had audio features)`);
+    // Count total analyzed
+    const { count: analyzedNow } = await supabase
+      .from("liked_songs")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", user.id)
+      .not("analyzed_at", "is", null);
+
+    console.info(`[analyze-liked-songs] Created ${clusters.length} playlists, assigned ${totalAssigned} tracks (${hasAudioFeatures} had audio features), total analyzed: ${analyzedNow}/${total}`);
 
     return json({
       success: true,
+      done: (analyzedNow ?? 0) >= total,
       clusters_created: clusters.length,
       tracks_analyzed: totalAssigned,
       tracks_with_audio_features: hasAudioFeatures,
-      total_liked_songs: likedSongs.length,
+      total_analyzed: analyzedNow ?? 0,
+      total_liked_songs: total,
     });
   } catch (e) {
     console.error("analyze-liked-songs error:", e);

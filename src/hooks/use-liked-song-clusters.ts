@@ -32,6 +32,12 @@ export interface ClusterTrack {
   atmosphere: string | null;
 }
 
+export interface AnalysisProgress {
+  totalAnalyzed: number;
+  totalSongs: number;
+  phase: "idle" | "clustering" | "tagging" | "done";
+}
+
 export function useLikedSongClusters() {
   const { user, profile } = useAuth();
   const spotifyConnected = profile?.spotify_connected ?? false;
@@ -42,6 +48,7 @@ export function useLikedSongClusters() {
   const [hasAnalyzed, setHasAnalyzed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [likedCount, setLikedCount] = useState(0);
+  const [progress, setProgress] = useState<AnalysisProgress>({ totalAnalyzed: 0, totalSongs: 0, phase: "idle" });
 
   const loadClusters = useCallback(async () => {
     if (!user || !spotifyConnected) {
@@ -51,12 +58,15 @@ export function useLikedSongClusters() {
 
     setLoading(true);
 
-    // Get liked count
-    const { count } = await supabase
-      .from("liked_songs")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", user.id);
-    setLikedCount(count ?? 0);
+    // Get liked count + analyzed count in parallel
+    const [countRes, analyzedRes] = await Promise.all([
+      supabase.from("liked_songs").select("id", { count: "exact", head: true }).eq("user_id", user.id),
+      supabase.from("liked_songs").select("id", { count: "exact", head: true }).eq("user_id", user.id).not("analyzed_at", "is", null),
+    ]);
+    const totalSongs = countRes.count ?? 0;
+    const totalAnalyzed = analyzedRes.count ?? 0;
+    setLikedCount(totalSongs);
+    setProgress(prev => ({ ...prev, totalAnalyzed, totalSongs }));
 
     // Get clusters
     const { data: clusterData } = await supabase
@@ -85,7 +95,6 @@ export function useLikedSongClusters() {
     
     let songMap = new Map<string, any>();
     if (likedSongIds.length > 0) {
-      // Fetch in batches of 100
       for (let i = 0; i < likedSongIds.length; i += 100) {
         const batch = likedSongIds.slice(i, i + 100);
         const { data: songs } = await supabase
@@ -139,6 +148,7 @@ export function useLikedSongClusters() {
 
     setAnalyzing(true);
     setError(null);
+    setProgress({ totalAnalyzed: 0, totalSongs: likedCount, phase: "clustering" });
 
     try {
       const { data: sessionData } = await supabase.auth.getSession();
@@ -146,14 +156,58 @@ export function useLikedSongClusters() {
         throw new Error("Session expired. Please sign in again.");
       }
 
-      const res = await supabase.functions.invoke("analyze-liked-songs");
+      // Phase 1: Cluster all songs (this also tags the songs it clusters)
+      const clusterRes = await supabase.functions.invoke("analyze-liked-songs");
       
-      if (res.error) {
-        throw new Error(res.error.message || "Analysis failed");
+      if (clusterRes.error) {
+        throw new Error(clusterRes.error.message || "Analysis failed");
+      }
+      if (clusterRes.data?.error) {
+        throw new Error(clusterRes.data.error);
       }
 
-      if (res.data?.error) {
-        throw new Error(res.data.error);
+      const clusterData = clusterRes.data;
+      setProgress({
+        totalAnalyzed: clusterData?.total_analyzed ?? 0,
+        totalSongs: clusterData?.total_liked_songs ?? likedCount,
+        phase: "tagging",
+      });
+
+      // Phase 2: Tag remaining unanalyzed songs in batches
+      if (!clusterData?.done) {
+        let done = false;
+        let batchNum = 0;
+        const maxBatches = 50; // safety limit
+
+        while (!done && batchNum < maxBatches) {
+          batchNum++;
+          const tagRes = await supabase.functions.invoke("analyze-liked-songs", {
+            body: { mode: "tag_only", batch_size: 150 },
+          });
+
+          if (tagRes.error) {
+            console.error("Tag batch error:", tagRes.error);
+            break;
+          }
+
+          if (tagRes.data?.error) {
+            console.error("Tag batch data error:", tagRes.data.error);
+            break;
+          }
+
+          const tagData = tagRes.data;
+          done = tagData?.done ?? true;
+
+          setProgress({
+            totalAnalyzed: tagData?.total_analyzed ?? 0,
+            totalSongs: tagData?.total_liked_songs ?? likedCount,
+            phase: done ? "done" : "tagging",
+          });
+
+          console.log(`[analyze] batch ${batchNum}: ${tagData?.total_analyzed}/${tagData?.total_liked_songs} analyzed, done=${done}`);
+        }
+      } else {
+        setProgress(prev => ({ ...prev, phase: "done" }));
       }
 
       await loadClusters();
@@ -162,7 +216,7 @@ export function useLikedSongClusters() {
     } finally {
       setAnalyzing(false);
     }
-  }, [user, loadClusters]);
+  }, [user, loadClusters, likedCount]);
 
   return {
     clusters,
@@ -171,6 +225,7 @@ export function useLikedSongClusters() {
     hasAnalyzed,
     error,
     likedCount,
+    progress,
     runAnalysis,
     refresh: loadClusters,
   };
