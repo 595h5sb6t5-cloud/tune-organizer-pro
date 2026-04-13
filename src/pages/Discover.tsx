@@ -7,6 +7,8 @@ import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { useDiscoverRecommendations } from "@/hooks/use-discover-recommendations";
 import { useAuth } from "@/hooks/use-auth";
+import { useSpotifySearch, type SpotifyTrackInfo } from "@/hooks/use-spotify-search";
+import { AudioPreviewButton } from "@/components/app/AudioPreviewButton";
 import { supabase } from "@/integrations/supabase/client";
 
 const discoveryModes = [
@@ -36,11 +38,13 @@ const Discover = () => {
   const { user, profile } = useAuth();
   const spotifyConnected = profile?.spotify_connected ?? false;
   const [trackCount, setTrackCount] = useState<number | null>(null);
+  const { enrich } = useSpotifySearch();
 
   const [activeMode, setActiveMode] = useState("balanced");
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
   const [acceptedIds, setAcceptedIds] = useState<Set<string>>(new Set());
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
+  const [spotifyData, setSpotifyData] = useState<Map<string, SpotifyTrackInfo>>(new Map());
 
   const { categories, loading, hasLoaded, generate, recordFeedback } = useDiscoverRecommendations();
 
@@ -62,23 +66,36 @@ const Discover = () => {
 
   const hasData = trackCount !== null && trackCount > 0;
 
+  // Auto-generate on first load
   useEffect(() => {
     if (hasData && !hasLoaded && !loading) {
       generate(activeMode);
     }
   }, [hasData, hasLoaded, loading]);
 
+  // Enrich recommendations with Spotify data after they load
+  useEffect(() => {
+    if (!hasLoaded || categories.length === 0) return;
+    const allTracks = categories.flatMap(c =>
+      c.recommendations.map(r => ({ title: r.track.title, artist: r.track.artist }))
+    );
+    if (allTracks.length === 0) return;
+    enrich(allTracks).then(setSpotifyData);
+  }, [hasLoaded, categories, enrich]);
+
   const handleModeSwitch = (mode: string) => {
     if (mode === activeMode && hasLoaded) return;
     setActiveMode(mode);
     setDismissedIds(new Set());
     setAcceptedIds(new Set());
+    setSpotifyData(new Map());
     generate(mode);
   };
 
   const handleRefresh = () => {
     setDismissedIds(new Set());
     setAcceptedIds(new Set());
+    setSpotifyData(new Map());
     generate(activeMode);
   };
 
@@ -235,16 +252,22 @@ const Discover = () => {
                   <p className="text-sm text-muted-foreground mb-4 ml-10">{cat.subtitle}</p>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {visibleRecs.map((rec) => (
-                      <RecCard
-                        key={rec.id}
-                        rec={rec}
-                        isSaved={savedIds.has(rec.id)}
-                        onAdd={() => handleAdd(rec)}
-                        onDismiss={() => handleDismiss(rec)}
-                        onSave={() => handleSave(rec)}
-                      />
-                    ))}
+                    {visibleRecs.map((rec) => {
+                      const spotifyInfo = spotifyData.get(
+                        `${rec.track.title}|||${rec.track.artist}`.toLowerCase()
+                      );
+                      return (
+                        <RecCard
+                          key={rec.id}
+                          rec={rec}
+                          isSaved={savedIds.has(rec.id)}
+                          onAdd={() => handleAdd(rec)}
+                          onDismiss={() => handleDismiss(rec)}
+                          onSave={() => handleSave(rec)}
+                          spotifyInfo={spotifyInfo}
+                        />
+                      );
+                    })}
                   </div>
                 </div>
               );
@@ -284,26 +307,35 @@ function RecCard({
   onAdd,
   onDismiss,
   onSave,
+  spotifyInfo,
 }: {
   rec: Recommendation;
   isSaved: boolean;
   onAdd: () => void;
   onDismiss: () => void;
   onSave: () => void;
+  spotifyInfo?: SpotifyTrackInfo;
 }) {
   const tier = tierConfig[rec.popularityTier || "mid"];
   const TierIcon = tier.icon;
   const [showDetails, setShowDetails] = useState(false);
   const [showExplanation, setShowExplanation] = useState(false);
   const breakdown = rec.compatibilityBreakdown;
+  const artworkUrl = spotifyInfo?.image_url;
+  const previewUrl = spotifyInfo?.preview_url;
+  const trackId = spotifyInfo?.spotify_id || rec.id;
 
   return (
     <div className="rounded-2xl bg-surface-elevated border border-border/50 hover:border-accent/30 hover:shadow-sm transition-all overflow-hidden">
       <div className="flex gap-4 p-4">
-        {/* Album art placeholder */}
-        <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-accent/20 to-primary/10 flex items-center justify-center text-lg flex-shrink-0 border border-border/30">
-          🎵
-        </div>
+        {/* Album art */}
+        {artworkUrl ? (
+          <img src={artworkUrl} alt={rec.track.album} className="w-14 h-14 rounded-xl object-cover flex-shrink-0" />
+        ) : (
+          <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-accent/20 to-primary/10 flex items-center justify-center text-lg flex-shrink-0 border border-border/30">
+            🎵
+          </div>
+        )}
         <div className="flex-1 min-w-0">
           <div className="flex items-start justify-between gap-2 mb-0.5">
             <div className="min-w-0">
@@ -351,6 +383,7 @@ function RecCard({
                 </button>
               )}
               <div className="flex gap-0.5">
+                <AudioPreviewButton trackId={trackId} previewUrl={previewUrl} />
                 <button className="w-7 h-7 rounded-lg inline-flex items-center justify-center text-accent hover:bg-accent/10 transition-colors" title="Add to library" onClick={onAdd}>
                   <Plus className="w-3.5 h-3.5" />
                 </button>
@@ -387,6 +420,7 @@ function RecCard({
                 mood: "Mood", tempo: "Tempo", energy: "Energy",
                 genre: "Genre", artistNetwork: "Artist", era: "Era",
                 production: "Production", rhythm: "Rhythm", novelty: "Novelty",
+                groove: "Groove", atmosphere: "Atmosphere",
               };
               const numValue = Number(value);
               return (
