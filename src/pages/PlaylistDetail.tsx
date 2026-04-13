@@ -1,7 +1,7 @@
 import AppLayout from "@/components/app/AppLayout";
 import { Button } from "@/components/ui/button";
 import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, RefreshCw, Plus, X, Bookmark, Sparkles, Loader2, Gem, TrendingUp, Music, Brain, Eye, EyeOff, Zap, Clock, Palette, Target, Shield, Lightbulb, MapPin, Mic2, Radio, Layers, Star } from "lucide-react";
+import { ArrowLeft, RefreshCw, Plus, X, Bookmark, Sparkles, Loader2, Gem, TrendingUp, Music, Brain, Eye, EyeOff, Zap, Clock, Palette, Target, Shield, Lightbulb, MapPin, Mic2, Radio, Layers, Star, ChevronDown, ChevronUp } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
