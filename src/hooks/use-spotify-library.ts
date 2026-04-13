@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "./use-auth";
 
@@ -34,14 +34,17 @@ export interface FollowedArtist {
   popularity: number | null;
 }
 
-export type SyncPhase =
-  | "idle"
-  | "starting"
-  | "liked_songs"
-  | "playlists"
-  | "artists"
-  | "complete"
-  | "error";
+/** Each stage the sync pipeline goes through, in order */
+export type SyncStage = "liked_songs" | "playlists" | "artists" | "analysis";
+
+export type StageStatus = "pending" | "active" | "done" | "error" | "skipped";
+
+export interface SyncStageState {
+  stage: SyncStage;
+  label: string;
+  status: StageStatus;
+  detail?: string;
+}
 
 export type SyncStatus = "idle" | "syncing" | "error";
 
@@ -67,6 +70,13 @@ function formatTimeAgo(dateStr: string | null): string | null {
   return `${days}d ago`;
 }
 
+const INITIAL_STAGES: SyncStageState[] = [
+  { stage: "liked_songs", label: "Liked songs", status: "pending" },
+  { stage: "playlists", label: "Playlists", status: "pending" },
+  { stage: "artists", label: "Followed artists", status: "pending" },
+  { stage: "analysis", label: "Audio analysis", status: "pending" },
+];
+
 export function useSpotifyLibrary() {
   const { user, profile } = useAuth();
   const spotifyConnected = profile?.spotify_connected ?? false;
@@ -77,7 +87,7 @@ export function useSpotifyLibrary() {
   const [followedArtists, setFollowedArtists] = useState<FollowedArtist[]>([]);
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
-  const [syncPhase, setSyncPhase] = useState<SyncPhase>("idle");
+  const [syncStages, setSyncStages] = useState<SyncStageState[]>(INITIAL_STAGES);
   const [lastSyncResult, setLastSyncResult] = useState<Record<string, any> | null>(null);
   const [syncMeta, setSyncMeta] = useState<SyncMetadata>({
     syncStatus: "idle",
@@ -88,6 +98,13 @@ export function useSpotifyLibrary() {
     lastPlaylistSyncAt: null,
     lastArtistSyncAt: null,
   });
+
+  // Helpers to update a single stage
+  const setStage = useCallback((stage: SyncStage, status: StageStatus, detail?: string) => {
+    setSyncStages(prev =>
+      prev.map(s => s.stage === stage ? { ...s, status, detail: detail ?? s.detail } : s)
+    );
+  }, []);
 
   const loadSyncMeta = useCallback(async () => {
     if (!user || !spotifyConnected) return;
@@ -110,6 +127,42 @@ export function useSpotifyLibrary() {
     }
   }, [user, spotifyConnected]);
 
+  // Refresh just one data section from DB
+  const refreshLiked = useCallback(async () => {
+    if (!user) return;
+    const [countRes, listRes] = await Promise.all([
+      supabase.from("liked_songs").select("id", { count: "exact", head: true }).eq("user_id", user.id),
+      supabase.from("liked_songs")
+        .select("id, spotify_track_id, track_name, artist_name, album_name, image_url, added_at")
+        .eq("user_id", user.id)
+        .order("added_at", { ascending: false, nullsFirst: false })
+        .limit(50),
+    ]);
+    setLikedCount(countRes.count ?? 0);
+    setLikedSongs((listRes.data as LikedSong[]) ?? []);
+  }, [user]);
+
+  const refreshPlaylists = useCallback(async () => {
+    if (!user) return;
+    const { data } = await supabase
+      .from("spotify_playlists")
+      .select("id, spotify_playlist_id, name, description, image_url, track_count, is_owned_by_user, is_collaborative, owner_display_name, last_synced_at")
+      .eq("user_id", user.id)
+      .order("is_owned_by_user", { ascending: false })
+      .order("name");
+    setPlaylists((data as SpotifyPlaylist[]) ?? []);
+  }, [user]);
+
+  const refreshArtists = useCallback(async () => {
+    if (!user) return;
+    const { data } = await supabase
+      .from("spotify_followed_artists")
+      .select("id, spotify_artist_id, artist_name, image_url, genres, popularity")
+      .eq("user_id", user.id)
+      .order("artist_name");
+    setFollowedArtists((data as FollowedArtist[]) ?? []);
+  }, [user]);
+
   const refresh = useCallback(async () => {
     if (!user || !spotifyConnected) {
       setPlaylists([]);
@@ -118,88 +171,107 @@ export function useSpotifyLibrary() {
       setFollowedArtists([]);
       return;
     }
-
     setLoading(true);
-
-    const [playlistRes, likedCountRes, likedRes, artistRes] = await Promise.all([
-      supabase
-        .from("spotify_playlists")
-        .select("id, spotify_playlist_id, name, description, image_url, track_count, is_owned_by_user, is_collaborative, owner_display_name, last_synced_at")
-        .eq("user_id", user.id)
-        .order("is_owned_by_user", { ascending: false })
-        .order("name"),
-      supabase
-        .from("liked_songs")
-        .select("id", { count: "exact", head: true })
-        .eq("user_id", user.id),
-      supabase
-        .from("liked_songs")
-        .select("id, spotify_track_id, track_name, artist_name, album_name, image_url, added_at")
-        .eq("user_id", user.id)
-        .order("added_at", { ascending: false, nullsFirst: false })
-        .limit(50),
-      supabase
-        .from("spotify_followed_artists")
-        .select("id, spotify_artist_id, artist_name, image_url, genres, popularity")
-        .eq("user_id", user.id)
-        .order("artist_name"),
-    ]);
-
-    setPlaylists((playlistRes.data as SpotifyPlaylist[]) ?? []);
-    setLikedCount(likedCountRes.count ?? 0);
-    setLikedSongs((likedRes.data as LikedSong[]) ?? []);
-    setFollowedArtists((artistRes.data as FollowedArtist[]) ?? []);
+    await Promise.all([refreshLiked(), refreshPlaylists(), refreshArtists(), loadSyncMeta()]);
     setLoading(false);
+  }, [user, spotifyConnected, refreshLiked, refreshPlaylists, refreshArtists, loadSyncMeta]);
 
-    // Also refresh sync metadata
-    await loadSyncMeta();
-  }, [user, spotifyConnected, loadSyncMeta]);
+  // Invoke a scoped sync and return result
+  const invokeSync = useCallback(async (scope: string, forceFullSync: boolean) => {
+    const body: Record<string, any> = { scope };
+    if (forceFullSync) body.force_full = true;
+    const res = await supabase.functions.invoke("spotify-import-tracks", { body });
+    if (res.error) throw new Error(res.error.message);
+    if (res.data?.error) throw new Error(res.data.error);
+    return res.data as Record<string, any>;
+  }, []);
+
+  // Abort ref so we can cancel background work
+  const abortRef = useRef(false);
 
   const resync = useCallback(async (forceFullSync = false) => {
     if (syncing || !user || !spotifyConnected) return;
 
+    abortRef.current = false;
     setSyncing(true);
-    setSyncPhase("starting");
+    setSyncStages(INITIAL_STAGES.map(s => ({ ...s, status: "pending" as StageStatus })));
     setLastSyncResult(null);
 
+    const combinedResult: Record<string, any> = { success: true };
+
     try {
-      // Show progress phases optimistically
-      const t1 = setTimeout(() => setSyncPhase("liked_songs"), 500);
-      const t2 = setTimeout(() => setSyncPhase("playlists"), 3000);
-      const t3 = setTimeout(() => setSyncPhase("artists"), 6000);
+      // ── Stage 1: Liked songs ──
+      setStage("liked_songs", "active");
+      const likedRes = await invokeSync("liked", forceFullSync);
+      Object.assign(combinedResult, likedRes);
+      setStage("liked_songs", "done", `+${likedRes.liked_songs_added ?? 0}`);
+      // Immediately show new liked songs
+      await refreshLiked();
 
-      const res = await supabase.functions.invoke("spotify-import-tracks", {
-        body: forceFullSync ? { force_full: true } : undefined,
-      });
+      if (abortRef.current) return;
 
-      clearTimeout(t1);
-      clearTimeout(t2);
-      clearTimeout(t3);
+      // ── Stage 2: Playlists ──
+      setStage("playlists", "active");
+      const plRes = await invokeSync("playlists", forceFullSync);
+      Object.assign(combinedResult, plRes);
+      setStage("playlists", "done", `${plRes.playlists_changed ?? 0} updated`);
+      // Immediately show new playlists
+      await refreshPlaylists();
 
-      if (res.error) throw new Error(res.error.message);
-      if (res.data?.error) throw new Error(res.data.error);
+      if (abortRef.current) return;
 
-      setLastSyncResult(res.data);
-      setSyncPhase("complete");
-      await refresh();
+      // ── Stage 3: Artists ──
+      setStage("artists", "active");
+      const artRes = await invokeSync("artists", forceFullSync);
+      Object.assign(combinedResult, artRes);
+      setStage("artists", "done", `+${artRes.artists_added ?? 0}`);
+      // Immediately show new artists
+      await refreshArtists();
 
-      // Reset phase after a moment
-      setTimeout(() => setSyncPhase("idle"), 3000);
+      if (abortRef.current) return;
+
+      // ── Stage 4: Audio analysis (background, non-blocking) ──
+      setStage("analysis", "active");
+      // Call full sync which will only fetch audio features for tracks missing them
+      // This is fast when core data is already synced
+      try {
+        const analysisRes = await supabase.functions.invoke("spotify-import-tracks", {
+          body: { scope: "all", skip_core: false, ...(forceFullSync ? { force_full: true } : {}) },
+        });
+        const featureCount = analysisRes.data?.audio_features ?? 0;
+        setStage("analysis", "done", featureCount > 0 ? `${featureCount} tracks` : "up to date");
+      } catch {
+        setStage("analysis", "skipped", "will retry later");
+      }
+
+      combinedResult.sync_mode = forceFullSync ? "full" : "incremental";
+      setLastSyncResult(combinedResult);
+      await loadSyncMeta();
     } catch (e: any) {
-      setSyncPhase("error");
-      await loadSyncMeta(); // Refresh to get the error message from DB
+      // Mark current active stage as errored
+      setSyncStages(prev =>
+        prev.map(s => s.status === "active" ? { ...s, status: "error" as StageStatus, detail: e.message } : s)
+      );
+      await loadSyncMeta();
       throw e;
     } finally {
       setSyncing(false);
     }
-  }, [syncing, user, spotifyConnected, refresh, loadSyncMeta]);
+  }, [syncing, user, spotifyConnected, invokeSync, refreshLiked, refreshPlaylists, refreshArtists, loadSyncMeta, setStage]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
 
-  // Compute last synced display string
+  // Clean up on unmount
+  useEffect(() => {
+    return () => { abortRef.current = true; };
+  }, []);
+
   const lastSyncedLabel = formatTimeAgo(syncMeta.lastIncrementalSyncAt || syncMeta.lastFullSyncAt);
+
+  // Derived: is every stage done?
+  const allDone = syncing === false && syncStages.some(s => s.status === "done");
 
   return {
     playlists,
@@ -208,7 +280,8 @@ export function useSpotifyLibrary() {
     followedArtists,
     loading,
     syncing,
-    syncPhase,
+    syncStages,
+    allDone,
     lastSyncResult,
     syncMeta,
     lastSyncedLabel,
