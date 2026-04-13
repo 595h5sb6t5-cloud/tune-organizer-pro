@@ -58,6 +58,8 @@ const INITIAL_PROGRESS: AnalysisProgress = {
   worldsCount: 0, assignedCount: 0, statusMessage: "",
 };
 
+const MIN_TAGGED_SONGS = 10;
+
 async function fetchAllFromTable(table: "liked_song_clusters" | "liked_song_cluster_tracks" | "liked_songs", userId: string, columns: string) {
   const all: any[] = [];
   let from = 0;
@@ -84,16 +86,25 @@ export function useLikedSongClusters() {
   const [progress, setProgress] = useState<AnalysisProgress>(INITIAL_PROGRESS);
   const abortRef = useRef(false);
 
+  const getDeepTagCounts = useCallback(async () => {
+    if (!user) return { total: 0, tagged: 0 };
+
+    const [totalRes, taggedRes] = await Promise.all([
+      supabase.from("liked_songs").select("id", { count: "exact", head: true }).eq("user_id", user.id),
+      supabase.from("liked_songs").select("id", { count: "exact", head: true }).eq("user_id", user.id).not("groove_feel", "is", null),
+    ]);
+
+    return {
+      total: totalRes.count ?? 0,
+      tagged: taggedRes.count ?? 0,
+    };
+  }, [user]);
+
   const loadClusters = useCallback(async () => {
     if (!user || !spotifyConnected) { setClusters([]); return; }
     setLoading(true);
 
-    const [countRes, analyzedRes] = await Promise.all([
-      supabase.from("liked_songs").select("id", { count: "exact", head: true }).eq("user_id", user.id),
-      supabase.from("liked_songs").select("id", { count: "exact", head: true }).eq("user_id", user.id).not("analyzed_at", "is", null),
-    ]);
-    const totalSongs = countRes.count ?? 0;
-    const totalAnalyzed = analyzedRes.count ?? 0;
+    const { total: totalSongs, tagged: totalAnalyzed } = await getDeepTagCounts();
     setLikedCount(totalSongs);
     setProgress(prev => ({ ...prev, totalAnalyzed, totalSongs }));
 
@@ -142,7 +153,7 @@ export function useLikedSongClusters() {
     });
 
     setClusters(enriched); setHasAnalyzed(true); setLoading(false);
-  }, [user, spotifyConnected]);
+  }, [user, spotifyConnected, getDeepTagCounts]);
 
   useEffect(() => { void loadClusters(); }, [loadClusters]);
 
@@ -162,18 +173,13 @@ export function useLikedSongClusters() {
       // ═══ PHASE 1: Tag songs (skip if already fully tagged and not forcing) ═══
       if (!forceRetag) {
         // Quick check: are all songs already tagged?
-        const [totalRes, taggedRes] = await Promise.all([
-          supabase.from("liked_songs").select("id", { count: "exact", head: true }).eq("user_id", user.id),
-          supabase.from("liked_songs").select("id", { count: "exact", head: true }).eq("user_id", user.id).not("groove_feel", "is", null),
-        ]);
-        const total = totalRes.count ?? 0;
-        const tagged = taggedRes.count ?? 0;
+        const { total, tagged } = await getDeepTagCounts();
 
         if (tagged >= total && total > 0) {
           console.log(`[rebuild] All ${total} songs already tagged — skipping Phase 1`);
           setProgress(prev => ({
             ...prev, totalAnalyzed: tagged, totalSongs: total,
-            statusMessage: `All ${total} songs already analyzed — using cached data`,
+            statusMessage: `All ${total} songs already fully tagged — using cached data`,
           }));
           // Skip straight to Phase 2
         } else {
@@ -185,6 +191,17 @@ export function useLikedSongClusters() {
       }
 
       if (abortRef.current) return;
+
+      const { total: totalSongsReady, tagged: taggedSongsReady } = await getDeepTagCounts();
+      setProgress(prev => ({
+        ...prev,
+        totalAnalyzed: taggedSongsReady,
+        totalSongs: totalSongsReady,
+      }));
+
+      if (taggedSongsReady < MIN_TAGGED_SONGS) {
+        throw new Error(`Need more tagged songs. Run tagging first. (${taggedSongsReady}/${totalSongsReady} ready)`);
+      }
 
       // ═══ PHASE 2: Define sonic worlds from full ecosystem ═══
       setProgress(prev => ({
@@ -374,7 +391,7 @@ export function useLikedSongClusters() {
     } finally {
       setAnalyzing(false);
     }
-  }, [user, loadClusters, likedCount]);
+  }, [user, loadClusters, likedCount, getDeepTagCounts]);
 
   // Helper for tagging phase
   async function tagSongs(forceRetag: boolean) {
@@ -393,8 +410,15 @@ export function useLikedSongClusters() {
         },
       });
 
-      if (tagRes.error) { console.error("Tag error:", tagRes.error); break; }
-      if (tagRes.data?.error) { console.error("Tag data error:", tagRes.data.error); break; }
+      if (tagRes.error) {
+        console.error("Tag error:", tagRes.error);
+        throw new Error(tagRes.error.message || "Tagging failed");
+      }
+
+      if (tagRes.data?.error) {
+        console.error("Tag data error:", tagRes.data.error);
+        throw new Error(tagRes.data.error);
+      }
 
       tagDone = tagRes.data?.done ?? true;
       setProgress(prev => ({
@@ -405,6 +429,10 @@ export function useLikedSongClusters() {
           ? "All songs analyzed!"
           : `${tagRes.data?.total_analyzed ?? 0} of ${tagRes.data?.total_liked_songs ?? 0} songs analyzed…`,
       }));
+    }
+
+    if (!abortRef.current && !tagDone) {
+      throw new Error("Song tagging did not finish. Please retry.");
     }
   }
 
