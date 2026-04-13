@@ -16,7 +16,6 @@ class SpotifyImportError extends Error {
   step: string;
   status: number;
   details: Record<string, unknown>;
-
   constructor(step: string, message: string, status = 500, details: Record<string, unknown> = {}) {
     super(message);
     this.name = "SpotifyImportError";
@@ -32,12 +31,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function parseJsonText(text: string) {
   if (!text) return null;
-
-  try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    return { raw_body: text };
-  }
+  try { return JSON.parse(text) as unknown; } catch { return { raw_body: text }; }
 }
 
 function fail(step: string, error: string, status = 500, details: Record<string, unknown> = {}) {
@@ -53,12 +47,7 @@ async function refreshTokenIfNeeded(supabase: ReturnType<typeof createClient>, u
     .single();
 
   if (error || !conn) {
-    throw new SpotifyImportError("load_connection", "No Spotify connection found.", 404, {
-      diagnostics: {
-        user_id: userId,
-        query_error: error?.message ?? null,
-      },
-    });
+    throw new SpotifyImportError("load_connection", "No Spotify connection found.", 404);
   }
 
   if (new Date(conn.expires_at) > new Date(Date.now() + 5 * 60 * 1000)) {
@@ -67,14 +56,8 @@ async function refreshTokenIfNeeded(supabase: ReturnType<typeof createClient>, u
 
   const clientId = Deno.env.get("SPOTIFY_CLIENT_ID");
   const clientSecret = Deno.env.get("SPOTIFY_CLIENT_SECRET");
-
   if (!clientId || !clientSecret) {
-    throw new SpotifyImportError("runtime_config", "Spotify credentials are not fully configured.", 500, {
-      diagnostics: {
-        has_client_id: Boolean(clientId),
-        has_client_secret: Boolean(clientSecret),
-      },
-    });
+    throw new SpotifyImportError("runtime_config", "Spotify credentials not configured.", 500);
   }
 
   const refreshRes = await fetch("https://accounts.spotify.com/api/token", {
@@ -83,224 +66,267 @@ async function refreshTokenIfNeeded(supabase: ReturnType<typeof createClient>, u
       "Content-Type": "application/x-www-form-urlencoded",
       Authorization: `Basic ${btoa(`${clientId}:${clientSecret}`)}`,
     },
-    body: new URLSearchParams({
-      grant_type: "refresh_token",
-      refresh_token: conn.refresh_token,
-    }),
+    body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: conn.refresh_token }),
   });
 
-  const refreshText = await refreshRes.text();
-  const refreshData = parseJsonText(refreshText);
-  const refreshError = isRecord(refreshData)
-    ? (typeof refreshData.error_description === "string" ? refreshData.error_description : typeof refreshData.error === "string" ? refreshData.error : null)
-    : null;
-
-  if (!refreshRes.ok || refreshError) {
-    throw new SpotifyImportError("refresh_token", refreshError || "Spotify token refresh failed.", refreshRes.status || 400, {
-      spotify_status: refreshRes.status,
-      spotify_body: refreshData,
-    });
+  const refreshData = parseJsonText(await refreshRes.text());
+  if (!refreshRes.ok || !isRecord(refreshData) || typeof refreshData.access_token !== "string") {
+    throw new SpotifyImportError("refresh_token", "Token refresh failed.", refreshRes.status || 400);
   }
 
-  const refreshedAccessToken = isRecord(refreshData) && typeof refreshData.access_token === "string"
-    ? refreshData.access_token
-    : null;
-  const expiresIn = isRecord(refreshData) && typeof refreshData.expires_in === "number"
-    ? refreshData.expires_in
-    : null;
+  const expires_at = new Date(Date.now() + (refreshData.expires_in as number) * 1000).toISOString();
+  await supabase.from("spotify_connections").update({
+    access_token: refreshData.access_token,
+    refresh_token: typeof refreshData.refresh_token === "string" ? refreshData.refresh_token : conn.refresh_token,
+    expires_at,
+  }).eq("user_id", userId);
 
-  if (!refreshedAccessToken || !expiresIn) {
-    throw new SpotifyImportError("refresh_token", "Spotify token refresh returned an incomplete payload.", 400, {
-      spotify_status: refreshRes.status,
-      spotify_body: refreshData,
-    });
+  return refreshData.access_token as string;
+}
+
+async function spotifyGet(url: string, token: string) {
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) {
+    const body = parseJsonText(await res.text());
+    throw new SpotifyImportError("spotify_api", `Spotify API error: ${res.status}`, res.status, { body });
   }
+  return await res.json();
+}
 
-  const refreshedRefreshToken = isRecord(refreshData) && typeof refreshData.refresh_token === "string"
-    ? refreshData.refresh_token
-    : conn.refresh_token;
+type TrackRow = {
+  user_id: string;
+  spotify_track_id: string;
+  track_name: string;
+  artist_name: string;
+  album_name: string | null;
+  image_url: string | null;
+  added_at: string | null;
+};
 
-  const expires_at = new Date(Date.now() + expiresIn * 1000).toISOString();
-
-  const { error: updateError } = await supabase
-    .from("spotify_connections")
-    .update({
-      access_token: refreshedAccessToken,
-      refresh_token: refreshedRefreshToken,
-      expires_at,
-    })
-    .eq("user_id", userId);
-
-  if (updateError) {
-    throw new SpotifyImportError("database_write_connection_refresh", updateError.message, 500, {
-      diagnostics: {
-        user_id: userId,
-      },
-    });
-  }
-
-  return refreshedAccessToken;
+function extractTrack(item: any, userId: string): TrackRow | null {
+  const track = item?.track;
+  if (!track || typeof track.id !== "string") return null;
+  const artists = Array.isArray(track.artists) ? track.artists.map((a: any) => a?.name).filter(Boolean).join(", ") : "";
+  const album = track.album;
+  const images = album?.images || [];
+  const img = images.find((i: any) => i?.url);
+  return {
+    user_id: userId,
+    spotify_track_id: track.id,
+    track_name: track.name || "Untitled",
+    artist_name: artists,
+    album_name: album?.name || null,
+    image_url: img?.url || null,
+    added_at: typeof item.added_at === "string" ? item.added_at : null,
+  };
 }
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
-  }
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   let step = "auth_validation";
-
   try {
     const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
-      return fail(step, "Not authenticated.", 401);
-    }
+    if (!authHeader) return fail(step, "Not authenticated.", 401);
 
-    step = "backend_client_config";
-    const supabaseUrl = Deno.env.get("SUPABASE_URL");
-    const supabaseKey = Deno.env.get("SUPABASE_ANON_KEY");
-
-    if (!supabaseUrl || !supabaseKey) {
-      return fail(step, "Backend client configuration is missing.", 500, {
-        diagnostics: {
-          has_supabase_url: Boolean(supabaseUrl),
-          has_supabase_anon_key: Boolean(supabaseKey),
-        },
-      });
-    }
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const supabaseKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
     const supabase = createClient(supabaseUrl, supabaseKey, {
       global: { headers: { Authorization: authHeader } },
     });
+    // Service role client for bulk inserts (bypasses RLS)
+    const adminClient = createClient(supabaseUrl, serviceKey);
 
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
-
-    if (userError || !user) {
-      return fail("user_session", "Invalid session.", 401, {
-        diagnostics: {
-          user_error: userError?.message ?? null,
-        },
-      });
-    }
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    if (userError || !user) return fail("user_session", "Invalid session.", 401);
 
     step = "refresh_access_token";
     const accessToken = await refreshTokenIfNeeded(supabase, user.id);
-    console.info("[spotify-import-tracks] access_token_ready", {
-      user_id: user.id,
-      access_token_present: Boolean(accessToken),
-    });
+    console.info("[spotify-import-tracks] access_token_ready", { user_id: user.id });
 
-    const allTracks: Array<{
-      user_id: string;
-      spotify_track_id: string;
-      track_name: string;
-      artist_name: string;
-      album_name: string | null;
-      image_url: string | null;
-      release_date: string | null;
-      added_at: string | null;
-    }> = [];
-
+    // ──────────────────────────────────────────────
+    // 1. Import liked/saved songs
+    // ──────────────────────────────────────────────
+    step = "import_liked_songs";
+    const likedSongs: TrackRow[] = [];
     let offset = 0;
-    const limit = 50;
     let total = Infinity;
 
     while (offset < total && offset < 2000) {
-      step = "saved_tracks_fetch";
-      const spotifyRes = await fetch(
-        `https://api.spotify.com/v1/me/tracks?limit=${limit}&offset=${offset}`,
-        { headers: { Authorization: `Bearer ${accessToken}` } },
+      const data = await spotifyGet(`https://api.spotify.com/v1/me/tracks?limit=50&offset=${offset}`, accessToken);
+      total = data.total ?? likedSongs.length;
+      for (const item of data.items || []) {
+        const t = extractTrack(item, user.id);
+        if (t) likedSongs.push(t);
+      }
+      offset += 50;
+    }
+
+    console.info("[spotify-import-tracks] liked_songs_fetched", { count: likedSongs.length });
+
+    // Write liked songs
+    for (let i = 0; i < likedSongs.length; i += 100) {
+      const batch = likedSongs.slice(i, i + 100);
+      await adminClient.from("liked_songs").upsert(batch, { onConflict: "user_id,spotify_track_id", ignoreDuplicates: true });
+    }
+
+    // Also write to imported_tracks for backward compat
+    for (let i = 0; i < likedSongs.length; i += 100) {
+      const batch = likedSongs.slice(i, i + 100);
+      await adminClient.from("imported_tracks").upsert(batch, { onConflict: "user_id,spotify_track_id", ignoreDuplicates: true });
+    }
+
+    // ──────────────────────────────────────────────
+    // 2. Import playlists
+    // ──────────────────────────────────────────────
+    step = "import_playlists";
+    const spotifyProfile = await spotifyGet("https://api.spotify.com/v1/me", accessToken);
+    const spotifyUserId = spotifyProfile.id;
+
+    type PlaylistMeta = {
+      id: string;
+      name: string;
+      description: string | null;
+      image_url: string | null;
+      track_count: number;
+      owner_id: string;
+      is_owned: boolean;
+      snapshot_id: string | null;
+    };
+
+    const playlists: PlaylistMeta[] = [];
+    offset = 0;
+    total = Infinity;
+
+    while (offset < total && offset < 500) {
+      const data = await spotifyGet(`https://api.spotify.com/v1/me/playlists?limit=50&offset=${offset}`, accessToken);
+      total = data.total ?? 0;
+      for (const pl of data.items || []) {
+        if (!pl || !pl.id) continue;
+        playlists.push({
+          id: pl.id,
+          name: pl.name || "Untitled",
+          description: pl.description || null,
+          image_url: pl.images?.[0]?.url || null,
+          track_count: pl.tracks?.total || 0,
+          owner_id: pl.owner?.id || "",
+          is_owned: pl.owner?.id === spotifyUserId,
+          snapshot_id: pl.snapshot_id || null,
+        });
+      }
+      offset += 50;
+    }
+
+    console.info("[spotify-import-tracks] playlists_fetched", { count: playlists.length });
+
+    // Upsert playlists
+    const playlistRows = playlists.map(pl => ({
+      user_id: user.id,
+      spotify_playlist_id: pl.id,
+      name: pl.name,
+      description: pl.description,
+      image_url: pl.image_url,
+      track_count: pl.track_count,
+      spotify_owner_id: pl.owner_id,
+      is_owned_by_user: pl.is_owned,
+      snapshot_id: pl.snapshot_id,
+      last_synced_at: new Date().toISOString(),
+    }));
+
+    for (let i = 0; i < playlistRows.length; i += 50) {
+      await adminClient.from("spotify_playlists").upsert(
+        playlistRows.slice(i, i + 50),
+        { onConflict: "user_id,spotify_playlist_id" }
       );
-      const spotifyText = await spotifyRes.text();
-      const spotifyData = parseJsonText(spotifyText);
-      const spotifyError = isRecord(spotifyData) && isRecord(spotifyData.error) && typeof spotifyData.error.message === "string"
-        ? spotifyData.error.message
-        : null;
-
-      if (!spotifyRes.ok || spotifyError) {
-        throw new SpotifyImportError(step, spotifyError || "Failed to import Spotify library.", spotifyRes.status || 400, {
-          spotify_status: spotifyRes.status,
-          spotify_body: spotifyData,
-          diagnostics: {
-            offset,
-            limit,
-          },
-        });
-      }
-
-      if (!isRecord(spotifyData)) {
-        throw new SpotifyImportError(step, "Unexpected Spotify saved tracks response.", 500, {
-          spotify_status: spotifyRes.status,
-          spotify_body: spotifyData,
-          diagnostics: {
-            offset,
-            limit,
-          },
-        });
-      }
-
-      total = typeof spotifyData.total === "number" ? spotifyData.total : allTracks.length;
-
-      for (const item of Array.isArray(spotifyData.items) ? spotifyData.items : []) {
-        if (!isRecord(item)) continue;
-
-        const track = isRecord(item.track) ? item.track : null;
-        if (!track || typeof track.id !== "string") continue;
-
-        const artists = Array.isArray(track.artists) ? track.artists : [];
-        const artistNames = artists
-          .map((artist) => (isRecord(artist) && typeof artist.name === "string" ? artist.name : null))
-          .filter((artistName): artistName is string => Boolean(artistName));
-
-        const album = isRecord(track.album) ? track.album : null;
-        const images = album && Array.isArray(album.images) ? album.images : [];
-        const firstImage = images.find((image) => isRecord(image) && typeof image.url === "string");
-
-        allTracks.push({
-          user_id: user.id,
-          spotify_track_id: track.id,
-          track_name: typeof track.name === "string" ? track.name : "Untitled track",
-          artist_name: artistNames.join(", "),
-          album_name: album && typeof album.name === "string" ? album.name : null,
-          image_url: isRecord(firstImage) && typeof firstImage.url === "string" ? firstImage.url : null,
-          release_date: album && typeof album.release_date === "string" ? album.release_date : null,
-          added_at: typeof item.added_at === "string" ? item.added_at : null,
-        });
-      }
-
-      offset += limit;
     }
 
-    step = "database_write_tracks";
-    for (let index = 0; index < allTracks.length; index += 100) {
-      const batch = allTracks.slice(index, index + 100);
-      const { error } = await supabase
-        .from("imported_tracks")
-        .upsert(batch, { onConflict: "user_id,spotify_track_id", ignoreDuplicates: true });
+    // ──────────────────────────────────────────────
+    // 3. Import playlist tracks (top 20 playlists only to stay within time limits)
+    // ──────────────────────────────────────────────
+    step = "import_playlist_tracks";
 
-      if (error) {
-        throw new SpotifyImportError(step, error.message, 500, {
-          diagnostics: {
-            batch_start: index,
-            batch_size: batch.length,
-          },
-        });
+    // Get DB playlist IDs
+    const { data: dbPlaylists } = await adminClient
+      .from("spotify_playlists")
+      .select("id, spotify_playlist_id")
+      .eq("user_id", user.id);
+
+    const playlistIdMap = new Map<string, string>();
+    for (const p of dbPlaylists || []) {
+      playlistIdMap.set(p.spotify_playlist_id, p.id);
+    }
+
+    // Import tracks for top playlists (owned first, then followed, max 20)
+    const sortedPlaylists = [...playlists].sort((a, b) => {
+      if (a.is_owned !== b.is_owned) return a.is_owned ? -1 : 1;
+      return b.track_count - a.track_count;
+    }).slice(0, 20);
+
+    let totalPlaylistTracks = 0;
+
+    for (const pl of sortedPlaylists) {
+      const dbId = playlistIdMap.get(pl.id);
+      if (!dbId) continue;
+
+      try {
+        const trackRows: any[] = [];
+        let plOffset = 0;
+        const plTotal = Math.min(pl.track_count, 200); // max 200 per playlist
+
+        while (plOffset < plTotal) {
+          const data = await spotifyGet(
+            `https://api.spotify.com/v1/playlists/${pl.id}/tracks?limit=50&offset=${plOffset}&fields=items(added_at,track(id,name,artists(name),album(name,images)))`,
+            accessToken
+          );
+          for (let idx = 0; idx < (data.items || []).length; idx++) {
+            const item = data.items[idx];
+            const track = item?.track;
+            if (!track || !track.id) continue;
+            const artists = (track.artists || []).map((a: any) => a?.name).filter(Boolean).join(", ");
+            const img = track.album?.images?.[0]?.url || null;
+            trackRows.push({
+              user_id: user.id,
+              playlist_id: dbId,
+              spotify_track_id: track.id,
+              track_name: track.name || "Untitled",
+              artist_name: artists,
+              album_name: track.album?.name || null,
+              image_url: img,
+              added_at: item.added_at || null,
+              position: plOffset + idx,
+            });
+          }
+          plOffset += 50;
+        }
+
+        // Upsert playlist tracks
+        for (let i = 0; i < trackRows.length; i += 100) {
+          await adminClient.from("spotify_playlist_tracks").upsert(
+            trackRows.slice(i, i + 100),
+            { onConflict: "playlist_id,spotify_track_id", ignoreDuplicates: true }
+          );
+        }
+        totalPlaylistTracks += trackRows.length;
+      } catch (e) {
+        console.warn(`[spotify-import-tracks] Failed to import tracks for playlist ${pl.name}:`, e);
+        // Continue with other playlists
       }
     }
+
+    console.info("[spotify-import-tracks] playlist_tracks_imported", { count: totalPlaylistTracks });
 
     return json({
       success: true,
       step: "complete",
-      total_found: Number.isFinite(total) ? total : allTracks.length,
-      imported: allTracks.length,
+      liked_songs: likedSongs.length,
+      playlists: playlists.length,
+      playlist_tracks: totalPlaylistTracks,
+      imported: likedSongs.length,
     });
   } catch (e) {
-    if (e instanceof SpotifyImportError) {
-      return fail(e.step, e.message, e.status, e.details);
-    }
-
+    if (e instanceof SpotifyImportError) return fail(e.step, e.message, e.status, e.details);
     const message = e instanceof Error ? e.message : "Spotify import failed.";
     return fail(step, message, 500);
   }

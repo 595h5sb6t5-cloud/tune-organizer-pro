@@ -53,6 +53,42 @@ export type Database = {
         }
         Relationships: []
       }
+      liked_songs: {
+        Row: {
+          added_at: string | null
+          album_name: string | null
+          artist_name: string
+          created_at: string
+          id: string
+          image_url: string | null
+          spotify_track_id: string
+          track_name: string
+          user_id: string
+        }
+        Insert: {
+          added_at?: string | null
+          album_name?: string | null
+          artist_name: string
+          created_at?: string
+          id?: string
+          image_url?: string | null
+          spotify_track_id: string
+          track_name: string
+          user_id: string
+        }
+        Update: {
+          added_at?: string | null
+          album_name?: string | null
+          artist_name?: string
+          created_at?: string
+          id?: string
+          image_url?: string | null
+          spotify_track_id?: string
+          track_name?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           apple_music_connected: boolean
@@ -245,6 +281,104 @@ export type Database = {
           id?: string
           refresh_token?: string
           spotify_user_id?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      spotify_playlist_tracks: {
+        Row: {
+          added_at: string | null
+          album_name: string | null
+          artist_name: string
+          created_at: string
+          id: string
+          image_url: string | null
+          playlist_id: string
+          position: number
+          spotify_track_id: string
+          track_name: string
+          user_id: string
+        }
+        Insert: {
+          added_at?: string | null
+          album_name?: string | null
+          artist_name: string
+          created_at?: string
+          id?: string
+          image_url?: string | null
+          playlist_id: string
+          position?: number
+          spotify_track_id: string
+          track_name: string
+          user_id: string
+        }
+        Update: {
+          added_at?: string | null
+          album_name?: string | null
+          artist_name?: string
+          created_at?: string
+          id?: string
+          image_url?: string | null
+          playlist_id?: string
+          position?: number
+          spotify_track_id?: string
+          track_name?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "spotify_playlist_tracks_playlist_id_fkey"
+            columns: ["playlist_id"]
+            isOneToOne: false
+            referencedRelation: "spotify_playlists"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      spotify_playlists: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: string
+          image_url: string | null
+          is_owned_by_user: boolean
+          last_synced_at: string
+          name: string
+          snapshot_id: string | null
+          spotify_owner_id: string | null
+          spotify_playlist_id: string
+          track_count: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          image_url?: string | null
+          is_owned_by_user?: boolean
+          last_synced_at?: string
+          name: string
+          snapshot_id?: string | null
+          spotify_owner_id?: string | null
+          spotify_playlist_id: string
+          track_count?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          image_url?: string | null
+          is_owned_by_user?: boolean
+          last_synced_at?: string
+          name?: string
+          snapshot_id?: string | null
+          spotify_owner_id?: string | null
+          spotify_playlist_id?: string
+          track_count?: number
           updated_at?: string
           user_id?: string
         }
