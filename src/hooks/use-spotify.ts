@@ -34,15 +34,16 @@ export function useSpotify() {
   const [importCount, setImportCount] = useState(0);
 
   const startAuth = useCallback(async () => {
-    const clientId = import.meta.env.VITE_SPOTIFY_CLIENT_ID;
-    if (!clientId) {
-      setError("Spotify client ID is not configured");
-      setStatus("error");
-      return;
-    }
-
     setStatus("connecting");
     setError(null);
+
+    try {
+      // Fetch client ID from edge function
+      const configRes = await supabase.functions.invoke("spotify-config");
+      const clientId = configRes.data?.client_id;
+      if (!clientId) {
+        throw new Error("Spotify is not configured. Please contact support.");
+      }
 
     const codeVerifier = generateRandomString(64);
     const hashed = await sha256(codeVerifier);
