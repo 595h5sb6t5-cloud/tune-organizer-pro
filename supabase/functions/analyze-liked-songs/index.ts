@@ -198,6 +198,8 @@ Use the save_playlists function to return your clustering result.`;
                       mood_tags: { type: "array", items: { type: "string" }, description: "2-4 mood/vibe tags" },
                       color_hex: { type: "string", description: "Hex color matching the playlist mood" },
                       energy_level: { type: "string", enum: ["low", "medium-low", "medium", "medium-high", "high"] },
+                      primary_language: { type: "string", description: "Dominant language of the playlist (e.g. 'English', 'Spanish', 'Mixed')" },
+                      language_consistency: { type: "number", description: "0-1 score of how language-consistent this playlist is. 1.0 = single language, 0.5 = mixed" },
                       tempo_range: { type: "string", description: "e.g. '85-100 BPM'" },
                       era_range: { type: "string" },
                       avg_energy: { type: "number", description: "Average energy value of songs in this cluster" },
