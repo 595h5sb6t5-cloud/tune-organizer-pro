@@ -9,6 +9,12 @@ interface UseAIRecommendationsOptions {
   playlistMood: string;
   playlistDescription: string;
   tracks: Track[];
+  discoveryMode?: string;
+}
+
+interface FeedbackTrack {
+  title: string;
+  artist: string;
 }
 
 export function useAIRecommendations({
@@ -17,10 +23,13 @@ export function useAIRecommendations({
   playlistMood,
   playlistDescription,
   tracks,
+  discoveryMode = "balanced",
 }: UseAIRecommendationsOptions) {
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [loading, setLoading] = useState(false);
   const [hasLoaded, setHasLoaded] = useState(false);
+  const [acceptedSongs, setAcceptedSongs] = useState<FeedbackTrack[]>([]);
+  const [dismissedSongs, setDismissedSongs] = useState<FeedbackTrack[]>([]);
 
   const generate = useCallback(async () => {
     setLoading(true);
@@ -37,7 +46,14 @@ export function useAIRecommendations({
             mood: t.mood,
             tempo: t.tempo,
             energy: t.energy,
+            valence: t.valence,
+            acousticness: t.acousticness,
+            danceability: t.danceability,
+            year: t.year,
           })),
+          discoveryMode,
+          acceptedSongs,
+          dismissedSongs,
         },
       });
 
@@ -65,6 +81,8 @@ export function useAIRecommendations({
           matchScore: r.matchScore || 80,
           reason: r.reason || "AI-selected for this playlist",
           moodTags: r.moodTags || [],
+          popularityTier: r.popularityTier || "mid",
+          compatibilityBreakdown: r.compatibilityBreakdown || null,
           targetPlaylistId: playlistId,
           status: "pending" as const,
         })
@@ -80,7 +98,23 @@ export function useAIRecommendations({
     } finally {
       setLoading(false);
     }
-  }, [playlistId, playlistName, playlistMood, playlistDescription, tracks]);
+  }, [playlistId, playlistName, playlistMood, playlistDescription, tracks, discoveryMode, acceptedSongs, dismissedSongs]);
 
-  return { recommendations, loading, hasLoaded, generate, setRecommendations };
+  const recordAccepted = useCallback((track: Track) => {
+    setAcceptedSongs((prev) => [...prev, { title: track.title, artist: track.artist }]);
+  }, []);
+
+  const recordDismissed = useCallback((track: Track) => {
+    setDismissedSongs((prev) => [...prev, { title: track.title, artist: track.artist }]);
+  }, []);
+
+  return {
+    recommendations,
+    loading,
+    hasLoaded,
+    generate,
+    setRecommendations,
+    recordAccepted,
+    recordDismissed,
+  };
 }
