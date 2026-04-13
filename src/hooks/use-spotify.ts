@@ -45,27 +45,30 @@ export function useSpotify() {
         throw new Error("Spotify is not configured. Please contact support.");
       }
 
-    const codeVerifier = generateRandomString(64);
-    const hashed = await sha256(codeVerifier);
-    const codeChallenge = base64encode(hashed);
+      const codeVerifier = generateRandomString(64);
+      const hashed = await sha256(codeVerifier);
+      const codeChallenge = base64encode(hashed);
 
-    // Store verifier for callback
-    sessionStorage.setItem("spotify_code_verifier", codeVerifier);
-    sessionStorage.setItem("spotify_return_path", window.location.pathname);
+      sessionStorage.setItem("spotify_code_verifier", codeVerifier);
+      sessionStorage.setItem("spotify_return_path", window.location.pathname);
 
-    const redirectUri = `${window.location.origin}/spotify-callback`;
+      const redirectUri = `${window.location.origin}/spotify-callback`;
 
-    const params = new URLSearchParams({
-      client_id: clientId,
-      response_type: "code",
-      redirect_uri: redirectUri,
-      code_challenge_method: "S256",
-      code_challenge: codeChallenge,
-      scope: SCOPES,
-      state: generateRandomString(16),
-    });
+      const params = new URLSearchParams({
+        client_id: clientId,
+        response_type: "code",
+        redirect_uri: redirectUri,
+        code_challenge_method: "S256",
+        code_challenge: codeChallenge,
+        scope: SCOPES,
+        state: generateRandomString(16),
+      });
 
-    window.location.href = `${SPOTIFY_AUTH_URL}?${params.toString()}`;
+      window.location.href = `${SPOTIFY_AUTH_URL}?${params.toString()}`;
+    } catch (e: any) {
+      setError(e.message);
+      setStatus("error");
+    }
   }, []);
 
   const handleCallback = useCallback(async (code: string) => {
