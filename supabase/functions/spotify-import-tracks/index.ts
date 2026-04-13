@@ -195,17 +195,17 @@ async function syncLikedSongs(
   const spotifyLikedIds = new Set<string>();
   let offset = 0;
   let total = Infinity;
-  const MAX_SONGS = 3000;
 
   // For incremental: stop early once we hit a run of known tracks
   let consecutiveKnown = 0;
   const KNOWN_THRESHOLD = 100; // stop after 100 consecutive known tracks in incremental mode
 
-  while (offset < total && offset < MAX_SONGS) {
+  while (offset < total) {
     const data = await spotifyGet(`https://api.spotify.com/v1/me/tracks?limit=50&offset=${offset}`, token);
     total = data.total ?? 0;
+    const items = data.items || [];
 
-    for (const item of data.items || []) {
+    for (const item of items) {
       const t = extractTrack(item, userId);
       if (!t) continue;
       spotifyLikedIds.add(t.spotify_track_id);
@@ -220,12 +220,22 @@ async function syncLikedSongs(
 
     offset += 50;
 
+    // Log progress every 500 tracks
+    if (offset % 500 === 0) {
+      console.log(`[spotify-import-tracks] liked songs pagination: ${offset}/${total}, new: ${spotifyLiked.length}`);
+    }
+
     // In incremental mode, stop early if we've hit a long run of known tracks
     if (!isFullSync && consecutiveKnown >= KNOWN_THRESHOLD) {
-      console.info("[spotify-import-tracks] incremental: stopping liked songs scan after consecutive known run");
+      console.log("[spotify-import-tracks] incremental: stopping liked songs scan after consecutive known run");
       break;
     }
+
+    // If no items returned, we're done regardless of total
+    if (items.length === 0) break;
   }
+
+  console.log(`[spotify-import-tracks] liked songs pagination complete: scanned ${offset}, total ${total}, new ${spotifyLiked.length}`);
 
   // Upsert new tracks
   for (let i = 0; i < spotifyLiked.length; i += 100) {
