@@ -1,48 +1,16 @@
 import AppLayout from "@/components/app/AppLayout";
 import { Button } from "@/components/ui/button";
-import { samplePlaylists, type Playlist } from "@/lib/sample-data";
-import { CheckCircle2, AlertCircle, Upload, RefreshCw, Loader2 } from "lucide-react";
-import { useState } from "react";
+import { CheckCircle2, AlertCircle, Headphones, RefreshCw } from "lucide-react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { useConnections } from "@/hooks/use-connections";
 import { useSpotify } from "@/hooks/use-spotify";
 
-type SyncState = Record<string, Playlist["syncStatus"]>;
-
 const Sync = () => {
   const { connections } = useConnections();
-  const { startAuth, disconnect, status: spotifyStatus } = useSpotify();
-  const [syncStates, setSyncStates] = useState<SyncState>(
-    Object.fromEntries(samplePlaylists.map((pl) => [pl.id, pl.syncStatus]))
-  );
-  const [activeExports, setActiveExports] = useState<Set<string>>(new Set());
+  const { startAuth, disconnect } = useSpotify();
 
-  const handleExport = (pl: Playlist) => {
-    if (activeExports.has(pl.id)) return;
-    setActiveExports((prev) => new Set(prev).add(pl.id));
-    setSyncStates((prev) => ({ ...prev, [pl.id]: "exporting" }));
-    toast.loading(`Exporting "${pl.name}"…`, { id: `export-${pl.id}` });
-    setTimeout(() => {
-      setSyncStates((prev) => ({ ...prev, [pl.id]: "synced" }));
-      setActiveExports((prev) => { const next = new Set(prev); next.delete(pl.id); return next; });
-      toast.dismiss(`export-${pl.id}`);
-      toast.success(`"${pl.name}" exported!`);
-    }, 2000);
-  };
-
-  const handleRefresh = (pl: Playlist) => {
-    if (activeExports.has(pl.id)) return;
-    setActiveExports((prev) => new Set(prev).add(pl.id));
-    setSyncStates((prev) => ({ ...prev, [pl.id]: "exporting" }));
-    setTimeout(() => {
-      setSyncStates((prev) => ({ ...prev, [pl.id]: "synced" }));
-      setActiveExports((prev) => { const next = new Set(prev); next.delete(pl.id); return next; });
-      toast.success(`"${pl.name}" refreshed!`);
-    }, 1500);
-  };
-
-  const noExportPlatform = !connections.spotify.connected;
+  const spotifyConnected = connections.spotify.connected;
 
   return (
     <AppLayout>
@@ -52,77 +20,62 @@ const Sync = () => {
           <p className="text-muted-foreground">Manage your playlist exports to Spotify.</p>
         </div>
 
-        <div className="space-y-3 mb-6">
-          <div className="p-5 rounded-2xl bg-surface-elevated border border-border/50 flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 rounded-xl bg-[#1DB954]/10 flex items-center justify-center text-xl">🎵</div>
-              <div>
-                <p className="font-medium">Spotify</p>
-                <p className="text-sm text-muted-foreground">{connections.spotify.connected ? `Connected as ${connections.spotify.email}` : "Not connected"}</p>
-              </div>
+        {/* Spotify connection card */}
+        <div className="p-5 rounded-2xl bg-surface-elevated border border-border/50 flex items-center justify-between mb-6">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-xl bg-accent/10 flex items-center justify-center text-xl">🎵</div>
+            <div>
+              <p className="font-medium">Spotify</p>
+              <p className="text-sm text-muted-foreground">
+                {spotifyConnected ? `Connected as ${connections.spotify.email}` : "Not connected"}
+              </p>
             </div>
-            {connections.spotify.connected ? (
-              <div className="flex items-center gap-3">
-                <span className="inline-flex items-center gap-1 text-sm text-accent"><CheckCircle2 className="w-4 h-4" /> Connected</span>
-                <Button variant="ghost" size="sm" className="rounded-lg text-destructive" onClick={async () => { await disconnect(); toast("Spotify disconnected"); }}>
-                  Disconnect
-                </Button>
-              </div>
-            ) : (
-              <Button variant="hero" size="sm" className="rounded-lg" onClick={() => void startAuth("/sync")}>
-                Connect
-              </Button>
-            )}
           </div>
+          {spotifyConnected ? (
+            <div className="flex items-center gap-3">
+              <span className="inline-flex items-center gap-1 text-sm text-accent">
+                <CheckCircle2 className="w-4 h-4" /> Connected
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="rounded-lg text-destructive"
+                onClick={async () => {
+                  await disconnect();
+                  toast("Spotify disconnected");
+                }}
+              >
+                Disconnect
+              </Button>
+            </div>
+          ) : (
+            <Button variant="hero" size="sm" className="rounded-lg" onClick={() => void startAuth("/sync")}>
+              Connect
+            </Button>
+          )}
         </div>
 
-        {noExportPlatform && (
-          <div className="p-4 rounded-xl bg-destructive/10 text-destructive text-sm mb-6 flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 flex-shrink-0" />
-            <span>No platform connected. <Link to="/settings" className="underline font-medium">Go to Settings</Link> or connect above to export playlists.</span>
+        {/* Content */}
+        {!spotifyConnected ? (
+          <div className="rounded-2xl bg-surface-elevated border border-border/50 p-12 text-center">
+            <Headphones className="w-10 h-10 text-muted-foreground mx-auto mb-4" />
+            <h2 className="font-heading text-xl mb-2">Connect Spotify to enable sync</h2>
+            <p className="text-sm text-muted-foreground max-w-sm mx-auto">
+              Once Spotify is connected and you have generated playlists, you'll be able to export and sync them here.
+            </p>
+          </div>
+        ) : (
+          <div className="rounded-2xl bg-surface-elevated border border-border/50 p-12 text-center">
+            <RefreshCw className="w-10 h-10 text-muted-foreground mx-auto mb-4" />
+            <h2 className="font-heading text-xl mb-2">No playlists to sync</h2>
+            <p className="text-sm text-muted-foreground max-w-sm mx-auto mb-6">
+              Generate playlists from your imported library first, then come back here to export them to Spotify.
+            </p>
+            <Button variant="hero" asChild>
+              <Link to="/discover">Open Discover</Link>
+            </Button>
           </div>
         )}
-
-        <div className="space-y-3">
-          {samplePlaylists.map((pl) => {
-            const status = syncStates[pl.id];
-            const isExporting = activeExports.has(pl.id);
-            return (
-              <div key={pl.id} className="p-5 rounded-2xl bg-surface-elevated border border-border/50 flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <Link to={`/playlists/${pl.id}`} className="text-2xl hover:scale-110 transition-transform">{pl.emoji}</Link>
-                  <div>
-                    <Link to={`/playlists/${pl.id}`} className="font-medium hover:text-accent transition-colors">{pl.name}</Link>
-                    <p className="text-xs text-muted-foreground">{pl.trackCount} tracks · {pl.mood}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-3">
-                  {status === "synced" && !isExporting ? (
-                    <>
-                      <span className="text-xs text-accent flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> Synced</span>
-                      <Button variant="ghost" size="sm" className="rounded-lg gap-1" onClick={() => handleRefresh(pl)} disabled={noExportPlatform}>
-                        <RefreshCw className="w-3.5 h-3.5" /> Refresh
-                      </Button>
-                    </>
-                  ) : status === "exporting" || isExporting ? (
-                    <span className="text-xs text-warm flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> Exporting…</span>
-                  ) : status === "failed" ? (
-                    <>
-                      <span className="text-xs text-destructive flex items-center gap-1"><AlertCircle className="w-3 h-3" /> Failed</span>
-                      <Button variant="warm" size="sm" className="rounded-lg gap-1" onClick={() => handleExport(pl)} disabled={noExportPlatform}>
-                        <Upload className="w-3.5 h-3.5" /> Retry
-                      </Button>
-                    </>
-                  ) : (
-                    <Button variant="hero" size="sm" className="rounded-lg gap-1" onClick={() => handleExport(pl)} disabled={noExportPlatform}>
-                      <Upload className="w-3.5 h-3.5" /> Export
-                    </Button>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
       </div>
     </AppLayout>
   );

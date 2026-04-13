@@ -1,7 +1,8 @@
 import { useState, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { type Track, type Recommendation, samplePlaylists, sampleTracks } from "@/lib/sample-data";
+import { type Recommendation } from "@/lib/sample-data";
 import { toast } from "sonner";
+import { useAuth } from "./use-auth";
 
 interface DiscoverCategory {
   id: string;
@@ -16,6 +17,7 @@ interface FeedbackTrack {
 }
 
 export function useDiscoverRecommendations() {
+  const { user } = useAuth();
   const [categories, setCategories] = useState<DiscoverCategory[]>([]);
   const [loading, setLoading] = useState(false);
   const [hasLoaded, setHasLoaded] = useState(false);
@@ -25,32 +27,35 @@ export function useDiscoverRecommendations() {
   const generate = useCallback(async (discoveryMode: string = "balanced") => {
     setLoading(true);
     try {
+      // Fetch real imported tracks from DB
+      let importedTracks: { track_name: string; artist_name: string; album_name: string | null }[] = [];
+      if (user) {
+        const { data } = await supabase
+          .from("imported_tracks")
+          .select("track_name, artist_name, album_name")
+          .eq("user_id", user.id)
+          .limit(200);
+        importedTracks = data ?? [];
+      }
+
+      if (importedTracks.length === 0) {
+        setCategories([]);
+        setHasLoaded(true);
+        setLoading(false);
+        return;
+      }
+
       const { data, error } = await supabase.functions.invoke("discover-recommendations", {
         body: {
-          allPlaylists: samplePlaylists.map((p) => ({
-            id: p.id,
-            name: p.name,
-            mood: p.mood,
-            avgTempo: p.avgTempo,
-            description: p.description,
-            tracks: p.tracks.map((t) => ({
-              title: t.title,
-              artist: t.artist,
-              genre: t.genre,
-              mood: t.mood,
-              tempo: t.tempo,
-              energy: t.energy,
-            })),
-          })),
-          allTracks: sampleTracks.map((t) => ({
-            title: t.title,
-            artist: t.artist,
-            genre: t.genre,
-            mood: t.mood,
-            tempo: t.tempo,
-            energy: t.energy,
-            valence: t.valence,
-            year: t.year,
+          allPlaylists: [],
+          allTracks: importedTracks.map((t) => ({
+            title: t.track_name,
+            artist: t.artist_name,
+            album: t.album_name || "Unknown",
+            genre: "Unknown",
+            mood: "Unknown",
+            tempo: 100,
+            energy: 0.5,
           })),
           discoveryMode,
           acceptedSongs,
@@ -103,7 +108,7 @@ export function useDiscoverRecommendations() {
     } finally {
       setLoading(false);
     }
-  }, [acceptedSongs, dismissedSongs]);
+  }, [user, acceptedSongs, dismissedSongs]);
 
   const recordAccepted = useCallback((track: { title: string; artist: string }) => {
     setAcceptedSongs((prev) => [...prev, { title: track.title, artist: track.artist }]);

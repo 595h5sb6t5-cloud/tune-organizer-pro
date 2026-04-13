@@ -1,11 +1,13 @@
 import AppLayout from "@/components/app/AppLayout";
-import { samplePlaylists, type Recommendation } from "@/lib/sample-data";
-import { Sparkles, Plus, X, Bookmark, ChevronRight, Loader2, RefreshCw, Gem, TrendingUp, Music } from "lucide-react";
+import { type Recommendation } from "@/lib/sample-data";
+import { Sparkles, Plus, X, Bookmark, Loader2, RefreshCw, Gem, TrendingUp, Music, Headphones } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { useDiscoverRecommendations } from "@/hooks/use-discover-recommendations";
+import { useAuth } from "@/hooks/use-auth";
+import { supabase } from "@/integrations/supabase/client";
 
 const discoveryModes = [
   { id: "balanced", label: "Balanced" },
@@ -31,6 +33,10 @@ const categoryEmoji: Record<string, string> = {
 };
 
 const Discover = () => {
+  const { user, profile } = useAuth();
+  const spotifyConnected = profile?.spotify_connected ?? false;
+  const [trackCount, setTrackCount] = useState<number | null>(null);
+
   const [activeMode, setActiveMode] = useState("balanced");
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
   const [acceptedIds, setAcceptedIds] = useState<Set<string>>(new Set());
@@ -38,11 +44,30 @@ const Discover = () => {
 
   const { categories, loading, hasLoaded, generate, recordAccepted, recordDismissed } = useDiscoverRecommendations();
 
+  // Check if user has imported tracks
   useEffect(() => {
-    if (!hasLoaded && !loading) {
+    if (!user || !spotifyConnected) {
+      setTrackCount(spotifyConnected ? null : 0);
+      return;
+    }
+    let cancelled = false;
+    supabase
+      .from("imported_tracks")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", user.id)
+      .then(({ count }) => {
+        if (!cancelled) setTrackCount(count ?? 0);
+      });
+    return () => { cancelled = true; };
+  }, [user, spotifyConnected]);
+
+  const hasData = trackCount !== null && trackCount > 0;
+
+  useEffect(() => {
+    if (hasData && !hasLoaded && !loading) {
       generate(activeMode);
     }
-  }, []);
+  }, [hasData, hasLoaded, loading]);
 
   const handleModeSwitch = (mode: string) => {
     if (mode === activeMode && hasLoaded) return;
@@ -63,10 +88,7 @@ const Discover = () => {
   const handleAdd = (rec: Recommendation) => {
     setAcceptedIds((prev) => new Set(prev).add(rec.id));
     recordAccepted(rec.track);
-    const playlistName = rec.targetPlaylistName
-      || (rec.targetPlaylistId ? samplePlaylists.find((p) => p.id === rec.targetPlaylistId)?.name : null)
-      || "your library";
-    toast.success(`Added "${rec.track.title}" to ${playlistName}`);
+    toast.success(`Added "${rec.track.title}" to your library`);
   };
 
   const handleDismiss = (rec: Recommendation) => {
@@ -89,9 +111,55 @@ const Discover = () => {
     });
   };
 
-  const totalVisible = categories.reduce((sum, cat) => 
-    sum + cat.recommendations.filter((r) => !hiddenIds.has(r.id)).length, 0
+  const totalVisible = categories.reduce(
+    (sum, cat) => sum + cat.recommendations.filter((r) => !hiddenIds.has(r.id)).length,
+    0,
   );
+
+  // Not connected state
+  if (!spotifyConnected) {
+    return (
+      <AppLayout>
+        <div className="max-w-5xl">
+          <div className="mb-6">
+            <h1 className="font-heading text-3xl mb-1">Discover</h1>
+            <p className="text-muted-foreground">AI-curated songs tailored to your taste and playlists.</p>
+          </div>
+          <div className="rounded-2xl bg-surface-elevated border border-border/50 p-12 text-center">
+            <Headphones className="w-10 h-10 text-muted-foreground mx-auto mb-4" />
+            <h2 className="font-heading text-xl mb-2">Connect Spotify for personalized recommendations</h2>
+            <p className="text-sm text-muted-foreground max-w-md mx-auto mb-6">
+              Discover uses your real listening data to find songs that match your taste. Connect Spotify to unlock personalized AI recommendations.
+            </p>
+            <Button variant="hero" asChild>
+              <Link to="/settings">Go to Settings</Link>
+            </Button>
+          </div>
+        </div>
+      </AppLayout>
+    );
+  }
+
+  // Connected but no data yet
+  if (trackCount !== null && trackCount === 0) {
+    return (
+      <AppLayout>
+        <div className="max-w-5xl">
+          <div className="mb-6">
+            <h1 className="font-heading text-3xl mb-1">Discover</h1>
+            <p className="text-muted-foreground">AI-curated songs tailored to your taste and playlists.</p>
+          </div>
+          <div className="rounded-2xl bg-surface-elevated border border-border/50 p-12 text-center">
+            <Sparkles className="w-10 h-10 text-muted-foreground mx-auto mb-4" />
+            <h2 className="font-heading text-xl mb-2">Waiting for your library</h2>
+            <p className="text-sm text-muted-foreground max-w-md mx-auto">
+              Spotify is connected but no tracks have been imported yet. Once your library is imported, personalized recommendations will appear here.
+            </p>
+          </div>
+        </div>
+      </AppLayout>
+    );
+  }
 
   return (
     <AppLayout>
