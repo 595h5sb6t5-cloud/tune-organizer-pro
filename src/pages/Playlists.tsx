@@ -92,7 +92,7 @@ const Playlists = () => {
     );
   }
 
-  const hasData = playlists.length > 0 || likedCount > 0;
+  const hasData = playlists.length > 0 || likedCount > 0 || followedArtists.length > 0;
   const hasAnySyncActivity = syncStages.some(s => s.status !== "pending");
 
   return (

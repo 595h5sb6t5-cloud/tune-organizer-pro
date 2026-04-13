@@ -162,6 +162,11 @@ async function fetchAudioFeatures(trackIds: string[], token: string): Promise<Ma
         if (feat && feat.id) featureMap.set(feat.id, feat);
       }
     } catch (e) {
+      // Audio features API returns 403 for apps without the scope — skip gracefully
+      if (e instanceof SpotifyImportError && e.status === 403) {
+        console.warn("[spotify-import-tracks] audio features API returned 403 — skipping (likely deprecated for this app)");
+        return featureMap; // stop trying further batches
+      }
       console.warn("[spotify-import-tracks] audio features batch failed:", e);
     }
   }
@@ -536,7 +541,7 @@ Deno.serve(async (req) => {
 
     const isFullSync = shouldDoFullSync(connection, forceFullSync);
     const syncMode = isFullSync ? "full" : "incremental";
-    console.info("[spotify-import-tracks] starting sync", { user_id: user.id, mode: syncMode, scope: syncScope });
+    console.log("[spotify-import-tracks] === STARTING SYNC ===", { user_id: user.id, mode: syncMode, scope: syncScope, forceFullSync });
 
     // Update sync status
     await adminClient.from("spotify_connections").update({
@@ -581,7 +586,7 @@ Deno.serve(async (req) => {
       result.liked_songs_added = likedResult.added;
       result.liked_songs_removed = likedResult.removed;
       result.liked_songs_total = likedResult.total;
-      console.info("[spotify-import-tracks] liked_songs_done", likedResult);
+      console.log("[spotify-import-tracks] liked_songs_done", likedResult);
 
       await adminClient.from("spotify_connections").update({ last_library_sync_at: now }).eq("user_id", user.id);
 
@@ -631,7 +636,7 @@ Deno.serve(async (req) => {
       result.playlists_removed = plResult.removed;
       result.playlist_tracks_synced = plResult.tracksSynced;
       if (plResult.warning) warnings.push(plResult.warning);
-      console.info("[spotify-import-tracks] playlists_done", plResult);
+      console.log("[spotify-import-tracks] playlists_done", plResult);
 
       await adminClient.from("spotify_connections").update({ last_playlist_sync_at: now }).eq("user_id", user.id);
     }
@@ -643,7 +648,7 @@ Deno.serve(async (req) => {
       result.artists_total = artistResult.total;
       result.artists_added = artistResult.added;
       result.artists_removed = artistResult.removed;
-      console.info("[spotify-import-tracks] followed_artists_done", artistResult);
+      console.log("[spotify-import-tracks] followed_artists_done", artistResult);
 
       await adminClient.from("spotify_connections").update({ last_artist_sync_at: now }).eq("user_id", user.id);
     }
