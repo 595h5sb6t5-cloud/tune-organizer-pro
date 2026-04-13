@@ -14,6 +14,51 @@ export type Database = {
   }
   public: {
     Tables: {
+      profiles: {
+        Row: {
+          apple_music_connected: boolean
+          created_at: string
+          email: string | null
+          first_name: string | null
+          full_name: string | null
+          id: string
+          last_name: string | null
+          onboarding_completed: boolean
+          phone: string | null
+          spotify_connected: boolean
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          apple_music_connected?: boolean
+          created_at?: string
+          email?: string | null
+          first_name?: string | null
+          full_name?: string | null
+          id?: string
+          last_name?: string | null
+          onboarding_completed?: boolean
+          phone?: string | null
+          spotify_connected?: boolean
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          apple_music_connected?: boolean
+          created_at?: string
+          email?: string | null
+          first_name?: string | null
+          full_name?: string | null
+          id?: string
+          last_name?: string | null
+          onboarding_completed?: boolean
+          phone?: string | null
+          spotify_connected?: boolean
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       recommendation_feedback: {
         Row: {
           action: string
