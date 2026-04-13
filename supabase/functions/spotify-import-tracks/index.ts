@@ -300,7 +300,8 @@ async function syncPlaylists(
     while (offset < totalPl) {
       const data = await spotifyGet(`https://api.spotify.com/v1/me/playlists?limit=50&offset=${offset}`, token);
       totalPl = data.total ?? 0;
-      for (const pl of data.items || []) {
+      const items = data.items || [];
+      for (const pl of items) {
         if (!pl || !pl.id) continue;
         playlists.push({
           id: pl.id,
@@ -316,8 +317,10 @@ async function syncPlaylists(
         });
       }
       offset += 50;
-      if (!data.items || data.items.length === 0) break;
+      console.log(`[spotify-import-tracks] playlists pagination: ${offset}/${totalPl}, collected: ${playlists.length}`);
+      if (items.length === 0) break;
     }
+    console.log(`[spotify-import-tracks] playlists pagination complete: ${playlists.length} total`);
   } catch (e) {
     if (isInsufficientScopeError(e)) {
       warning = "Spotify connection is missing playlist read access. Reconnect Spotify to sync playlists.";
