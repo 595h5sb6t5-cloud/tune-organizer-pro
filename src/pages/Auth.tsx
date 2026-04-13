@@ -281,20 +281,16 @@ function SignUpForm({ onSuccess }: { onSuccess: () => void }) {
 /* ─── Connect Card (Onboarding Step 2) ─── */
 
 function ConnectCard({ onComplete }: { onComplete: () => void }) {
-  const { updateProfile } = useAuth();
-  const [connectingSpotify, setConnectingSpotify] = useState(false);
+  const { updateProfile, profile } = useAuth();
+  const { startAuth: startSpotify, status: spotifyStatus } = useSpotify();
   const [connectingApple, setConnectingApple] = useState(false);
-  const [spotifyDone, setSpotifyDone] = useState(false);
   const [appleDone, setAppleDone] = useState(false);
 
+  const spotifyDone = profile?.spotify_connected || false;
+
   const handleSpotify = async () => {
-    setConnectingSpotify(true);
-    // Simulated OAuth — replace with real Spotify OAuth when ready
-    await new Promise((r) => setTimeout(r, 1500));
-    await updateProfile({ spotify_connected: true });
-    setSpotifyDone(true);
-    setConnectingSpotify(false);
-    toast({ title: "Spotify connected!" });
+    sessionStorage.setItem("spotify_return_path", "/auth");
+    await startSpotify();
   };
 
   const handleApple = async () => {
@@ -321,9 +317,9 @@ function ConnectCard({ onComplete }: { onComplete: () => void }) {
             variant="outline"
             className="w-full justify-start gap-3 h-14"
             onClick={handleSpotify}
-            disabled={connectingSpotify || spotifyDone}
+            disabled={spotifyStatus === "connecting" || spotifyDone}
           >
-            {connectingSpotify ? (
+            {spotifyStatus === "connecting" ? (
               <Loader2 className="h-5 w-5 animate-spin text-accent" />
             ) : spotifyDone ? (
               <CheckCircle2 className="h-5 w-5 text-accent" />
