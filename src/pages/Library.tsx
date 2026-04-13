@@ -23,7 +23,7 @@ function StageIcon({ status }: { status: SyncStageState["status"] }) {
   }
 }
 
-const Playlists = () => {
+const LibraryPage = () => {
   const { profile } = useAuth();
   const spotifyConnected = profile?.spotify_connected ?? false;
   const {
@@ -267,4 +267,4 @@ const Playlists = () => {
   );
 };
 
-export default Playlists;
+export default LibraryPage;
