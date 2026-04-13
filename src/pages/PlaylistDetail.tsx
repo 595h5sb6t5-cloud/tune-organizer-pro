@@ -1,7 +1,7 @@
 import AppLayout from "@/components/app/AppLayout";
 import { Button } from "@/components/ui/button";
 import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, RefreshCw, Plus, X, Bookmark, Sparkles, Loader2, Gem, TrendingUp, Music, Brain, Eye, EyeOff, Zap, Clock, Palette, Target, Shield, Lightbulb, MapPin, Mic2, Radio, Layers, Star, ChevronDown, ChevronUp } from "lucide-react";
+import { ArrowLeft, RefreshCw, Plus, X, Bookmark, Sparkles, Loader2, Gem, TrendingUp, Music, Brain, Eye, EyeOff, Zap, Clock, Palette, Target, Shield, Lightbulb, MapPin, Mic2, Radio, Layers, Star, ChevronDown, ChevronUp, Edit3, Upload, ExternalLink, Users, Lock, Trash2, GripVertical } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
@@ -23,10 +23,15 @@ interface PlaylistTrack {
 
 interface SpotifyPlaylistInfo {
   id: string;
+  spotify_playlist_id: string;
   name: string;
   description: string | null;
   image_url: string | null;
   track_count: number;
+  is_owned_by_user: boolean;
+  is_collaborative: boolean;
+  owner_display_name: string | null;
+  spotify_owner_id: string | null;
 }
 
 interface VibeRecommendation {
@@ -426,6 +431,29 @@ function CompatibilityBreakdown({ breakdown, color }: { breakdown: Record<string
   );
 }
 
+/* ─── Ownership Badge ─── */
+function OwnershipBadge({ playlist }: { playlist: SpotifyPlaylistInfo }) {
+  if (playlist.is_owned_by_user) {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-accent/15 text-accent">
+        <Edit3 className="w-3 h-3" /> Your playlist
+      </span>
+    );
+  }
+  if (playlist.is_collaborative) {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-primary/15 text-primary">
+        <Users className="w-3 h-3" /> Collaborative
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-secondary text-muted-foreground">
+      <Lock className="w-3 h-3" /> Saved · by {playlist.owner_display_name || "Unknown"}
+    </span>
+  );
+}
+
 /* ─── Main Page ─── */
 const PlaylistDetail = () => {
   const { id } = useParams();
@@ -436,6 +464,9 @@ const PlaylistDetail = () => {
   const [playlist, setPlaylist] = useState<SpotifyPlaylistInfo | null>(null);
   const [tracks, setTracks] = useState<PlaylistTrack[]>([]);
   const [loadingPlaylist, setLoadingPlaylist] = useState(true);
+  const [editing, setEditing] = useState(false);
+  const [editedName, setEditedName] = useState("");
+  const [exporting, setExporting] = useState(false);
 
   const { vibe, loading: vibeLoading, analyzing, analyze } = usePlaylistVibe(id);
 
@@ -448,18 +479,104 @@ const PlaylistDetail = () => {
   const [expandedRecId, setExpandedRecId] = useState<string | null>(null);
   const [explainedRecId, setExplainedRecId] = useState<string | null>(null);
 
+  const canEdit = playlist?.is_owned_by_user || playlist?.is_collaborative;
+
   useEffect(() => {
     if (!id || !user) return;
     setLoadingPlaylist(true);
     Promise.all([
-      supabase.from("spotify_playlists").select("id, name, description, image_url, track_count").eq("id", id).single(),
+      supabase.from("spotify_playlists").select("id, spotify_playlist_id, name, description, image_url, track_count, is_owned_by_user, is_collaborative, owner_display_name, spotify_owner_id").eq("id", id).single(),
       supabase.from("spotify_playlist_tracks").select("id, spotify_track_id, track_name, artist_name, album_name, image_url, position").eq("playlist_id", id).eq("user_id", user.id).order("position"),
     ]).then(([plRes, trRes]) => {
-      if (plRes.data) setPlaylist(plRes.data as SpotifyPlaylistInfo);
+      if (plRes.data) {
+        setPlaylist(plRes.data as SpotifyPlaylistInfo);
+        setEditedName(plRes.data.name);
+      }
       setTracks((trRes.data as PlaylistTrack[]) || []);
       setLoadingPlaylist(false);
     });
   }, [id, user]);
+
+  const handleRemoveTrack = useCallback(async (trackId: string) => {
+    if (!canEdit || !user) return;
+    const trackToRemove = tracks.find(t => t.id === trackId);
+    if (!trackToRemove) return;
+    
+    setTracks(prev => prev.filter(t => t.id !== trackId));
+    const { error } = await supabase.from("spotify_playlist_tracks").delete().eq("id", trackId);
+    if (error) {
+      toast.error("Failed to remove track");
+      // Re-add
+      setTracks(prev => [...prev, trackToRemove].sort((a, b) => a.position - b.position));
+    }
+  }, [canEdit, user, tracks]);
+
+  const handleMoveTrack = useCallback(async (trackId: string, direction: "up" | "down") => {
+    if (!canEdit) return;
+    const idx = tracks.findIndex(t => t.id === trackId);
+    if (idx < 0) return;
+    const swapIdx = direction === "up" ? idx - 1 : idx + 1;
+    if (swapIdx < 0 || swapIdx >= tracks.length) return;
+
+    const newTracks = [...tracks];
+    [newTracks[idx], newTracks[swapIdx]] = [newTracks[swapIdx], newTracks[idx]];
+    newTracks.forEach((t, i) => t.position = i);
+    setTracks(newTracks);
+
+    // Persist positions
+    await Promise.all([
+      supabase.from("spotify_playlist_tracks").update({ position: newTracks[idx].position }).eq("id", newTracks[idx].id),
+      supabase.from("spotify_playlist_tracks").update({ position: newTracks[swapIdx].position }).eq("id", newTracks[swapIdx].id),
+    ]);
+  }, [canEdit, tracks]);
+
+  const handleExportToSpotify = useCallback(async () => {
+    if (!playlist || !canEdit || tracks.length === 0) return;
+    setExporting(true);
+    try {
+      // Use the spotify-export-playlist edge function but adapted for spotify playlists
+      const trackIds = tracks.map(t => t.spotify_track_id).filter(Boolean);
+      
+      const { data: conn } = await supabase
+        .from("spotify_connections")
+        .select("access_token, refresh_token, expires_at, spotify_user_id")
+        .eq("user_id", user!.id)
+        .single();
+      
+      if (!conn) throw new Error("Spotify not connected");
+
+      // Call the export function
+      const { data, error } = await supabase.functions.invoke("spotify-export-playlist", {
+        body: {
+          cluster_id: playlist.id, // reuse as identifier
+          name: editedName || playlist.name,
+          description: playlist.description || "",
+          track_ids: trackIds,
+          spotify_playlist_id: playlist.spotify_playlist_id, // pass the existing Spotify playlist ID
+        },
+      });
+
+      if (error) throw new Error(error.message);
+      if (data?.error) throw new Error(data.error);
+
+      toast.success(
+        data?.is_update ? "Playlist updated on Spotify" : "Playlist exported to Spotify",
+        { description: `${trackIds.length} tracks synced` }
+      );
+    } catch (err: any) {
+      toast.error("Export failed", { description: err.message });
+    } finally {
+      setExporting(false);
+    }
+  }, [playlist, canEdit, tracks, user, editedName]);
+
+  const handleSaveName = useCallback(async () => {
+    if (!playlist || !editedName.trim()) return;
+    await supabase.from("spotify_playlists").update({ name: editedName.trim() }).eq("id", playlist.id);
+    setPlaylist(prev => prev ? { ...prev, name: editedName.trim() } : null);
+    setEditing(false);
+    toast.success("Playlist renamed");
+  }, [playlist, editedName]);
 
   const generateRecs = useCallback(async () => {
     if (!playlist || tracks.length === 0) return;
@@ -576,21 +693,60 @@ const PlaylistDetail = () => {
             <div className="w-36 h-36 rounded-2xl bg-secondary flex items-center justify-center text-5xl flex-shrink-0">🎵</div>
           )}
           <div className="flex-1">
-            <h1 className="font-heading text-4xl mb-1">{playlist.name}</h1>
+            {editing && canEdit ? (
+              <div className="flex items-center gap-2 mb-2">
+                <input
+                  value={editedName}
+                  onChange={e => setEditedName(e.target.value)}
+                  className="font-heading text-3xl bg-transparent border-b-2 border-accent outline-none w-full"
+                  autoFocus
+                  onKeyDown={e => e.key === "Enter" && handleSaveName()}
+                />
+                <Button size="sm" variant="hero" onClick={handleSaveName}>Save</Button>
+                <Button size="sm" variant="ghost" onClick={() => { setEditing(false); setEditedName(playlist.name); }}>Cancel</Button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 mb-1">
+                <h1 className="font-heading text-4xl">{playlist.name}</h1>
+                {canEdit && (
+                  <button onClick={() => setEditing(true)} className="text-muted-foreground hover:text-accent transition-colors">
+                    <Edit3 className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            )}
             {playlist.description && (
               <p className="text-muted-foreground text-sm mb-3">{playlist.description}</p>
             )}
-            <div className="flex items-center gap-4 text-sm text-muted-foreground mb-4">
-              <span>{tracks.length} tracks</span>
+            
+            {/* Ownership and meta info */}
+            <div className="flex items-center gap-3 flex-wrap mb-4">
+              <OwnershipBadge playlist={playlist} />
+              <span className="text-sm text-muted-foreground">{tracks.length} tracks</span>
               {vibe && (
-                <span className="font-medium" style={{ color: vibeColor }}>{vibe.primary_vibe}</span>
+                <span className="text-sm font-medium" style={{ color: vibeColor }}>{vibe.primary_vibe}</span>
               )}
             </div>
+
             <div className="flex gap-3 flex-wrap">
               <Button variant="hero" className="rounded-xl gap-2" onClick={generateRecs} disabled={recsLoading || tracks.length === 0}>
                 {recsLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
                 {recsLoading ? "Finding songs…" : "Get Recommendations"}
               </Button>
+              {canEdit && (
+                <Button variant="secondary" className="rounded-xl gap-2" onClick={handleExportToSpotify} disabled={exporting || tracks.length === 0}>
+                  {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                  {exporting ? "Exporting…" : "Export to Spotify"}
+                </Button>
+              )}
+              {playlist.spotify_playlist_id && (
+                <Button variant="ghost" className="rounded-xl gap-2" asChild>
+                  <a href={`https://open.spotify.com/playlist/${playlist.spotify_playlist_id}`} target="_blank" rel="noopener noreferrer">
+                    <ExternalLink className="w-4 h-4" />
+                    Open in Spotify
+                  </a>
+                </Button>
+              )}
             </div>
           </div>
         </div>
@@ -600,7 +756,7 @@ const PlaylistDetail = () => {
 
         {/* Track list */}
         <div className="rounded-2xl border border-border/50 overflow-hidden mb-8">
-          <div className="grid grid-cols-[40px_1fr_1fr_40px] gap-4 px-5 py-3 text-xs text-muted-foreground border-b border-border/50 bg-secondary/30">
+          <div className={`grid ${canEdit ? "grid-cols-[40px_1fr_1fr_80px]" : "grid-cols-[40px_1fr_1fr_40px]"} gap-4 px-5 py-3 text-xs text-muted-foreground border-b border-border/50 bg-secondary/30`}>
             <span>#</span>
             <span>Title</span>
             <span>Album</span>
@@ -612,7 +768,7 @@ const PlaylistDetail = () => {
             </div>
           ) : (
             tracks.map((track, i) => (
-              <div key={track.id} className="group grid grid-cols-[40px_1fr_1fr_40px] gap-4 px-5 py-3 items-center hover:bg-secondary/30 transition-colors">
+              <div key={track.id} className={`group grid ${canEdit ? "grid-cols-[40px_1fr_1fr_80px]" : "grid-cols-[40px_1fr_1fr_40px]"} gap-4 px-5 py-3 items-center hover:bg-secondary/30 transition-colors`}>
                 <span className="text-sm text-muted-foreground">{i + 1}</span>
                 <div className="flex items-center gap-3 min-w-0">
                   {track.image_url && (
@@ -624,7 +780,33 @@ const PlaylistDetail = () => {
                   </div>
                 </div>
                 <p className="text-sm text-muted-foreground truncate">{track.album_name || "—"}</p>
-                <div />
+                <div className="flex items-center gap-1">
+                  <AudioPreviewButton trackId={track.spotify_track_id} size="sm" />
+                  {canEdit && (
+                    <>
+                      <button
+                        onClick={() => handleMoveTrack(track.id, "up")}
+                        disabled={i === 0}
+                        className="w-6 h-6 flex items-center justify-center rounded text-muted-foreground hover:text-foreground disabled:opacity-20 opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <ChevronUp className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => handleMoveTrack(track.id, "down")}
+                        disabled={i === tracks.length - 1}
+                        className="w-6 h-6 flex items-center justify-center rounded text-muted-foreground hover:text-foreground disabled:opacity-20 opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <ChevronDown className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => handleRemoveTrack(track.id)}
+                        className="w-6 h-6 flex items-center justify-center rounded text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
             ))
           )}
