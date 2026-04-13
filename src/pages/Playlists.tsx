@@ -27,6 +27,7 @@ const Playlists = () => {
   } = useLikedSongClusters();
 
   const [selectedCluster, setSelectedCluster] = useState<LikedSongCluster | null>(null);
+  const [editingCluster, setEditingCluster] = useState<LikedSongCluster | null>(null);
   const [exportingId, setExportingId] = useState<string | null>(null);
 
   const handleAnalyze = async () => {
