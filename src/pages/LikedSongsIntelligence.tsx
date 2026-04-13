@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { Brain, Heart, Loader2, Music, RefreshCw, Sparkles, Headphones, ChevronLeft, Play } from "lucide-react";
 import AppLayout from "@/components/app/AppLayout";
 import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
 import { useAuth } from "@/hooks/use-auth";
 import { useLikedSongClusters, type LikedSongCluster } from "@/hooks/use-liked-song-clusters";
 import { toast } from "sonner";
@@ -17,6 +18,7 @@ const LikedSongsIntelligence = () => {
     hasAnalyzed,
     error,
     likedCount,
+    progress,
     runAnalysis,
   } = useLikedSongClusters();
 
@@ -212,7 +214,7 @@ const LikedSongsIntelligence = () => {
           </div>
         )}
 
-        {/* Loading */}
+        {/* Loading / Analyzing with progress */}
         {(loading || analyzing) && !hasAnalyzed && (
           <div className="flex flex-col items-center justify-center py-20 gap-4">
             <div className="relative">
@@ -221,9 +223,26 @@ const LikedSongsIntelligence = () => {
             </div>
             <div className="text-center">
               <p className="font-heading text-lg mb-1">
-                {analyzing ? "Curating your playlists…" : "Loading playlists…"}
+                {analyzing
+                  ? progress.phase === "clustering"
+                    ? "Clustering your library…"
+                    : progress.phase === "tagging"
+                    ? "Analyzing songs…"
+                    : "Curating your playlists…"
+                  : "Loading playlists…"}
               </p>
-              <p className="text-sm text-muted-foreground max-w-md">
+              {analyzing && progress.totalSongs > 0 && (
+                <div className="max-w-xs mx-auto mt-3 space-y-2">
+                  <Progress
+                    value={progress.totalSongs > 0 ? (progress.totalAnalyzed / progress.totalSongs) * 100 : 0}
+                    className="h-2"
+                  />
+                  <p className="text-sm font-medium text-accent">
+                    {progress.totalAnalyzed} of {progress.totalSongs} songs analyzed
+                  </p>
+                </div>
+              )}
+              <p className="text-sm text-muted-foreground max-w-md mt-2">
                 {analyzing
                   ? "Tempo AI is analyzing mood, atmosphere, energy, production style, and sonic identity across your liked songs to build perfectly curated playlists."
                   : "Loading your curated playlists."}
