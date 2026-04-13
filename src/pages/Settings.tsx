@@ -1,35 +1,15 @@
 import AppLayout from "@/components/app/AppLayout";
 import { Button } from "@/components/ui/button";
-import { useState } from "react";
 import { toast } from "sonner";
 import { CheckCircle2 } from "lucide-react";
+import { useConnections } from "@/hooks/use-connections";
+import { useState } from "react";
 
 const Settings = () => {
-  const [spotifyConnected, setSpotifyConnected] = useState(true);
-  const [appleConnected, setAppleConnected] = useState(false);
+  const { connections, connectSpotify, disconnectSpotify, connectApple, disconnectApple, connectingSpotify, connectingApple } = useConnections();
   const [overlapMode, setOverlapMode] = useState(false);
   const [excludeExplicit, setExcludeExplicit] = useState(false);
   const [visibility, setVisibility] = useState<"Private" | "Public">("Private");
-  const [connectingSpotify, setConnectingSpotify] = useState(false);
-  const [connectingApple, setConnectingApple] = useState(false);
-
-  const handleConnectSpotify = () => {
-    setConnectingSpotify(true);
-    setTimeout(() => {
-      setSpotifyConnected(true);
-      setConnectingSpotify(false);
-      toast.success("Spotify connected!");
-    }, 1500);
-  };
-
-  const handleConnectApple = () => {
-    setConnectingApple(true);
-    setTimeout(() => {
-      setAppleConnected(true);
-      setConnectingApple(false);
-      toast.success("Apple Music connected!");
-    }, 1500);
-  };
 
   return (
     <AppLayout>
@@ -49,30 +29,16 @@ const Settings = () => {
                 <div>
                   <p className="text-sm font-medium">Spotify</p>
                   <p className="text-xs text-muted-foreground">
-                    {spotifyConnected ? "jordan.d@email.com" : "Not connected"}
+                    {connections.spotify.connected ? connections.spotify.email : "Not connected"}
                   </p>
                 </div>
               </div>
-              {spotifyConnected ? (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="rounded-lg text-destructive"
-                  onClick={() => {
-                    setSpotifyConnected(false);
-                    toast("Spotify disconnected");
-                  }}
-                >
+              {connections.spotify.connected ? (
+                <Button variant="ghost" size="sm" className="rounded-lg text-destructive" onClick={() => { disconnectSpotify(); toast("Spotify disconnected"); }}>
                   Disconnect
                 </Button>
               ) : (
-                <Button
-                  variant="hero"
-                  size="sm"
-                  className="rounded-lg"
-                  onClick={handleConnectSpotify}
-                  disabled={connectingSpotify}
-                >
+                <Button variant="hero" size="sm" className="rounded-lg" onClick={() => connectSpotify().then(() => toast.success("Spotify connected!"))} disabled={connectingSpotify}>
                   {connectingSpotify ? "Connecting…" : "Connect"}
                 </Button>
               )}
@@ -83,30 +49,16 @@ const Settings = () => {
                 <div>
                   <p className="text-sm font-medium">Apple Music</p>
                   <p className="text-xs text-muted-foreground">
-                    {appleConnected ? "jordan@icloud.com" : "Not connected"}
+                    {connections.apple.connected ? connections.apple.email : "Not connected"}
                   </p>
                 </div>
               </div>
-              {appleConnected ? (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="rounded-lg text-destructive"
-                  onClick={() => {
-                    setAppleConnected(false);
-                    toast("Apple Music disconnected");
-                  }}
-                >
+              {connections.apple.connected ? (
+                <Button variant="ghost" size="sm" className="rounded-lg text-destructive" onClick={() => { disconnectApple(); toast("Apple Music disconnected"); }}>
                   Disconnect
                 </Button>
               ) : (
-                <Button
-                  variant="hero"
-                  size="sm"
-                  className="rounded-lg"
-                  onClick={handleConnectApple}
-                  disabled={connectingApple}
-                >
+                <Button variant="hero" size="sm" className="rounded-lg" onClick={() => connectApple().then(() => toast.success("Apple Music connected!"))} disabled={connectingApple}>
                   {connectingApple ? "Connecting…" : "Connect"}
                 </Button>
               )}
@@ -122,22 +74,8 @@ const Settings = () => {
                   <p className="text-sm font-medium">Overlap Mode</p>
                   <p className="text-xs text-muted-foreground">Allow songs in multiple playlists</p>
                 </div>
-                <button
-                  onClick={() => {
-                    setOverlapMode(!overlapMode);
-                    toast(overlapMode ? "Overlap mode disabled" : "Overlap mode enabled");
-                  }}
-                  className={`w-10 h-6 rounded-full relative cursor-pointer transition-colors ${
-                    overlapMode ? "bg-accent" : "bg-secondary"
-                  }`}
-                  role="switch"
-                  aria-checked={overlapMode}
-                >
-                  <div
-                    className={`w-4 h-4 rounded-full bg-primary-foreground absolute top-1 transition-all ${
-                      overlapMode ? "left-5" : "left-1"
-                    }`}
-                  />
+                <button onClick={() => { setOverlapMode(!overlapMode); toast(overlapMode ? "Overlap mode disabled" : "Overlap mode enabled"); }} className={`w-10 h-6 rounded-full relative cursor-pointer transition-colors ${overlapMode ? "bg-accent" : "bg-secondary"}`} role="switch" aria-checked={overlapMode}>
+                  <div className={`w-4 h-4 rounded-full bg-primary-foreground absolute top-1 transition-all ${overlapMode ? "left-5" : "left-1"}`} />
                 </button>
               </div>
               <div className="flex items-center justify-between">
@@ -145,22 +83,8 @@ const Settings = () => {
                   <p className="text-sm font-medium">Exclude Explicit</p>
                   <p className="text-xs text-muted-foreground">Skip explicit tracks from playlists</p>
                 </div>
-                <button
-                  onClick={() => {
-                    setExcludeExplicit(!excludeExplicit);
-                    toast(excludeExplicit ? "Explicit tracks included" : "Explicit tracks excluded");
-                  }}
-                  className={`w-10 h-6 rounded-full relative cursor-pointer transition-colors ${
-                    excludeExplicit ? "bg-accent" : "bg-secondary"
-                  }`}
-                  role="switch"
-                  aria-checked={excludeExplicit}
-                >
-                  <div
-                    className={`w-4 h-4 rounded-full bg-primary-foreground absolute top-1 transition-all ${
-                      excludeExplicit ? "left-5" : "left-1"
-                    }`}
-                  />
+                <button onClick={() => { setExcludeExplicit(!excludeExplicit); toast(excludeExplicit ? "Explicit tracks included" : "Explicit tracks excluded"); }} className={`w-10 h-6 rounded-full relative cursor-pointer transition-colors ${excludeExplicit ? "bg-accent" : "bg-secondary"}`} role="switch" aria-checked={excludeExplicit}>
+                  <div className={`w-4 h-4 rounded-full bg-primary-foreground absolute top-1 transition-all ${excludeExplicit ? "left-5" : "left-1"}`} />
                 </button>
               </div>
               <div className="flex items-center justify-between">
@@ -168,14 +92,7 @@ const Settings = () => {
                   <p className="text-sm font-medium">Default Playlist Visibility</p>
                   <p className="text-xs text-muted-foreground">Set new playlists to private or public</p>
                 </div>
-                <button
-                  onClick={() => {
-                    const next = visibility === "Private" ? "Public" : "Private";
-                    setVisibility(next);
-                    toast(`Default visibility: ${next}`);
-                  }}
-                  className="text-sm text-accent hover:underline cursor-pointer"
-                >
+                <button onClick={() => { const next = visibility === "Private" ? "Public" : "Private"; setVisibility(next); toast(`Default visibility: ${next}`); }} className="text-sm text-accent hover:underline cursor-pointer">
                   {visibility}
                 </button>
               </div>
@@ -189,12 +106,7 @@ const Settings = () => {
               <CheckCircle2 className="w-4 h-4 text-accent" />
             </div>
             <p className="text-sm opacity-80 mb-4">Unlimited imports, playlists, and exports. Renews Jan 15, 2027.</p>
-            <Button
-              variant="warm"
-              size="sm"
-              className="rounded-lg opacity-60 cursor-not-allowed"
-              disabled
-            >
+            <Button variant="warm" size="sm" className="rounded-lg opacity-60 cursor-not-allowed" disabled>
               Manage Subscription — Coming Soon
             </Button>
           </div>

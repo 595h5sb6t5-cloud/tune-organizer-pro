@@ -2,13 +2,7 @@ import AppLayout from "@/components/app/AppLayout";
 import { samplePlaylists, sampleTracks } from "@/lib/sample-data";
 import { Music, Disc3, Headphones, Activity, TrendingUp, CheckCircle2, AlertCircle } from "lucide-react";
 import { Link } from "react-router-dom";
-
-const stats = [
-  { label: "Imported Tracks", value: "1,247", icon: Music, change: "+38 this week" },
-  { label: "AI Playlists", value: "12", icon: Disc3, change: "4 synced" },
-  { label: "Avg Cohesion", value: "91%", icon: Activity, change: "+3% vs last gen" },
-  { label: "Platforms", value: "Spotify", icon: Headphones, change: "Connected" },
-];
+import { useConnections } from "@/hooks/use-connections";
 
 const genreData = [
   { name: "Indie", pct: 28, color: "bg-accent" },
@@ -29,6 +23,21 @@ const moodData = [
 ];
 
 const Dashboard = () => {
+  const { connections } = useConnections();
+
+  const connectedPlatforms: string[] = [];
+  if (connections.spotify.connected) connectedPlatforms.push("Spotify");
+  if (connections.apple.connected) connectedPlatforms.push("Apple Music");
+  const platformLabel = connectedPlatforms.length > 0 ? connectedPlatforms.join(" + ") : "None";
+  const platformChange = connectedPlatforms.length > 0 ? "Connected" : "Not connected";
+
+  const stats = [
+    { label: "Imported Tracks", value: "1,247", icon: Music, change: "+38 this week" },
+    { label: "AI Playlists", value: "12", icon: Disc3, change: "4 synced" },
+    { label: "Avg Cohesion", value: "91%", icon: Activity, change: "+3% vs last gen" },
+    { label: "Platforms", value: platformLabel, icon: Headphones, change: platformChange },
+  ];
+
   return (
     <AppLayout>
       <div className="max-w-6xl">
@@ -44,11 +53,15 @@ const Dashboard = () => {
             <div key={stat.label} className="p-5 rounded-2xl bg-surface-elevated border border-border/50">
               <div className="flex items-center justify-between mb-3">
                 <stat.icon className="w-5 h-5 text-muted-foreground" />
-                <TrendingUp className="w-3.5 h-3.5 text-accent" />
+                {stat.label === "Platforms" && connectedPlatforms.length === 0 ? (
+                  <AlertCircle className="w-3.5 h-3.5 text-destructive" />
+                ) : (
+                  <TrendingUp className="w-3.5 h-3.5 text-accent" />
+                )}
               </div>
               <p className="font-heading text-2xl mb-0.5">{stat.value}</p>
               <p className="text-xs text-muted-foreground">{stat.label}</p>
-              <p className="text-xs text-accent mt-1">{stat.change}</p>
+              <p className={`text-xs mt-1 ${stat.label === "Platforms" && connectedPlatforms.length === 0 ? "text-destructive" : "text-accent"}`}>{stat.change}</p>
             </div>
           ))}
         </div>
