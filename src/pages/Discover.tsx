@@ -1,6 +1,6 @@
 import AppLayout from "@/components/app/AppLayout";
 import { type Recommendation } from "@/lib/sample-data";
-import { Sparkles, Plus, X, Bookmark, Loader2, RefreshCw, Gem, TrendingUp, Music, Headphones } from "lucide-react";
+import { Sparkles, Plus, X, Bookmark, Loader2, RefreshCw, Gem, TrendingUp, Music, Headphones, Brain, ChevronDown, ChevronUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
 import { useState, useEffect } from "react";
@@ -294,6 +294,7 @@ function RecCard({
   const tier = tierConfig[rec.popularityTier || "mid"];
   const TierIcon = tier.icon;
   const [showDetails, setShowDetails] = useState(false);
+  const [showExplanation, setShowExplanation] = useState(false);
   const breakdown = rec.compatibilityBreakdown;
 
   return (
@@ -317,6 +318,18 @@ function RecCard({
             </div>
           </div>
           <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{rec.reason}</p>
+
+          {/* Why this song? */}
+          {rec.aiExplanation && (
+            <button
+              onClick={() => setShowExplanation(!showExplanation)}
+              className="flex items-center gap-1 mt-1.5 text-[11px] font-medium text-accent hover:text-accent/80 transition-colors"
+            >
+              <Brain className="w-3 h-3" />
+              Why this song?
+              {showExplanation ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+            </button>
+          )}
 
           <div className="flex items-center justify-between mt-2">
             <div className="flex gap-1 flex-wrap">
@@ -351,6 +364,19 @@ function RecCard({
           </div>
         </div>
       </div>
+
+      {/* AI Explanation panel */}
+      {showExplanation && rec.aiExplanation && (
+        <div className="px-4 pb-3 pt-0">
+          <div className="rounded-xl bg-accent/5 border border-accent/10 p-3">
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <Brain className="w-3.5 h-3.5 text-accent" />
+              <span className="text-[11px] font-semibold text-accent uppercase tracking-wider">Tempo AI Insight</span>
+            </div>
+            <p className="text-xs text-foreground/80 leading-relaxed">{rec.aiExplanation}</p>
+          </div>
+        </div>
+      )}
 
       {showDetails && breakdown && (
         <div className="px-4 pb-4 pt-0 border-t border-border/30">

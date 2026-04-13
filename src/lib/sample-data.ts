@@ -28,6 +28,7 @@ export interface Recommendation {
   track: Track;
   matchScore: number;
   reason: string;
+  aiExplanation?: string;
   moodTags: string[];
   targetPlaylistId?: string;
   targetPlaylistName?: string;

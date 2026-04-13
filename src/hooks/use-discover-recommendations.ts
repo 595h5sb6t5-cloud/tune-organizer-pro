@@ -115,6 +115,7 @@ export function useDiscoverRecommendations() {
             },
             matchScore: r.matchScore || 80,
             reason: r.reason || "AI-selected for you",
+            aiExplanation: r.aiExplanation || null,
             moodTags: r.moodTags || [],
             popularityTier: r.popularityTier || "mid",
             compatibilityBreakdown: r.compatibilityBreakdown || null,

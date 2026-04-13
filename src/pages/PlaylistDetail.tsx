@@ -1,7 +1,7 @@
 import AppLayout from "@/components/app/AppLayout";
 import { Button } from "@/components/ui/button";
 import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, RefreshCw, Plus, X, Bookmark, Sparkles, Loader2, Gem, TrendingUp, Music, Brain, Eye, EyeOff, Zap, Clock, Palette, Target, Shield, Lightbulb, MapPin, Mic2, Radio, Layers, Star } from "lucide-react";
+import { ArrowLeft, RefreshCw, Plus, X, Bookmark, Sparkles, Loader2, Gem, TrendingUp, Music, Brain, Eye, EyeOff, Zap, Clock, Palette, Target, Shield, Lightbulb, MapPin, Mic2, Radio, Layers, Star, ChevronDown, ChevronUp } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
@@ -34,6 +34,7 @@ interface VibeRecommendation {
   album: string;
   matchScore: number;
   reason: string;
+  aiExplanation: string | null;
   moodTags: string[];
   insertAfterTrack: string | null;
   insertExplanation: string | null;
@@ -441,6 +442,7 @@ const PlaylistDetail = () => {
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
   const [expandedRecId, setExpandedRecId] = useState<string | null>(null);
+  const [explainedRecId, setExplainedRecId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!id || !user) return;
@@ -499,6 +501,7 @@ const PlaylistDetail = () => {
         album: r.album || "Unknown",
         matchScore: r.matchScore || 80,
         reason: r.reason || "Fits the playlist identity",
+        aiExplanation: r.aiExplanation || null,
         moodTags: r.moodTags || [],
         insertAfterTrack: r.insertAfterTrack || null,
         insertExplanation: r.insertExplanation || null,
@@ -678,6 +681,29 @@ const PlaylistDetail = () => {
                               <div className="flex items-start gap-1.5 mt-2">
                                 <Radio className="w-3 h-3 flex-shrink-0 mt-0.5" style={{ color: vibeColor }} />
                                 <p className="text-[11px] italic" style={{ color: vibeColor + "cc" }}>{rec.sonicConnection}</p>
+                              </div>
+                            )}
+
+                            {/* Why this song? */}
+                            {rec.aiExplanation && (
+                              <button
+                                onClick={() => setExplainedRecId(explainedRecId === rec.id ? null : rec.id)}
+                                className="flex items-center gap-1 mt-2 text-[11px] font-medium hover:opacity-80 transition-colors"
+                                style={{ color: vibeColor }}
+                              >
+                                <Brain className="w-3 h-3" />
+                                Why this song?
+                                {explainedRecId === rec.id ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                              </button>
+                            )}
+
+                            {explainedRecId === rec.id && rec.aiExplanation && (
+                              <div className="mt-2 rounded-xl border p-3" style={{ backgroundColor: vibeColor + "08", borderColor: vibeColor + "20" }}>
+                                <div className="flex items-center gap-1.5 mb-1.5">
+                                  <Brain className="w-3.5 h-3.5" style={{ color: vibeColor }} />
+                                  <span className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: vibeColor }}>Tempo AI Insight</span>
+                                </div>
+                                <p className="text-xs text-foreground/80 leading-relaxed">{rec.aiExplanation}</p>
                               </div>
                             )}
 
