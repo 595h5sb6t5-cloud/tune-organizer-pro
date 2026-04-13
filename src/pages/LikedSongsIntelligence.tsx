@@ -254,15 +254,9 @@ const LikedSongsIntelligence = () => {
             </div>
             <div className="text-center">
               <p className="font-heading text-lg mb-1">
-                {analyzing
-                  ? progress.phase === "clustering"
-                    ? "Clustering your library…"
-                    : progress.phase === "tagging"
-                    ? "Analyzing songs…"
-                    : "Curating your playlists…"
-                  : "Loading playlists…"}
+                {analyzing ? (progress.statusMessage || "Working…") : "Loading playlists…"}
               </p>
-              {analyzing && progress.totalSongs > 0 && (
+              {analyzing && progress.totalSongs > 0 && progress.phase === "tagging" && (
                 <div className="max-w-xs mx-auto mt-3 space-y-2">
                   <Progress
                     value={progress.totalSongs > 0 ? (progress.totalAnalyzed / progress.totalSongs) * 100 : 0}
@@ -273,9 +267,25 @@ const LikedSongsIntelligence = () => {
                   </p>
                 </div>
               )}
+              {analyzing && progress.phase === "assigning" && progress.totalSongs > 0 && (
+                <div className="max-w-xs mx-auto mt-3 space-y-2">
+                  <Progress
+                    value={(progress.assignedCount / progress.totalSongs) * 100}
+                    className="h-2"
+                  />
+                  <p className="text-sm font-medium text-accent">
+                    {progress.assignedCount} of {progress.totalSongs} songs assigned
+                  </p>
+                </div>
+              )}
+              {analyzing && progress.worldsCount > 0 && progress.phase !== "tagging" && (
+                <p className="text-xs text-muted-foreground mt-2">
+                  {progress.worldsCount} sonic worlds discovered
+                </p>
+              )}
               <p className="text-sm text-muted-foreground max-w-md mt-2">
                 {analyzing
-                  ? "Tempo AI is analyzing mood, atmosphere, energy, production style, and sonic identity across your liked songs to build perfectly curated playlists."
+                  ? "Tempo AI is building precise sonic worlds from your full Spotify ecosystem — playlists, albums, artists, and every song's deep musical identity."
                   : "Loading your curated playlists."}
               </p>
             </div>
