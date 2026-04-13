@@ -6,11 +6,13 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { useConnections } from "@/hooks/use-connections";
+import { useSpotify } from "@/hooks/use-spotify";
 
 type SyncState = Record<string, Playlist["syncStatus"]>;
 
 const Sync = () => {
-  const { connections, connectSpotify, connectApple, disconnectSpotify, disconnectApple, connectingSpotify, connectingApple } = useConnections();
+  const { connections } = useConnections();
+  const { startAuth, disconnect, status: spotifyStatus } = useSpotify();
   const [syncStates, setSyncStates] = useState<SyncState>(
     Object.fromEntries(samplePlaylists.map((pl) => [pl.id, pl.syncStatus]))
   );
@@ -40,17 +42,16 @@ const Sync = () => {
     }, 1500);
   };
 
-  const noExportPlatform = !connections.spotify.connected && !connections.apple.connected;
+  const noExportPlatform = !connections.spotify.connected;
 
   return (
     <AppLayout>
       <div className="max-w-3xl">
         <div className="mb-8">
           <h1 className="font-heading text-3xl mb-1">Sync & Export</h1>
-          <p className="text-muted-foreground">Manage your playlist exports to Spotify and Apple Music.</p>
+          <p className="text-muted-foreground">Manage your playlist exports to Spotify.</p>
         </div>
 
-        {/* Connected platforms */}
         <div className="space-y-3 mb-6">
           <div className="p-5 rounded-2xl bg-surface-elevated border border-border/50 flex items-center justify-between">
             <div className="flex items-center gap-4">
@@ -63,34 +64,13 @@ const Sync = () => {
             {connections.spotify.connected ? (
               <div className="flex items-center gap-3">
                 <span className="inline-flex items-center gap-1 text-sm text-accent"><CheckCircle2 className="w-4 h-4" /> Connected</span>
-                <Button variant="ghost" size="sm" className="rounded-lg text-destructive" onClick={() => { disconnectSpotify(); toast("Spotify disconnected"); }}>
+                <Button variant="ghost" size="sm" className="rounded-lg text-destructive" onClick={async () => { await disconnect(); toast("Spotify disconnected"); }}>
                   Disconnect
                 </Button>
               </div>
             ) : (
-              <Button variant="hero" size="sm" className="rounded-lg" onClick={() => connectSpotify().then(() => toast.success("Spotify connected!"))} disabled={connectingSpotify}>
-                {connectingSpotify ? "Connecting…" : "Connect"}
-              </Button>
-            )}
-          </div>
-          <div className="p-5 rounded-2xl bg-surface-elevated border border-border/50 flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 rounded-xl bg-[#FC3C44]/10 flex items-center justify-center text-xl">🍎</div>
-              <div>
-                <p className="font-medium">Apple Music</p>
-                <p className="text-sm text-muted-foreground">{connections.apple.connected ? `Connected as ${connections.apple.email}` : "Not connected"}</p>
-              </div>
-            </div>
-            {connections.apple.connected ? (
-              <div className="flex items-center gap-3">
-                <span className="inline-flex items-center gap-1 text-sm text-accent"><CheckCircle2 className="w-4 h-4" /> Connected</span>
-                <Button variant="ghost" size="sm" className="rounded-lg text-destructive" onClick={() => { disconnectApple(); toast("Apple Music disconnected"); }}>
-                  Disconnect
-                </Button>
-              </div>
-            ) : (
-              <Button variant="hero" size="sm" className="rounded-lg" onClick={() => connectApple().then(() => toast.success("Apple Music connected!"))} disabled={connectingApple}>
-                {connectingApple ? "Connecting…" : "Connect"}
+              <Button variant="hero" size="sm" className="rounded-lg" onClick={() => void startAuth("/sync")}>
+                Connect
               </Button>
             )}
           </div>
@@ -103,7 +83,6 @@ const Sync = () => {
           </div>
         )}
 
-        {/* Playlist sync list */}
         <div className="space-y-3">
           {samplePlaylists.map((pl) => {
             const status = syncStates[pl.id];

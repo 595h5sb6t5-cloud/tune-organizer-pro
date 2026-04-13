@@ -72,8 +72,8 @@ const PlaylistDetail = () => {
   const visibleRecs = aiRecs.filter((r) => !dismissedIds.has(r.id) && !acceptedIds.has(r.id));
   const allTracks = [...localTracks, ...acceptedRecs.map((r) => r.track)];
 
-  const hasConnectedPlatform = connections.spotify.connected || connections.apple.connected;
-  const syncTarget = connections.spotify.connected ? "Spotify" : "Apple Music";
+  const hasConnectedPlatform = connections.spotify.connected;
+  const syncTarget = "Spotify";
 
   const handleSync = () => {
     if (!hasConnectedPlatform) {
