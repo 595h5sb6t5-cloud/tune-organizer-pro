@@ -47,6 +47,15 @@ const Playlists = () => {
   };
 
   const handleExportToSpotify = async (cluster: LikedSongCluster) => {
+    if (!cluster.tracks?.length) {
+      toast.error("Cannot export", { description: "This playlist has no tracks. Try editing it first." });
+      return;
+    }
+    const trackIds = cluster.tracks.map(t => t.spotify_track_id).filter(Boolean);
+    if (!trackIds.length) {
+      toast.error("Cannot export", { description: "No valid track IDs found in this playlist." });
+      return;
+    }
     setExportingId(cluster.id);
     try {
       const res = await supabase.functions.invoke("spotify-export-playlist", {
@@ -54,7 +63,7 @@ const Playlists = () => {
           cluster_id: cluster.id,
           name: cluster.name,
           description: cluster.vibe_description || cluster.description || `Curated by Tempo AI — ${cluster.mood_tags.join(", ")}`,
-          track_ids: cluster.tracks.map(t => t.spotify_track_id),
+          track_ids: trackIds,
         },
       });
       if (res.error) throw new Error(res.error.message);
