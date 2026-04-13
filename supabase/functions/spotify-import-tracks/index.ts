@@ -541,7 +541,7 @@ Deno.serve(async (req) => {
 
     const isFullSync = shouldDoFullSync(connection, forceFullSync);
     const syncMode = isFullSync ? "full" : "incremental";
-    console.info("[spotify-import-tracks] starting sync", { user_id: user.id, mode: syncMode, scope: syncScope });
+    console.log("[spotify-import-tracks] === STARTING SYNC ===", { user_id: user.id, mode: syncMode, scope: syncScope, forceFullSync });
 
     // Update sync status
     await adminClient.from("spotify_connections").update({
