@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ConnectionProvider } from "./hooks/use-connections";
 import { AuthProvider } from "./hooks/use-auth";
+import { FloatingPlayer } from "./components/app/FloatingPlayer";
 import Index from "./pages/Index.tsx";
 import Auth from "./pages/Auth.tsx";
 import Dashboard from "./pages/Dashboard.tsx";
@@ -42,6 +43,7 @@ const App = () => (
           <Route path="/spotify-callback" element={<SpotifyCallback />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
+        <FloatingPlayer />
       </BrowserRouter>
     </TooltipProvider>
     </ConnectionProvider>
