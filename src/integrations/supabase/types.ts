@@ -212,6 +212,89 @@ export type Database = {
         }
         Relationships: []
       }
+      playlist_vibe_analysis: {
+        Row: {
+          ai_explanation: string | null
+          analysis_model: string | null
+          cohesion_description: string | null
+          created_at: string
+          energy_summary: string | null
+          era_summary: string | null
+          id: string
+          language_summary: string | null
+          listening_context: string | null
+          mood_summary: string | null
+          playlist_id: string
+          primary_vibe: string
+          production_summary: string | null
+          secondary_vibes: string[] | null
+          structural_flow: string | null
+          tempo_summary: string | null
+          updated_at: string
+          user_id: string
+          user_intent: string | null
+          vibe_color_hex: string | null
+          what_belongs: string | null
+          what_breaks_it: string | null
+        }
+        Insert: {
+          ai_explanation?: string | null
+          analysis_model?: string | null
+          cohesion_description?: string | null
+          created_at?: string
+          energy_summary?: string | null
+          era_summary?: string | null
+          id?: string
+          language_summary?: string | null
+          listening_context?: string | null
+          mood_summary?: string | null
+          playlist_id: string
+          primary_vibe: string
+          production_summary?: string | null
+          secondary_vibes?: string[] | null
+          structural_flow?: string | null
+          tempo_summary?: string | null
+          updated_at?: string
+          user_id: string
+          user_intent?: string | null
+          vibe_color_hex?: string | null
+          what_belongs?: string | null
+          what_breaks_it?: string | null
+        }
+        Update: {
+          ai_explanation?: string | null
+          analysis_model?: string | null
+          cohesion_description?: string | null
+          created_at?: string
+          energy_summary?: string | null
+          era_summary?: string | null
+          id?: string
+          language_summary?: string | null
+          listening_context?: string | null
+          mood_summary?: string | null
+          playlist_id?: string
+          primary_vibe?: string
+          production_summary?: string | null
+          secondary_vibes?: string[] | null
+          structural_flow?: string | null
+          tempo_summary?: string | null
+          updated_at?: string
+          user_id?: string
+          user_intent?: string | null
+          vibe_color_hex?: string | null
+          what_belongs?: string | null
+          what_breaks_it?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "playlist_vibe_analysis_playlist_id_fkey"
+            columns: ["playlist_id"]
+            isOneToOne: false
+            referencedRelation: "spotify_playlists"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           apple_music_connected: boolean
