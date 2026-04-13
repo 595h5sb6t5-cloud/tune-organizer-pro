@@ -531,8 +531,11 @@ export type Database = {
           created_at: string
           expires_at: string
           id: string
+          last_full_sync_at: string | null
+          last_incremental_sync_at: string | null
           refresh_token: string
           spotify_user_id: string | null
+          sync_status: string | null
           updated_at: string
           user_id: string
         }
@@ -541,8 +544,11 @@ export type Database = {
           created_at?: string
           expires_at: string
           id?: string
+          last_full_sync_at?: string | null
+          last_incremental_sync_at?: string | null
           refresh_token: string
           spotify_user_id?: string | null
+          sync_status?: string | null
           updated_at?: string
           user_id: string
         }
@@ -551,8 +557,50 @@ export type Database = {
           created_at?: string
           expires_at?: string
           id?: string
+          last_full_sync_at?: string | null
+          last_incremental_sync_at?: string | null
           refresh_token?: string
           spotify_user_id?: string | null
+          sync_status?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      spotify_followed_artists: {
+        Row: {
+          artist_name: string
+          created_at: string
+          follower_count: number | null
+          genres: string[] | null
+          id: string
+          image_url: string | null
+          popularity: number | null
+          spotify_artist_id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          artist_name: string
+          created_at?: string
+          follower_count?: number | null
+          genres?: string[] | null
+          id?: string
+          image_url?: string | null
+          popularity?: number | null
+          spotify_artist_id: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          artist_name?: string
+          created_at?: string
+          follower_count?: number | null
+          genres?: string[] | null
+          id?: string
+          image_url?: string | null
+          popularity?: number | null
+          spotify_artist_id?: string
           updated_at?: string
           user_id?: string
         }
