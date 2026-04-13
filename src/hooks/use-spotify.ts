@@ -223,6 +223,18 @@ export function useSpotify() {
     clearPendingSpotifyCallback();
 
     try {
+      // Verify session is still valid before calling the edge function
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError || !sessionData.session?.access_token) {
+        logSpotifyOAuth("session_expired_before_start", {
+          failure_type: "expired_app_session",
+          error: sessionError?.message ?? "No active session",
+        });
+        writePendingSpotifyConnect({ returnPath, savedAt: Date.now() });
+        window.location.assign("/auth?connect=spotify");
+        return;
+      }
+
       const configRes = await supabase.functions.invoke("spotify-auth-start", {
         body: { return_path: returnPath },
       });
