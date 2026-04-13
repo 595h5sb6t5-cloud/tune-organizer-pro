@@ -431,6 +431,7 @@ const PlaylistDetail = () => {
   const { id } = useParams();
   const { user } = useAuth();
   const { knownTrackIds, isKnown } = useKnownTracks();
+  const { enrich } = useSpotifySearch();
 
   const [playlist, setPlaylist] = useState<SpotifyPlaylistInfo | null>(null);
   const [tracks, setTracks] = useState<PlaylistTrack[]>([]);
@@ -443,6 +444,7 @@ const PlaylistDetail = () => {
   const [recsLoaded, setRecsLoaded] = useState(false);
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
+  const [recSpotifyData, setRecSpotifyData] = useState<Map<string, SpotifyTrackInfo>>(new Map());
   const [expandedRecId, setExpandedRecId] = useState<string | null>(null);
   const [explainedRecId, setExplainedRecId] = useState<string | null>(null);
 
