@@ -315,6 +315,7 @@ export function useDashboardStats() {
       setStats({
         totalLikedSongs: likedCountRes.count ?? 0,
         totalPlaylists: playlistCountRes.count ?? 0,
+        totalSavedAlbums: albumCountRes.count ?? 0,
         totalFollowedArtists: followedArtistCountRes.count ?? 0,
         totalAnalyzedSongs: analyzedCountRes.count ?? 0,
         totalClusters: clusterCountRes.count ?? 0,
