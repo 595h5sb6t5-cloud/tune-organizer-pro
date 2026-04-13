@@ -58,10 +58,6 @@ function formatAudioFeatures(s: any): string {
   return parts.length > 0 ? ` [${parts.join(", ")}]` : "";
 }
 
-/**
- * Fetches ALL liked songs for a user across pagination boundaries.
- * Supabase default limit is 1000, so we paginate with .range().
- */
 async function fetchAllLikedSongs(client: any, userId: string, columns: string): Promise<any[]> {
   const allRows: any[] = [];
   const pageSize = 1000;
@@ -85,6 +81,203 @@ async function fetchAllLikedSongs(client: any, userId: string, columns: string):
   return allRows;
 }
 
+// ── Deep analysis tags for tag_only mode ──
+
+const TAG_SYSTEM_PROMPT = `You are Tempo — a world-class music analyst with the ear of a mastering engineer, the soul of a DJ, and the vocabulary of a musicologist.
+
+Your job is to analyze each song across DEEP musical dimensions that go far beyond genre and BPM.
+
+For each song, you must determine:
+
+1. **mood** — The specific emotional shade (not just "happy/sad" — be precise: "wistful nostalgia", "defiant confidence", "melancholic euphoria")
+2. **energy** — Overall energy level
+3. **genre_tags** — 2-4 specific subgenre tags (e.g. "neo-soul", "trap-influenced R&B", "shoegaze-adjacent dream pop")
+4. **tempo_estimate** — Rhythmic speed category
+5. **era** — Sonic era influence (not just release year — what era does it SOUND like?)
+6. **atmosphere** — The spatial/environmental quality ("cavernous reverb cathedral", "tight dry studio", "open-air festival")
+7. **production_style** — Production philosophy ("lo-fi tape-saturated", "hyper-polished maximalist", "organic analog warmth")
+8. **groove_feel** — How the rhythm FEELS ("laid-back swing", "driving four-on-the-floor", "syncopated bounce", "freeform rubato", "trap hi-hat stutter")
+9. **vocal_style** — Vocal character ("breathy intimate whisper", "powerful belt", "nasal indie drawl", "auto-tuned melodic rap", "no vocals/instrumental")
+10. **sonic_brightness** — Dark-to-bright spectrum ("very dark", "dark", "neutral", "bright", "very bright")
+11. **spatial_quality** — Mix space ("intimate/close", "wide/spacious", "layered/dense", "sparse/minimal", "cavernous/reverberant")
+12. **rhythmic_identity** — The groove DNA ("straight rigid", "swung lazy", "polyrhythmic complex", "halftime heavy", "broken/glitchy", "organic human")
+13. **listening_context** — Best listening scenario ("late night alone", "driving highway", "morning coffee", "workout intensity", "dinner party background", "deep focus work")
+14. **sonic_texture** — The tactile quality ("warm analog", "cold digital", "gritty distorted", "crystalline clean", "fuzzy saturated", "airy ethereal")
+15. **intimacy_scale** — Scale of the sound ("whisper-close intimate", "bedroom personal", "club communal", "arena massive", "stadium epic")
+16. **tension_level** — Tension vs release ("deeply relaxed", "gently flowing", "building tension", "high tension", "cathartic release")
+
+RULES:
+- Be SPECIFIC. "Chill" is not a mood. "Hazy 3am contentment with a tinge of loneliness" is.
+- Reference actual sonic qualities you can hear, not marketing buzzwords.
+- Two songs in the same genre can have completely different groove_feel, spatial_quality, and tension — capture those differences.
+- Each tag must be precise enough that songs with the SAME tag would genuinely sound right next to each other.`;
+
+const TAG_TOOL = {
+  type: "function" as const,
+  function: {
+    name: "tag_songs",
+    description: "Save deep musical analysis tags for each song",
+    parameters: {
+      type: "object",
+      properties: {
+        songs: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              index: { type: "number", description: "1-indexed song number" },
+              genre_tags: { type: "array", items: { type: "string" } },
+              mood: { type: "string" },
+              energy: { type: "string", enum: ["low", "medium-low", "medium", "medium-high", "high"] },
+              tempo_estimate: { type: "string" },
+              era: { type: "string" },
+              atmosphere: { type: "string" },
+              production_style: { type: "string" },
+              groove_feel: { type: "string" },
+              vocal_style: { type: "string" },
+              sonic_brightness: { type: "string", enum: ["very dark", "dark", "neutral", "bright", "very bright"] },
+              spatial_quality: { type: "string" },
+              rhythmic_identity: { type: "string" },
+              listening_context: { type: "string" },
+              sonic_texture: { type: "string" },
+              intimacy_scale: { type: "string" },
+              tension_level: { type: "string" },
+            },
+            required: ["index", "mood", "energy", "groove_feel", "vocal_style", "sonic_brightness", "spatial_quality", "rhythmic_identity", "listening_context", "sonic_texture", "intimacy_scale", "tension_level"],
+          },
+        },
+      },
+      required: ["songs"],
+    },
+  },
+};
+
+// ── Clustering system prompt — the heart of playlist generation ──
+
+const CLUSTER_SYSTEM_PROMPT = `You are Tempo — a world-class music curator with the sensibility of a vinyl-obsessed DJ, the ear of a mastering engineer, and the soul of someone who has spent decades building perfect listening experiences.
+
+YOUR MISSION: Group these songs into playlists that each feel like ONE COHERENT SONIC WORLD. Every playlist must pass the "would I actually listen to this front-to-back without skipping?" test.
+
+═══════════════════════════════════════════════════════
+WHAT MAKES A GREAT PLAYLIST (in order of importance):
+═══════════════════════════════════════════════════════
+
+1. **SONIC WORLD UNITY** — Every song must live in the same sonic universe. Think of it like a room: the reverb space, the warmth of the air, the weight of the bass, the texture of the surfaces. Songs that share a sonic world feel like they were recorded in the same emotional space.
+
+2. **GROOVE & RHYTHMIC IDENTITY** — The rhythmic DNA must be compatible. This is NOT about BPM. A lazy swung 95 BPM groove and a rigid driving 95 BPM groove belong in DIFFERENT playlists even though they're the same tempo. What matters: swing feel, bounce character, pulse weight, hi-hat patterns, rhythmic density, groove pocket.
+
+3. **EMOTIONAL THREAD** — Not just "happy" or "sad" but the SPECIFIC shade of emotion. "Wistful nostalgia on a rainy afternoon" is different from "bittersweet memories of summer." Songs must share the same emotional specificity.
+
+4. **PRODUCTION IDENTITY** — The production philosophy must match. Lo-fi tape saturation doesn't sit next to crystal-clean digital production. Analog warmth doesn't mix with sterile precision. Bedroom intimacy doesn't pair with arena bombast.
+
+5. **VOCAL TEXTURE COMPATIBILITY** — Breathy whispers don't pair with powerful belts. Auto-tuned melodic vocals don't sit next to raw punk screams. Vocal delivery is part of the sonic world.
+
+6. **DARKNESS / BRIGHTNESS** — The tonal palette must be consistent. Dark, moody songs don't mix with bright, airy songs within the same playlist.
+
+7. **SPATIAL CONSISTENCY** — Intimate close-mic recordings don't sit next to massive reverb-drenched stadium productions.
+
+8. **TENSION & ENERGY BEHAVIOR** — Not just energy level, but how energy behaves. Building tension is different from sustained intensity. Cathartic release is different from steady cruising.
+
+9. **LISTENING CONTEXT** — A great playlist serves a specific moment. "Late night driving" is different from "Sunday morning kitchen." Songs must serve the same moment.
+
+═══════════════════════════════════════════════════════
+WHAT DOES NOT MAKE A GOOD PLAYLIST:
+═══════════════════════════════════════════════════════
+
+❌ Grouping by broad genre ("all the rap songs", "all the rock songs")
+❌ Grouping by BPM range ("everything between 100-120 BPM")
+❌ Grouping by artist ("all songs by this artist go together")
+❌ Grouping by release era alone ("all 2020s songs")
+❌ Grouping by language alone ("all Spanish songs")
+❌ Creating catch-all playlists for songs that don't fit elsewhere
+❌ Forcing every song into a playlist — if a song doesn't strongly belong anywhere, it's better to leave it in an "Uncategorized" overflow than to pollute a focused playlist
+
+═══════════════════════════════════════════════════════
+STRICT COHERENCE RULES:
+═══════════════════════════════════════════════════════
+
+Before placing a song in a playlist, it must pass AT LEAST 7 of these 10 checks:
+✓ Same sonic world (reverb space, tonal warmth, frequency balance)
+✓ Compatible groove feel (swing, bounce, pocket weight)
+✓ Same emotional shade (specific, not broad)
+✓ Compatible production philosophy (lo-fi/hi-fi, analog/digital, raw/polished)
+✓ Compatible vocal texture (style, intensity, treatment)
+✓ Same darkness/brightness spectrum
+✓ Same spatial scale (intimate vs. massive)
+✓ Compatible tension behavior (building vs. releasing vs. sustaining)
+✓ Same listening context (when/where you'd play this)
+✓ Transition compatibility (would these songs flow naturally in sequence?)
+
+A song that only matches on 4-5 dimensions does NOT belong in that playlist, even if it's the "closest" match.
+
+═══════════════════════════════════════════════════════
+BPM & GENRE RULES:
+═══════════════════════════════════════════════════════
+
+- BPM is a WEAK supporting signal. Two songs at 90 BPM can feel completely different rhythmically.
+- Genre is a WEAK supporting signal. Two "hip-hop" songs can belong in completely different sonic worlds.
+- NEVER use BPM buckets as a primary clustering method.
+- NEVER use genre labels as a primary clustering method.
+- Same-BPM songs go together ONLY if they also share groove feel, sonic world, production identity, and emotional tone.
+- Same-genre songs go together ONLY if they share sonic world, rhythmic identity, and emotional compatibility.
+
+═══════════════════════════════════════════════════════
+LANGUAGE RULES:
+═══════════════════════════════════════════════════════
+
+- Detect the language of each track.
+- English songs cluster with English songs by default.
+- Spanish songs cluster with Spanish songs by default.
+- Do NOT mix languages in the same playlist unless the sonic world is SO unified that language becomes irrelevant (rare).
+- Language mixing should be the EXCEPTION, not the default.
+
+═══════════════════════════════════════════════════════
+ARTIST RULES:
+═══════════════════════════════════════════════════════
+
+- NEVER assume songs by the same artist belong in the same playlist.
+- An artist can have tracks that span multiple sonic worlds — classify EACH track individually.
+- A single album can contain songs for different playlists.
+
+═══════════════════════════════════════════════════════
+PLAYLIST QUALITY STANDARDS:
+═══════════════════════════════════════════════════════
+
+Each playlist MUST feel like:
+- One coherent world you can inhabit for 30-60 minutes
+- One specific mood/emotion sustained throughout
+- One consistent production quality and sonic texture
+- One rhythmic logic that doesn't jolt you out of the flow
+- A listening experience with ZERO skips
+
+PREFER: Fewer, smaller, stronger playlists (5-25 songs each)
+AVOID: Large, broad, catch-all playlists (30+ songs of mixed character)
+
+If you have 15 dark moody songs that split into two distinct sub-worlds (e.g., "dark ambient electronic" vs "dark acoustic folk"), make TWO playlists of 7-8 songs, not one playlist of 15.
+
+═══════════════════════════════════════════════════════
+NAMING:
+═══════════════════════════════════════════════════════
+
+Names must be evocative, aesthetic, 2-4 words. Reflect the SONIC CHARACTER, not the genre.
+GOOD: "Midnight Drive", "Velvet Haze", "Golden Groove", "Soft Horizon", "Neon Cathedral", "Smoke & Amber"
+BAD: "Pop Mix", "Rap Songs", "Rock Playlist", "Spanish Mix", "Chill Vibes"
+
+═══════════════════════════════════════════════════════
+OUTPUT REQUIREMENTS:
+═══════════════════════════════════════════════════════
+
+Create 5-25 playlists (scale with library size). Every song must appear in exactly one playlist.
+For each playlist, provide:
+- Evocative name
+- Specific vibe description referencing sonic qualities
+- Detailed AI explanation referencing production, rhythm, mood, and texture
+- Mood tags that are SPECIFIC (not "chill" — say "hazy late-night contentment")
+- Energy level, tempo range, era range
+- Audio feature averages (from the Spotify data provided)
+
+Return ONLY valid JSON via the save_playlists function.`;
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -107,9 +300,8 @@ Deno.serve(async (req) => {
     const { data: { user }, error: userError } = await supabase.auth.getUser();
     if (userError || !user) return json({ error: "Invalid session" }, 401);
 
-    // Parse request body for batch parameters
     let batchOffset = 0;
-    let batchSize = 200; // max songs per AI call — fits context window well
+    let batchSize = 200;
     let mode: "cluster" | "tag_only" = "cluster";
     try {
       const body = await req.json();
@@ -118,7 +310,6 @@ Deno.serve(async (req) => {
       if (body?.mode === "tag_only") mode = "tag_only";
     } catch { /* no body is fine */ }
 
-    // Get total count first
     const { count: totalLikedSongs } = await supabase
       .from("liked_songs")
       .select("id", { count: "exact", head: true })
@@ -129,10 +320,10 @@ Deno.serve(async (req) => {
       return json({ error: "No liked songs found. Import your Spotify library first." }, 400);
     }
 
-    // For clustering mode (first batch only), we fetch ALL songs to cluster them all at once
-    // For tag_only mode, we fetch a specific batch of unanalyzed songs
+    // ═══════════════════════════════════════════
+    // TAG_ONLY MODE — deep per-song analysis
+    // ═══════════════════════════════════════════
     if (mode === "tag_only") {
-      // Fetch a batch of songs that haven't been analyzed yet
       const { data: unanalyzed, error: fetchErr } = await supabase
         .from("liked_songs")
         .select("id, spotify_track_id, track_name, artist_name, album_name, image_url, audio_tempo, audio_energy, audio_valence, audio_danceability, audio_acousticness, audio_instrumentalness, audio_speechiness, audio_loudness, audio_liveness")
@@ -145,7 +336,6 @@ Deno.serve(async (req) => {
       const songs = unanalyzed || [];
 
       if (songs.length === 0) {
-        // Count how many are analyzed
         const { count: analyzedCount } = await supabase
           .from("liked_songs")
           .select("id", { count: "exact", head: true })
@@ -167,7 +357,9 @@ Deno.serve(async (req) => {
         `${i + 1}. "${s.track_name}" – ${s.artist_name}${s.album_name ? ` (${s.album_name})` : ""}${formatAudioFeatures(s)}`
       ).join("\n");
 
-      const tagPrompt = `Analyze these ${songs.length} songs. For each song, provide genre tags, mood, energy level, tempo estimate, era, atmosphere, and production style.
+      const tagPrompt = `Analyze these ${songs.length} songs with DEEP musical analysis. For each song, provide all dimensions: genre_tags, mood, energy, tempo_estimate, era, atmosphere, production_style, groove_feel, vocal_style, sonic_brightness, spatial_quality, rhythmic_identity, listening_context, sonic_texture, intimacy_scale, tension_level.
+
+Be SPECIFIC and PRECISE — your tags will be used to cluster songs into playlists. Generic tags create bad playlists. Two songs tagged identically should genuinely sound right next to each other.
 
 ${songList}
 
@@ -182,40 +374,11 @@ Use the tag_songs function to return your analysis.`;
         body: JSON.stringify({
           model: "google/gemini-2.5-flash",
           messages: [
-            { role: "system", content: "You are a music analysis engine. Analyze each song and return structured metadata." },
+            { role: "system", content: TAG_SYSTEM_PROMPT },
             { role: "user", content: tagPrompt },
           ],
           temperature: 0.3,
-          tools: [{
-            type: "function",
-            function: {
-              name: "tag_songs",
-              description: "Save analysis tags for each song",
-              parameters: {
-                type: "object",
-                properties: {
-                  songs: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      properties: {
-                        index: { type: "number", description: "1-indexed song number" },
-                        genre_tags: { type: "array", items: { type: "string" } },
-                        mood: { type: "string" },
-                        energy: { type: "string", enum: ["low", "medium-low", "medium", "medium-high", "high"] },
-                        tempo_estimate: { type: "string" },
-                        era: { type: "string" },
-                        atmosphere: { type: "string" },
-                        production_style: { type: "string" },
-                      },
-                      required: ["index", "mood", "energy"],
-                    },
-                  },
-                },
-                required: ["songs"],
-              },
-            },
-          }],
+          tools: [TAG_TOOL],
           tool_choice: { type: "function", function: { name: "tag_songs" } },
         }),
       });
@@ -255,12 +418,20 @@ Use the tag_songs function to return your analysis.`;
           era: tagged.era || null,
           atmosphere: tagged.atmosphere || null,
           production_style: tagged.production_style || null,
+          groove_feel: tagged.groove_feel || null,
+          vocal_style: tagged.vocal_style || null,
+          sonic_brightness: tagged.sonic_brightness || null,
+          spatial_quality: tagged.spatial_quality || null,
+          rhythmic_identity: tagged.rhythmic_identity || null,
+          listening_context: tagged.listening_context || null,
+          sonic_texture: tagged.sonic_texture || null,
+          intimacy_scale: tagged.intimacy_scale || null,
+          tension_level: tagged.tension_level || null,
           analyzed_at: nowIso,
         }).eq("id", songId);
         taggedCount++;
       }
 
-      // Count total analyzed now
       const { count: analyzedNow } = await supabase
         .from("liked_songs")
         .select("id", { count: "exact", head: true })
@@ -280,8 +451,10 @@ Use the tag_songs function to return your analysis.`;
       });
     }
 
-    // ── CLUSTER MODE: fetch ALL songs, cluster them all ──
-    const columns = "id, spotify_track_id, track_name, artist_name, album_name, image_url, audio_tempo, audio_energy, audio_valence, audio_danceability, audio_acousticness, audio_instrumentalness, audio_speechiness, audio_loudness, audio_liveness";
+    // ═══════════════════════════════════════════
+    // CLUSTER MODE — group ALL songs into playlists
+    // ═══════════════════════════════════════════
+    const columns = "id, spotify_track_id, track_name, artist_name, album_name, image_url, audio_tempo, audio_energy, audio_valence, audio_danceability, audio_acousticness, audio_instrumentalness, audio_speechiness, audio_loudness, audio_liveness, mood, energy, atmosphere, production_style, groove_feel, vocal_style, sonic_brightness, spatial_quality, rhythmic_identity, listening_context, sonic_texture, intimacy_scale, tension_level, genre_tags, era, tempo_estimate";
     const likedSongs = await fetchAllLikedSongs(supabase, user.id, columns);
 
     if (likedSongs.length === 0) {
@@ -289,63 +462,39 @@ Use the tag_songs function to return your analysis.`;
     }
 
     const hasAudioFeatures = likedSongs.filter(s => s.audio_energy != null).length;
-    console.info(`[analyze-liked-songs] Clustering ${likedSongs.length} songs (${hasAudioFeatures} with audio features) for user ${user.id}`);
+    const hasDeepTags = likedSongs.filter(s => s.groove_feel != null).length;
+    console.info(`[analyze-liked-songs] Clustering ${likedSongs.length} songs (${hasAudioFeatures} with audio features, ${hasDeepTags} with deep tags) for user ${user.id}`);
 
-    const songList = likedSongs.map((s, i) =>
-      `${i + 1}. "${s.track_name}" – ${s.artist_name}${s.album_name ? ` (${s.album_name})` : ""}${formatAudioFeatures(s)}`
-    ).join("\n");
+    // Build rich song descriptions including deep tags when available
+    const songList = likedSongs.map((s, i) => {
+      let line = `${i + 1}. "${s.track_name}" – ${s.artist_name}`;
+      if (s.album_name) line += ` (${s.album_name})`;
+      line += formatAudioFeatures(s);
 
-    const systemPrompt = `You are Tempo, a premium music intelligence engine that clusters songs into playlists that feel like ONE cohesive listening world.
+      // Add deep analysis tags if available
+      const tags: string[] = [];
+      if (s.mood) tags.push(`mood:"${s.mood}"`);
+      if (s.groove_feel) tags.push(`groove:"${s.groove_feel}"`);
+      if (s.sonic_brightness) tags.push(`brightness:${s.sonic_brightness}`);
+      if (s.spatial_quality) tags.push(`space:"${s.spatial_quality}"`);
+      if (s.rhythmic_identity) tags.push(`rhythm:"${s.rhythmic_identity}"`);
+      if (s.production_style) tags.push(`prod:"${s.production_style}"`);
+      if (s.vocal_style) tags.push(`vocal:"${s.vocal_style}"`);
+      if (s.sonic_texture) tags.push(`texture:"${s.sonic_texture}"`);
+      if (s.atmosphere) tags.push(`atm:"${s.atmosphere}"`);
+      if (s.listening_context) tags.push(`context:"${s.listening_context}"`);
+      if (s.intimacy_scale) tags.push(`scale:"${s.intimacy_scale}"`);
+      if (s.tension_level) tags.push(`tension:"${s.tension_level}"`);
+      if (s.energy) tags.push(`energy_cat:${s.energy}`);
+      if (s.genre_tags?.length) tags.push(`genres:[${s.genre_tags.join(", ")}]`);
 
-CORE PRINCIPLE: It is better to make FEWER playlists with STRONG identity than MORE playlists with weak or random grouping.
-A song should ONLY be placed into a playlist if it strongly matches across MULTIPLE dimensions simultaneously.
+      if (tags.length > 0) line += ` {${tags.join(", ")}}`;
+      return line;
+    }).join("\n");
 
-PRIMARY CLUSTERING SIGNALS (from Spotify audio features):
-- **tempo (BPM)**: Songs within a cluster must be within ±15 BPM of each other.
-- **energy (0-1)**: Energy variance within a cluster must be < 0.25.
-- **valence (0-1)**: Valence variance must be < 0.3. Don't mix dark (0.1) with upbeat (0.8).
-- **danceability (0-1)**: Rhythmic groove compatibility. Don't mix freeform ambient with club bangers.
-- **acousticness (0-1)**: Production world must match. Don't mix raw acoustic (0.9) with polished electronic (0.05).
-- **instrumentalness (0-1)**: Vocal vs instrumental focus must be compatible.
-- **loudness (dB)**: Production intensity must be compatible.
+    const userPrompt = `Cluster these ${likedSongs.length} liked songs into coherent playlists. Each song includes Spotify audio features AND deep analysis tags (mood, groove, brightness, spatial quality, rhythmic identity, production style, vocal style, texture, atmosphere, listening context, intimacy scale, tension level).
 
-DEEP COMPATIBILITY CHECKS — every song must pass MOST of these before placement:
-1. Mood & emotional tone (same shade of emotion, not just "happy/sad")
-2. Atmosphere & sonic texture (same sonic world — reverb space, warmth, spatial quality)
-3. Production style (lo-fi vs polished, analog vs digital, compressed vs dynamic)
-4. Instrumentation compatibility (similar instrument families and timbres)
-5. Vocal style & intensity (breathy vs powerful, falsetto vs baritone, etc.)
-6. Rhythmic feel & groove character (straight vs swung, driving vs laid-back)
-7. Darkness vs brightness of the sonic palette
-8. Mainstream vs underground feel
-9. Era influence & sonic generation
-10. Listening context (driving, studying, working out, late night, etc.)
-11. Transition compatibility (would these songs flow naturally in sequence?)
-
-LANGUAGE RULES — CRITICAL:
-- Detect the language of each track (from artist name, track name, and your musical knowledge).
-- By DEFAULT, English songs cluster with English songs. Spanish songs cluster with Spanish songs.
-- Do NOT casually mix Spanish and English in the same playlist. This breaks listening coherence.
-- Only mix languages if there is a VERY strong musical reason AND the playlist still feels intentional.
-- Language mixing should be the EXCEPTION, not the default.
-
-COHERENCE RULES (STRICT):
-- Energy variance within a cluster must be < 0.25
-- Valence variance within a cluster must be < 0.3
-- Tempo range within a cluster should be < 25 BPM
-- If a cluster violates these, SPLIT it into smaller playlists
-- Genre is ONLY a weak tiebreaker — never the primary signal
-
-PLAYLIST NAMING:
-Names must be evocative, aesthetic, 2-3 words. Reflect the SONIC CHARACTER, not genre.
-GOOD: "Midnight Drive", "Dark Velvet", "Golden Groove", "Soft Horizon", "Neon Nights"
-BAD: "Pop Mix", "Rap Songs", "Rock Playlist", "Spanish Mix", "English Vibes"
-
-Create 5-20 playlists (scale with library size). Every song must appear in exactly one playlist. Favor precision over quantity.
-
-Return ONLY valid JSON via the save_playlists function.`;
-
-    const userPrompt = `Cluster these ${likedSongs.length} liked songs into coherent vibe-based playlists using their audio features as PRIMARY signals:
+USE THE DEEP TAGS AS YOUR PRIMARY CLUSTERING SIGNALS. Songs with similar groove_feel + sonic_brightness + spatial_quality + production_style + mood + rhythmic_identity belong together. Audio features (BPM, energy, valence) are SUPPORTING data only.
 
 ${songList}
 
@@ -358,17 +507,17 @@ Use the save_playlists function to return your clustering result.`;
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
+        model: "google/gemini-2.5-pro",
         messages: [
-          { role: "system", content: systemPrompt },
+          { role: "system", content: CLUSTER_SYSTEM_PROMPT },
           { role: "user", content: userPrompt },
         ],
-        temperature: 0.5,
+        temperature: 0.4,
         tools: [{
           type: "function",
           function: {
             name: "save_playlists",
-            description: "Save the curated playlists generated from audio-feature-based clustering",
+            description: "Save the curated playlists generated from deep sonic-world clustering",
             parameters: {
               type: "object",
               properties: {
@@ -377,10 +526,10 @@ Use the save_playlists function to return your clustering result.`;
                   items: {
                     type: "object",
                     properties: {
-                      name: { type: "string", description: "Evocative, aesthetic playlist name (2-3 words)" },
-                      vibe_description: { type: "string", description: "One-line vibe summary reflecting audio character, 10-20 words" },
-                      ai_explanation: { type: "string", description: "2-3 sentences explaining the sonic thread. Reference specific audio features (tempo, energy, valence)." },
-                      mood_tags: { type: "array", items: { type: "string" }, description: "2-4 mood/vibe tags" },
+                      name: { type: "string", description: "Evocative, aesthetic playlist name (2-4 words)" },
+                      vibe_description: { type: "string", description: "One-line vibe summary referencing sonic world, groove, and emotional tone (15-25 words)" },
+                      ai_explanation: { type: "string", description: "3-4 sentences explaining the sonic thread. Reference groove feel, production identity, spatial quality, mood, and what makes these songs belong together." },
+                      mood_tags: { type: "array", items: { type: "string" }, description: "2-4 specific mood/vibe tags (not generic — 'hazy late-night nostalgia' not 'chill')" },
                       color_hex: { type: "string", description: "Hex color matching the playlist mood" },
                       energy_level: { type: "string", enum: ["low", "medium-low", "medium", "medium-high", "high"] },
                       primary_language: { type: "string" },
@@ -390,6 +539,8 @@ Use the save_playlists function to return your clustering result.`;
                       avg_energy: { type: "number" },
                       avg_valence: { type: "number" },
                       avg_tempo: { type: "number" },
+                      sonic_world: { type: "string", description: "The unifying sonic world in 1-2 sentences" },
+                      groove_identity: { type: "string", description: "The rhythmic DNA of this playlist" },
                       songs: {
                         type: "array",
                         items: {
@@ -491,7 +642,7 @@ Use the save_playlists function to return your clustering result.`;
           era_range: cluster.era_range || "Mixed",
           track_count: songs.length,
           cover_tracks: coverTracks,
-          analysis_model: "google/gemini-2.5-flash+audio-features",
+          analysis_model: "google/gemini-2.5-pro+deep-sonic-clustering",
           sort_order: ci,
         })
         .select("id")
@@ -547,7 +698,7 @@ Use the save_playlists function to return your clustering result.`;
       .eq("user_id", user.id)
       .not("analyzed_at", "is", null);
 
-    console.info(`[analyze-liked-songs] Created ${clusters.length} playlists, assigned ${totalAssigned} tracks (${hasAudioFeatures} had audio features), total analyzed: ${analyzedNow}/${total}`);
+    console.info(`[analyze-liked-songs] Created ${clusters.length} playlists, assigned ${totalAssigned} tracks (${hasAudioFeatures} had audio features, ${hasDeepTags} had deep tags), total analyzed: ${analyzedNow}/${total}`);
 
     return json({
       success: true,
