@@ -249,8 +249,13 @@ Deno.serve(async (req) => {
 
     // 3. Import playlists
     step = "import_playlists";
-    const spotifyProfile = await spotifyGet("https://api.spotify.com/v1/me", accessToken);
-    const spotifyUserId = spotifyProfile.id;
+    let spotifyUserId = "";
+    try {
+      const spotifyProfile = await spotifyGet("https://api.spotify.com/v1/me", accessToken);
+      spotifyUserId = spotifyProfile.id || "";
+    } catch (e) {
+      console.warn("[spotify-import-tracks] /v1/me failed (may lack user-read-private scope), continuing without owner matching:", e);
+    }
 
     type PlaylistMeta = {
       id: string;
