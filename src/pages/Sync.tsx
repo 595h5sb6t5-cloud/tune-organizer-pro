@@ -3,13 +3,14 @@ import { Button } from "@/components/ui/button";
 import { samplePlaylists, type Playlist } from "@/lib/sample-data";
 import { CheckCircle2, AlertCircle, Upload, RefreshCw, Loader2 } from "lucide-react";
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { useConnections } from "@/hooks/use-connections";
 
 type SyncState = Record<string, Playlist["syncStatus"]>;
 
 const Sync = () => {
-  const { connections, connectApple, connectingApple } = useConnections();
+  const { connections, connectSpotify, connectApple, disconnectSpotify, disconnectApple, connectingSpotify, connectingApple } = useConnections();
   const [syncStates, setSyncStates] = useState<SyncState>(
     Object.fromEntries(samplePlaylists.map((pl) => [pl.id, pl.syncStatus]))
   );
@@ -24,7 +25,7 @@ const Sync = () => {
       setSyncStates((prev) => ({ ...prev, [pl.id]: "synced" }));
       setActiveExports((prev) => { const next = new Set(prev); next.delete(pl.id); return next; });
       toast.dismiss(`export-${pl.id}`);
-      toast.success(`"${pl.name}" exported to Spotify!`);
+      toast.success(`"${pl.name}" exported!`);
     }, 2000);
   };
 
@@ -60,9 +61,16 @@ const Sync = () => {
               </div>
             </div>
             {connections.spotify.connected ? (
-              <span className="inline-flex items-center gap-1 text-sm text-accent"><CheckCircle2 className="w-4 h-4" /> Connected</span>
+              <div className="flex items-center gap-3">
+                <span className="inline-flex items-center gap-1 text-sm text-accent"><CheckCircle2 className="w-4 h-4" /> Connected</span>
+                <Button variant="ghost" size="sm" className="rounded-lg text-destructive" onClick={() => { disconnectSpotify(); toast("Spotify disconnected"); }}>
+                  Disconnect
+                </Button>
+              </div>
             ) : (
-              <span className="inline-flex items-center gap-1 text-sm text-muted-foreground"><AlertCircle className="w-4 h-4" /> Disconnected</span>
+              <Button variant="hero" size="sm" className="rounded-lg" onClick={() => connectSpotify().then(() => toast.success("Spotify connected!"))} disabled={connectingSpotify}>
+                {connectingSpotify ? "Connecting…" : "Connect"}
+              </Button>
             )}
           </div>
           <div className="p-5 rounded-2xl bg-surface-elevated border border-border/50 flex items-center justify-between">
@@ -70,11 +78,16 @@ const Sync = () => {
               <div className="w-12 h-12 rounded-xl bg-[#FC3C44]/10 flex items-center justify-center text-xl">🍎</div>
               <div>
                 <p className="font-medium">Apple Music</p>
-                <p className="text-sm text-muted-foreground">{connections.apple.connected ? connections.apple.email : "Not connected"}</p>
+                <p className="text-sm text-muted-foreground">{connections.apple.connected ? `Connected as ${connections.apple.email}` : "Not connected"}</p>
               </div>
             </div>
             {connections.apple.connected ? (
-              <span className="inline-flex items-center gap-1 text-sm text-accent"><CheckCircle2 className="w-4 h-4" /> Connected</span>
+              <div className="flex items-center gap-3">
+                <span className="inline-flex items-center gap-1 text-sm text-accent"><CheckCircle2 className="w-4 h-4" /> Connected</span>
+                <Button variant="ghost" size="sm" className="rounded-lg text-destructive" onClick={() => { disconnectApple(); toast("Apple Music disconnected"); }}>
+                  Disconnect
+                </Button>
+              </div>
             ) : (
               <Button variant="hero" size="sm" className="rounded-lg" onClick={() => connectApple().then(() => toast.success("Apple Music connected!"))} disabled={connectingApple}>
                 {connectingApple ? "Connecting…" : "Connect"}
@@ -86,7 +99,7 @@ const Sync = () => {
         {noExportPlatform && (
           <div className="p-4 rounded-xl bg-destructive/10 text-destructive text-sm mb-6 flex items-center gap-2">
             <AlertCircle className="w-4 h-4 flex-shrink-0" />
-            Connect at least one platform in Settings to export playlists.
+            <span>No platform connected. <Link to="/settings" className="underline font-medium">Go to Settings</Link> or connect above to export playlists.</span>
           </div>
         )}
 
@@ -98,9 +111,9 @@ const Sync = () => {
             return (
               <div key={pl.id} className="p-5 rounded-2xl bg-surface-elevated border border-border/50 flex items-center justify-between">
                 <div className="flex items-center gap-4">
-                  <span className="text-2xl">{pl.emoji}</span>
+                  <Link to={`/playlists/${pl.id}`} className="text-2xl hover:scale-110 transition-transform">{pl.emoji}</Link>
                   <div>
-                    <p className="font-medium">{pl.name}</p>
+                    <Link to={`/playlists/${pl.id}`} className="font-medium hover:text-accent transition-colors">{pl.name}</Link>
                     <p className="text-xs text-muted-foreground">{pl.trackCount} tracks · {pl.mood}</p>
                   </div>
                 </div>

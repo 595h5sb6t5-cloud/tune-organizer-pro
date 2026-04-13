@@ -2,10 +2,11 @@ import AppLayout from "@/components/app/AppLayout";
 import { samplePlaylists, type Recommendation, type Track } from "@/lib/sample-data";
 import { Button } from "@/components/ui/button";
 import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, Upload, RefreshCw, Shuffle, Play, MoreHorizontal, Plus, X, Bookmark, Sparkles, Loader2, Gem, TrendingUp, Music, Trash2, ArrowRightLeft, Pencil, Check } from "lucide-react";
+import { ArrowLeft, Upload, RefreshCw, Shuffle, Play, MoreHorizontal, Plus, X, Bookmark, Sparkles, Loader2, Gem, TrendingUp, Music, Trash2, Pencil, Check } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
 import { toast } from "sonner";
 import { useAIRecommendations } from "@/hooks/use-ai-recommendations";
+import { useConnections } from "@/hooks/use-connections";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -23,6 +24,7 @@ const tierConfig = {
 const PlaylistDetail = () => {
   const { id } = useParams();
   const playlist = samplePlaylists.find((p) => p.id === id) ?? samplePlaylists[0];
+  const { connections } = useConnections();
 
   const [localTracks, setLocalTracks] = useState<Track[]>(playlist.tracks);
   const [playlistName, setPlaylistName] = useState(playlist.name);
@@ -70,13 +72,20 @@ const PlaylistDetail = () => {
   const visibleRecs = aiRecs.filter((r) => !dismissedIds.has(r.id) && !acceptedIds.has(r.id));
   const allTracks = [...localTracks, ...acceptedRecs.map((r) => r.track)];
 
+  const hasConnectedPlatform = connections.spotify.connected || connections.apple.connected;
+  const syncTarget = connections.spotify.connected ? "Spotify" : "Apple Music";
+
   const handleSync = () => {
+    if (!hasConnectedPlatform) {
+      toast.error("No platform connected", { description: "Connect Spotify or Apple Music in Settings first." });
+      return;
+    }
     setSyncing(true);
-    toast.loading("Syncing to Spotify…");
+    toast.loading(`Syncing to ${syncTarget}…`);
     setTimeout(() => {
       setSyncing(false);
       toast.dismiss();
-      toast.success(`"${playlistName}" synced to Spotify!`);
+      toast.success(`"${playlistName}" synced to ${syncTarget}!`);
     }, 2000);
   };
 
@@ -86,7 +95,6 @@ const PlaylistDetail = () => {
       const j = Math.floor(Math.random() * (i + 1));
       [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
     }
-    // Split back into local tracks and accepted
     const originalIds = new Set(playlist.tracks.map((t) => t.id));
     const newLocal = shuffled.filter((t) => originalIds.has(t.id));
     const newAccepted = shuffled.filter((t) => !originalIds.has(t.id));
@@ -129,7 +137,6 @@ const PlaylistDetail = () => {
   };
 
   const handleRemoveTrack = (track: Track) => {
-    // Check if it's an accepted rec
     const recMatch = acceptedRecs.find((r) => r.track.id === track.id);
     if (recMatch) {
       setAcceptedRecs((prev) => prev.filter((r) => r.track.id !== track.id));
@@ -205,11 +212,22 @@ const PlaylistDetail = () => {
               <span>{playlist.avgTempo} BPM avg</span>
               <span className="text-accent font-medium">{playlist.cohesionScore}% cohesion</span>
             </div>
-            <div className="flex gap-3">
-              <Button variant="hero" className="rounded-xl gap-2" onClick={handleSync} disabled={syncing || allTracks.length === 0}>
+            <div className="flex gap-3 flex-wrap">
+              <Button
+                variant="hero"
+                className="rounded-xl gap-2"
+                onClick={handleSync}
+                disabled={syncing || allTracks.length === 0 || !hasConnectedPlatform}
+                title={!hasConnectedPlatform ? "Connect a platform in Settings first" : undefined}
+              >
                 {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-                {syncing ? "Syncing…" : "Sync to Spotify"}
+                {syncing ? "Syncing…" : `Sync to ${hasConnectedPlatform ? syncTarget : "…"}`}
               </Button>
+              {!hasConnectedPlatform && (
+                <Link to="/settings" className="text-xs text-destructive self-center hover:underline">
+                  Connect a platform first →
+                </Link>
+              )}
               <Button variant="secondary" className="rounded-xl gap-2" onClick={handleRefreshRecs} disabled={aiLoading}>
                 <RefreshCw className={`w-4 h-4 ${aiLoading ? "animate-spin" : ""}`} />
                 {aiLoading ? "Loading…" : "New Suggestions"}
@@ -244,7 +262,9 @@ const PlaylistDetail = () => {
                   className={`group grid grid-cols-[40px_1fr_1fr_80px_80px_40px] gap-4 px-5 py-3 items-center hover:bg-secondary/30 transition-colors ${isNew ? "bg-accent/5" : ""}`}
                 >
                   <span className="text-sm text-muted-foreground group-hover:hidden">{i + 1}</span>
-                  <Play className="w-4 h-4 text-accent hidden group-hover:block" />
+                  <button className="hidden group-hover:block text-accent" onClick={() => toast.success(`Now playing "${track.title}"`)}>
+                    <Play className="w-4 h-4" />
+                  </button>
                   <div>
                     <div className="flex items-center gap-2">
                       <p className="text-sm font-medium truncate">{track.title}</p>

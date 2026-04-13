@@ -48,7 +48,6 @@ const Discover = () => {
     if (mode === activeMode) return;
     setSwitching(true);
     setActiveMode(mode);
-    // Reset dismissed/accepted for fresh view on mode switch
     setDismissedIds(new Set());
     setAcceptedIds(new Set());
     setTimeout(() => {
@@ -137,7 +136,7 @@ const Discover = () => {
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     {recs.map((rec) => (
-                      <RecommendationCard
+                      <RecCard
                         key={rec.id}
                         rec={rec}
                         isSaved={savedIds.has(rec.id)}
@@ -166,7 +165,7 @@ const Discover = () => {
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     {newVibes.map((rec) => (
-                      <RecommendationCard
+                      <RecCard
                         key={rec.id}
                         rec={rec}
                         isSaved={savedIds.has(rec.id)}
@@ -186,7 +185,7 @@ const Discover = () => {
   );
 };
 
-function RecommendationCard({
+function RecCard({
   rec,
   isSaved,
   onAdd,
@@ -220,15 +219,15 @@ function RecommendationCard({
             ))}
           </div>
           <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-            <Button variant="ghost" size="icon" className="w-7 h-7 rounded-lg text-accent hover:text-accent" title="Add to playlist" onClick={onAdd}>
+            <button className="w-7 h-7 rounded-lg inline-flex items-center justify-center text-accent hover:bg-accent/10 transition-colors" title="Add to playlist" onClick={onAdd}>
               <Plus className="w-3.5 h-3.5" />
-            </Button>
-            <Button variant="ghost" size="icon" className={`w-7 h-7 rounded-lg ${isSaved ? "text-warm" : ""}`} title="Save for later" onClick={onSave}>
+            </button>
+            <button className={`w-7 h-7 rounded-lg inline-flex items-center justify-center hover:bg-secondary transition-colors ${isSaved ? "text-warm" : "text-muted-foreground"}`} title="Save for later" onClick={onSave}>
               <Bookmark className={`w-3.5 h-3.5 ${isSaved ? "fill-current" : ""}`} />
-            </Button>
-            <Button variant="ghost" size="icon" className="w-7 h-7 rounded-lg text-muted-foreground" title="Dismiss" onClick={onDismiss}>
+            </button>
+            <button className="w-7 h-7 rounded-lg inline-flex items-center justify-center text-muted-foreground hover:bg-secondary transition-colors" title="Dismiss" onClick={onDismiss}>
               <X className="w-3.5 h-3.5" />
-            </Button>
+            </button>
           </div>
         </div>
       </div>

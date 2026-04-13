@@ -27,7 +27,7 @@ const Dashboard = () => {
 
   const stats = [
     { label: "Imported Tracks", value: "1,247", icon: Music, change: "+38 this week", ok: true },
-    { label: "AI Playlists", value: "12", icon: Disc3, change: "4 synced", ok: true },
+    { label: "AI Playlists", value: String(samplePlaylists.length), icon: Disc3, change: `${samplePlaylists.filter(p => p.syncStatus === "synced").length} synced`, ok: true },
     { label: "Avg Cohesion", value: "91%", icon: Activity, change: "+3% vs last gen", ok: true },
     { label: "Spotify", value: connections.spotify.connected ? "Connected" : "Off", icon: Headphones, change: connections.spotify.connected ? connections.spotify.email : "Not connected", ok: connections.spotify.connected },
     { label: "Apple Music", value: connections.apple.connected ? "Connected" : "Off", icon: Headphones, change: connections.apple.connected ? connections.apple.email : "Not connected", ok: connections.apple.connected },
@@ -43,7 +43,7 @@ const Dashboard = () => {
         </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-5 gap-3 mb-8">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 mb-8">
           {stats.map((stat) => (
             <div key={stat.label} className="p-4 rounded-2xl bg-surface-elevated border border-border/50">
               <div className="flex items-center justify-between mb-2">
@@ -56,11 +56,16 @@ const Dashboard = () => {
               </div>
               <p className="font-heading text-xl mb-0.5">{stat.value}</p>
               <p className="text-xs text-muted-foreground">{stat.label}</p>
-              <p className={`text-xs mt-1 truncate ${stat.ok ? "text-accent" : "text-destructive"}`}>{stat.change}</p>
+              <p className={`text-xs mt-1 truncate ${stat.ok ? "text-accent" : "text-destructive"}`}>
+                {stat.ok ? stat.change : (
+                  <Link to="/settings" className="hover:underline">{stat.change} — Connect →</Link>
+                )}
+              </p>
             </div>
           ))}
         </div>
-        <div className="grid grid-cols-3 gap-6 mb-8">
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
           {/* Genre distribution */}
           <div className="col-span-1 p-6 rounded-2xl bg-surface-elevated border border-border/50">
             <h3 className="font-heading text-lg mb-4">Genre Distribution</h3>
@@ -121,7 +126,7 @@ const Dashboard = () => {
             <h3 className="font-heading text-lg">Recent Playlists</h3>
             <Link to="/playlists" className="text-sm text-accent hover:underline">View all →</Link>
           </div>
-          <div className="grid grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {samplePlaylists.map((pl) => (
               <Link
                 key={pl.id}
