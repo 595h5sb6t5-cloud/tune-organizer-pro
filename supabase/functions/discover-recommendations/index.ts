@@ -208,7 +208,15 @@ INTERPRETATION: ${audioProfile.avgEnergy > 0.65 ? "High-energy listener" : audio
 - Top atmospheres: ${tasteSignals.topAtmospheres?.join(", ") || "unknown"}
 - Production styles: ${tasteSignals.topProductionStyles?.join(", ") || "unknown"}
 - Preferred eras: ${tasteSignals.topEras?.join(", ") || "mixed"}
-- Most listened artists: ${tasteSignals.topArtists?.join(", ") || "unknown"}`;
+- Most listened artists: ${tasteSignals.topArtists?.join(", ") || "unknown"}
+
+DEEP SONIC IDENTITY:
+- Top groove feels: ${tasteSignals.topGrooveFeels?.join(", ") || "not analyzed yet"}
+- Top vocal styles: ${tasteSignals.topVocalStyles?.join(", ") || "not analyzed yet"}
+- Sonic brightness preference: ${tasteSignals.topSonicBrightness?.join(", ") || "not analyzed yet"}
+- Spatial quality preference: ${tasteSignals.topSpatialQualities?.join(", ") || "not analyzed yet"}
+- Rhythmic identity: ${tasteSignals.topRhythmicIdentities?.join(", ") || "not analyzed yet"}
+- Sonic textures: ${tasteSignals.topSonicTextures?.join(", ") || "not analyzed yet"}`;
     }
 
     let clusterSection = "";
