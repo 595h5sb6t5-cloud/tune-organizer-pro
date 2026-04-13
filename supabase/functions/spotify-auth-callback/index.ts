@@ -11,9 +11,9 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { code, code_verifier } = await req.json();
-    if (!code || !code_verifier) {
-      return new Response(JSON.stringify({ error: "Missing code or code_verifier" }), {
+    const { code, code_verifier, redirect_uri } = await req.json();
+    if (!code || !code_verifier || !redirect_uri) {
+      return new Response(JSON.stringify({ error: "Missing code, code_verifier, or redirect_uri" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -21,7 +21,6 @@ Deno.serve(async (req) => {
 
     const clientId = Deno.env.get("SPOTIFY_CLIENT_ID")!;
     const clientSecret = Deno.env.get("SPOTIFY_CLIENT_SECRET")!;
-    const redirectUri = Deno.env.get("SPOTIFY_REDIRECT_URI")!;
 
     // Exchange code for tokens
     const tokenRes = await fetch("https://accounts.spotify.com/api/token", {
@@ -33,7 +32,7 @@ Deno.serve(async (req) => {
       body: new URLSearchParams({
         grant_type: "authorization_code",
         code,
-        redirect_uri: redirectUri,
+        redirect_uri,
         code_verifier,
       }),
     });
