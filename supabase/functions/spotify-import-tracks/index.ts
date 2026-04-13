@@ -195,17 +195,17 @@ async function syncLikedSongs(
   const spotifyLikedIds = new Set<string>();
   let offset = 0;
   let total = Infinity;
-  const MAX_SONGS = 3000;
 
   // For incremental: stop early once we hit a run of known tracks
   let consecutiveKnown = 0;
   const KNOWN_THRESHOLD = 100; // stop after 100 consecutive known tracks in incremental mode
 
-  while (offset < total && offset < MAX_SONGS) {
+  while (offset < total) {
     const data = await spotifyGet(`https://api.spotify.com/v1/me/tracks?limit=50&offset=${offset}`, token);
     total = data.total ?? 0;
+    const items = data.items || [];
 
-    for (const item of data.items || []) {
+    for (const item of items) {
       const t = extractTrack(item, userId);
       if (!t) continue;
       spotifyLikedIds.add(t.spotify_track_id);
@@ -220,12 +220,22 @@ async function syncLikedSongs(
 
     offset += 50;
 
+    // Log progress every 500 tracks
+    if (offset % 500 === 0) {
+      console.log(`[spotify-import-tracks] liked songs pagination: ${offset}/${total}, new: ${spotifyLiked.length}`);
+    }
+
     // In incremental mode, stop early if we've hit a long run of known tracks
     if (!isFullSync && consecutiveKnown >= KNOWN_THRESHOLD) {
-      console.info("[spotify-import-tracks] incremental: stopping liked songs scan after consecutive known run");
+      console.log("[spotify-import-tracks] incremental: stopping liked songs scan after consecutive known run");
       break;
     }
+
+    // If no items returned, we're done regardless of total
+    if (items.length === 0) break;
   }
+
+  console.log(`[spotify-import-tracks] liked songs pagination complete: scanned ${offset}, total ${total}, new ${spotifyLiked.length}`);
 
   // Upsert new tracks
   for (let i = 0; i < spotifyLiked.length; i += 100) {
@@ -290,7 +300,8 @@ async function syncPlaylists(
     while (offset < totalPl) {
       const data = await spotifyGet(`https://api.spotify.com/v1/me/playlists?limit=50&offset=${offset}`, token);
       totalPl = data.total ?? 0;
-      for (const pl of data.items || []) {
+      const items = data.items || [];
+      for (const pl of items) {
         if (!pl || !pl.id) continue;
         playlists.push({
           id: pl.id,
@@ -306,8 +317,10 @@ async function syncPlaylists(
         });
       }
       offset += 50;
-      if (!data.items || data.items.length === 0) break;
+      console.log(`[spotify-import-tracks] playlists pagination: ${offset}/${totalPl}, collected: ${playlists.length}`);
+      if (items.length === 0) break;
     }
+    console.log(`[spotify-import-tracks] playlists pagination complete: ${playlists.length} total`);
   } catch (e) {
     if (isInsufficientScopeError(e)) {
       warning = "Spotify connection is missing playlist read access. Reconnect Spotify to sync playlists.";
@@ -443,6 +456,7 @@ async function syncFollowedArtists(
   let after: string | null = null;
 
   try {
+    let page = 0;
     while (true) {
       const url = `https://api.spotify.com/v1/me/following?type=artist&limit=50${after ? `&after=${after}` : ""}`;
       const data = await spotifyGet(url, token);
@@ -464,8 +478,11 @@ async function syncFollowedArtists(
       }
 
       after = data?.artists?.cursors?.after || null;
+      page++;
+      console.log(`[spotify-import-tracks] artists pagination page ${page}: collected ${artists.length}, has_next: ${Boolean(after)}`);
       if (!after) break;
     }
+    console.log(`[spotify-import-tracks] artists pagination complete: ${artists.length} total`);
   } catch (e) {
     if (isInsufficientScopeError(e)) {
       console.warn("[spotify-import-tracks] followed artists skipped - missing user-follow-read scope");
