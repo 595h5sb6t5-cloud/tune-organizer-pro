@@ -225,12 +225,21 @@ ${playlistVibes.map((v: any) => `- Primary: "${v.primaryVibe}" | Mood: ${v.moodS
 
     let sampleSection = "";
     if (sampleTracks.length > 0) {
-      sampleSection = `\nSAMPLE TRACKS FROM LIBRARY (with audio features):
+      sampleSection = `\nSAMPLE TRACKS FROM LIBRARY (with audio features + deep sonic analysis):
 ${sampleTracks.slice(0, 25).map((t: any) => {
   const parts = [`"${t.title}" by ${t.artist}`];
-  if (t.mood) parts.push(`mood:${t.mood}`);
-  if (t.atmosphere) parts.push(`atm:${t.atmosphere}`);
-  if (t.production) parts.push(`prod:${t.production}`);
+  if (t.mood) parts.push(`mood:"${t.mood}"`);
+  if (t.grooveFeel) parts.push(`groove:"${t.grooveFeel}"`);
+  if (t.sonicBrightness) parts.push(`brightness:${t.sonicBrightness}`);
+  if (t.spatialQuality) parts.push(`space:"${t.spatialQuality}"`);
+  if (t.rhythmicIdentity) parts.push(`rhythm:"${t.rhythmicIdentity}"`);
+  if (t.production) parts.push(`prod:"${t.production}"`);
+  if (t.vocalStyle) parts.push(`vocal:"${t.vocalStyle}"`);
+  if (t.sonicTexture) parts.push(`texture:"${t.sonicTexture}"`);
+  if (t.atmosphere) parts.push(`atm:"${t.atmosphere}"`);
+  if (t.listeningContext) parts.push(`context:"${t.listeningContext}"`);
+  if (t.intimacyScale) parts.push(`scale:"${t.intimacyScale}"`);
+  if (t.tensionLevel) parts.push(`tension:"${t.tensionLevel}"`);
   if (t.tempo) parts.push(`${t.tempo}BPM`);
   if (t.audioEnergy != null) parts.push(`E:${t.audioEnergy}`);
   if (t.valence != null) parts.push(`V:${t.valence}`);
