@@ -586,7 +586,7 @@ Deno.serve(async (req) => {
       result.liked_songs_added = likedResult.added;
       result.liked_songs_removed = likedResult.removed;
       result.liked_songs_total = likedResult.total;
-      console.info("[spotify-import-tracks] liked_songs_done", likedResult);
+      console.log("[spotify-import-tracks] liked_songs_done", likedResult);
 
       await adminClient.from("spotify_connections").update({ last_library_sync_at: now }).eq("user_id", user.id);
 
