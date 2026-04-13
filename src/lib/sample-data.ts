@@ -14,6 +14,15 @@ export interface Track {
   coverUrl?: string;
 }
 
+export interface CompatibilityBreakdown {
+  mood: number;
+  tempo: number;
+  energy: number;
+  genre: number;
+  artistNetwork: number;
+  era: number;
+}
+
 export interface Recommendation {
   id: string;
   track: Track;
@@ -22,6 +31,8 @@ export interface Recommendation {
   moodTags: string[];
   targetPlaylistId?: string;
   status: "pending" | "accepted" | "dismissed" | "saved";
+  popularityTier?: "deep-cut" | "mid" | "well-known";
+  compatibilityBreakdown?: CompatibilityBreakdown | null;
 }
 
 export interface Playlist {
