@@ -100,36 +100,32 @@ Deno.serve(async (req) => {
       }
     } else {
       // Create new playlist
-      const spotifyUserId = conn.spotify_user_id;
+      let spotifyUserId = conn.spotify_user_id;
       if (!spotifyUserId) {
-        // Fetch user ID
         const meRes = await fetch("https://api.spotify.com/v1/me", { headers: { Authorization: `Bearer ${accessToken}` } });
         const meData = await meRes.json();
-        const userId = meData.id;
-        await supabase.from("spotify_connections").update({ spotify_user_id: userId }).eq("user_id", user.id);
-
-        const createRes = await fetch(`https://api.spotify.com/v1/users/${userId}/playlists`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ name, description: `${description || ""} · Created by Tempo`, public: false }),
-        });
-        const createData = await createRes.json();
-        if (!createData.id) {
-          return new Response(JSON.stringify({ error: "Failed to create Spotify playlist", details: createData }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-        }
-        spotifyPlaylistId = createData.id;
-      } else {
-        const createRes = await fetch(`https://api.spotify.com/v1/users/${spotifyUserId}/playlists`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ name, description: `${description || ""} · Created by Tempo`, public: false }),
-        });
-        const createData = await createRes.json();
-        if (!createData.id) {
-          return new Response(JSON.stringify({ error: "Failed to create Spotify playlist", details: createData }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-        }
-        spotifyPlaylistId = createData.id;
+        spotifyUserId = meData.id;
+        await supabase.from("spotify_connections").update({ spotify_user_id: spotifyUserId }).eq("user_id", user.id);
       }
+
+      const createRes = await fetch(`https://api.spotify.com/v1/users/${spotifyUserId}/playlists`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ name, description: `${description || ""} · Created by Tempo`, public: false }),
+      });
+      const createData = await createRes.json();
+
+      if (!createRes.ok || !createData.id) {
+        const status = createRes.status;
+        if (status === 403) {
+          return new Response(JSON.stringify({
+            error: "Spotify permissions insufficient. Please disconnect and reconnect Spotify in Settings to grant playlist creation permissions.",
+            needs_reauth: true,
+          }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }
+        return new Response(JSON.stringify({ error: "Failed to create Spotify playlist", details: createData }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      spotifyPlaylistId = createData.id;
     }
 
     // Add tracks in batches of 100
