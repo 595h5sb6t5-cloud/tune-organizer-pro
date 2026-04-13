@@ -2,7 +2,7 @@ const steps = [
   {
     number: "01",
     title: "Connect your account",
-    description: "Link Spotify or Apple Music in seconds with secure OAuth.",
+    description: "Link your Spotify account in seconds with secure OAuth.",
   },
   {
     number: "02",
@@ -17,7 +17,7 @@ const steps = [
   {
     number: "04",
     title: "Sync to your account",
-    description: "Export playlists directly back into Spotify or Apple Music with one click.",
+    description: "Export playlists directly back into Spotify with one click.",
   },
 ];
 

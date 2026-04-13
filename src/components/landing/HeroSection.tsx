@@ -23,7 +23,7 @@ const HeroSection = () => {
           </h1>
 
           <p className="text-lg md:text-xl text-muted-foreground max-w-xl mx-auto mb-8 animate-fade-up" style={{ animationDelay: "0.2s" }}>
-            Tempo analyzes your saved songs and creates intelligent playlists — then syncs them directly to your Spotify or Apple Music account.
+            Tempo analyzes your saved songs and creates intelligent playlists — then syncs them directly to your Spotify account.
           </p>
 
           <div className="flex items-center justify-center gap-4 animate-fade-up" style={{ animationDelay: "0.3s" }}>

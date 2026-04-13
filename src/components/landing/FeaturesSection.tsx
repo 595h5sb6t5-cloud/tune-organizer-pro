@@ -9,7 +9,7 @@ const features = [
   {
     icon: ArrowUpDown,
     title: "Real Sync",
-    description: "Playlists are created directly inside your Spotify or Apple Music account — not just in our app.",
+    description: "Playlists are created directly inside your Spotify account — not just in our app.",
   },
   {
     icon: Sliders,

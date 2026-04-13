@@ -77,7 +77,7 @@ const PlaylistDetail = () => {
 
   const handleSync = () => {
     if (!hasConnectedPlatform) {
-      toast.error("No platform connected", { description: "Connect Spotify or Apple Music in Settings first." });
+      toast.error("No platform connected", { description: "Connect Spotify in Settings first." });
       return;
     }
     setSyncing(true);

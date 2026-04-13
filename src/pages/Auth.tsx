@@ -9,8 +9,12 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "@/hooks/use-toast";
-
-const SPOTIFY_PENDING_CALLBACK_KEY = "spotify-pending-callback";
+import {
+  readPendingSpotifyCallback,
+  readPendingSpotifyConnect,
+  clearPendingSpotifyCallback,
+  clearPendingSpotifyConnect,
+} from "@/lib/spotify-auth";
 
 function getSpotifyStatusCopy(status: SpotifyStatus) {
   switch (status) {
@@ -37,55 +41,60 @@ const Auth = () => {
   const [searchParams] = useSearchParams();
   const [step, setStep] = useState<"auth" | "connect">("auth");
 
+  const connectSpotify = searchParams.get("connect") === "spotify";
   const redirectAfterLogin = searchParams.get("redirect");
 
-  // After login, check for pending Spotify callback and resume
+  // After login: resume pending Spotify callback (code saved before login)
   useEffect(() => {
     if (!user) return;
 
-    const pendingRaw = localStorage.getItem(SPOTIFY_PENDING_CALLBACK_KEY);
-    if (pendingRaw) {
-      try {
-        const pending = JSON.parse(pendingRaw) as { code: string; state: string; savedAt: number };
-        const ageMs = Date.now() - (pending.savedAt || 0);
-        if (pending.code && ageMs < 10 * 60 * 1000) {
-          console.info("[Auth] Resuming pending Spotify callback", { ageMs, has_code: true });
-          localStorage.removeItem(SPOTIFY_PENDING_CALLBACK_KEY);
-          const url = `/spotify-callback?code=${encodeURIComponent(pending.code)}${pending.state ? `&state=${encodeURIComponent(pending.state)}` : ""}`;
-          navigate(url, { replace: true });
-          return;
-        } else {
-          console.info("[Auth] Pending Spotify callback expired", { ageMs });
-          localStorage.removeItem(SPOTIFY_PENDING_CALLBACK_KEY);
-        }
-      } catch {
-        localStorage.removeItem(SPOTIFY_PENDING_CALLBACK_KEY);
-      }
+    const pendingCallback = readPendingSpotifyCallback();
+    if (pendingCallback) {
+      console.info("[Auth] Resuming pending Spotify callback", {
+        ageMs: Date.now() - pendingCallback.savedAt,
+        has_code: true,
+      });
+      clearPendingSpotifyCallback();
+      const url = `/spotify-callback?code=${encodeURIComponent(pendingCallback.code)}${
+        pendingCallback.state ? `&state=${encodeURIComponent(pendingCallback.state)}` : ""
+      }`;
+      navigate(url, { replace: true });
+      return;
+    }
+
+    // Resume pending Spotify connect (user clicked Connect before being logged in)
+    const pendingConnect = readPendingSpotifyConnect();
+    if (pendingConnect || connectSpotify) {
+      clearPendingSpotifyConnect();
+      setStep("connect");
+      return;
     }
 
     if (redirectAfterLogin) {
       navigate(redirectAfterLogin, { replace: true });
       return;
     }
-  }, [user, navigate, redirectAfterLogin]);
+  }, [user, navigate, redirectAfterLogin, connectSpotify]);
 
+  // Already onboarded + no pending Spotify → go to dashboard
   useEffect(() => {
-    if (user && profile?.onboarding_completed) {
-      const hasPending = localStorage.getItem(SPOTIFY_PENDING_CALLBACK_KEY);
-      if (!hasPending) {
-        // If Spotify not connected, still go to dashboard (it shows connect prompt)
-        navigate("/dashboard", { replace: true });
-      }
-    }
-  }, [user, profile?.onboarding_completed, navigate]);
+    if (!user || !profile?.onboarding_completed) return;
 
+    const hasPendingCallback = readPendingSpotifyCallback();
+    const hasPendingConnect = readPendingSpotifyConnect();
+    if (hasPendingCallback || hasPendingConnect || connectSpotify) return;
+
+    navigate("/dashboard", { replace: true });
+  }, [user, profile?.onboarding_completed, navigate, connectSpotify]);
+
+  // New user (onboarding not done) → show connect step
   useEffect(() => {
     if (user && profile && !profile.onboarding_completed) {
       setStep((current) => (current === "auth" ? "connect" : current));
     }
   }, [user, profile]);
 
-  if (user && profile?.onboarding_completed) {
+  if (user && profile?.onboarding_completed && !connectSpotify) {
     return null;
   }
 
@@ -282,11 +291,11 @@ function SignUpForm({ onSuccess }: { onSuccess: () => void }) {
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-2">
           <Label htmlFor="first-name">First name</Label>
-          <Input id="first-name" placeholder="Jordan" value={firstName} onChange={(e) => setFirstName(e.target.value)} autoComplete="given-name" />
+          <Input id="first-name" placeholder="First name" value={firstName} onChange={(e) => setFirstName(e.target.value)} autoComplete="given-name" />
         </div>
         <div className="space-y-2">
           <Label htmlFor="last-name">Last name</Label>
-          <Input id="last-name" placeholder="Doe" value={lastName} onChange={(e) => setLastName(e.target.value)} autoComplete="family-name" />
+          <Input id="last-name" placeholder="Last name" value={lastName} onChange={(e) => setLastName(e.target.value)} autoComplete="family-name" />
         </div>
       </div>
       <div className="space-y-2">
@@ -325,16 +334,16 @@ function ConnectCard({ onComplete }: { onComplete: () => void | Promise<void> })
   const spotifyCopy = getSpotifyStatusCopy(spotifyStatus);
 
   const handleSpotify = async () => {
-    await startSpotify("/auth");
+    await startSpotify("/dashboard");
   };
 
   return (
     <Card className="w-full max-w-md border-border/60 shadow-lg">
       <CardContent className="p-6 space-y-6">
         <div className="text-center space-y-2">
-          <h2 className="font-instrument-serif text-2xl text-foreground">Connect your music</h2>
+          <h2 className="font-instrument-serif text-2xl text-foreground">Connect Spotify</h2>
           <p className="text-sm text-muted-foreground">
-            Link Spotify to get personalized recommendations.
+            Link your Spotify account to get personalized AI recommendations.
           </p>
         </div>
 
@@ -357,7 +366,7 @@ function ConnectCard({ onComplete }: { onComplete: () => void | Promise<void> })
         </div>
 
         <div className="space-y-1">
-          <p className="text-xs text-muted-foreground">{spotifyDone ? "Spotify is ready for recommendations and playlist creation." : spotifyCopy.helper}</p>
+          <p className="text-xs text-muted-foreground">{spotifyDone ? "Spotify is ready. Your library will be imported." : spotifyCopy.helper}</p>
           {spotifyError && (
             <p className="text-xs text-destructive flex items-center gap-1">
               <AlertCircle className="h-3.5 w-3.5 shrink-0" />
