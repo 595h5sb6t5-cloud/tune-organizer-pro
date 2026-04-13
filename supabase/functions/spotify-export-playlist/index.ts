@@ -42,28 +42,27 @@ Deno.serve(async (req) => {
 
     let accessToken = conn.access_token;
 
-    // Refresh token if expired
-    if (new Date(conn.expires_at) <= new Date()) {
-      const clientId = Deno.env.get("SPOTIFY_CLIENT_ID")!;
-      const clientSecret = Deno.env.get("SPOTIFY_CLIENT_SECRET")!;
-      const refreshRes = await fetch("https://accounts.spotify.com/api/token", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          Authorization: `Basic ${btoa(`${clientId}:${clientSecret}`)}`,
-        },
-        body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: conn.refresh_token }),
-      });
-      const refreshData = await refreshRes.json();
-      if (!refreshData.access_token) {
-        return new Response(JSON.stringify({ error: "Failed to refresh Spotify token" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-      }
+    // Always refresh token to ensure we have latest scopes
+    const clientId = Deno.env.get("SPOTIFY_CLIENT_ID")!;
+    const clientSecret = Deno.env.get("SPOTIFY_CLIENT_SECRET")!;
+    const refreshRes = await fetch("https://accounts.spotify.com/api/token", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Authorization: `Basic ${btoa(`${clientId}:${clientSecret}`)}`,
+      },
+      body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: conn.refresh_token }),
+    });
+    const refreshData = await refreshRes.json();
+    if (refreshData.access_token) {
       accessToken = refreshData.access_token;
       await supabase.from("spotify_connections").update({
         access_token: refreshData.access_token,
         refresh_token: refreshData.refresh_token || conn.refresh_token,
-        expires_at: new Date(Date.now() + refreshData.expires_in * 1000).toISOString(),
+        expires_at: new Date(Date.now() + (refreshData.expires_in || 3600) * 1000).toISOString(),
       }).eq("user_id", user.id);
+    } else if (new Date(conn.expires_at) <= new Date()) {
+      return new Response(JSON.stringify({ error: "Spotify token expired. Please reconnect Spotify in Settings." }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     // Check if this cluster was already exported
