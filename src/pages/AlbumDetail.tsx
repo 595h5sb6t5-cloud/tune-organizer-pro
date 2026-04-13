@@ -94,7 +94,7 @@ const AlbumDetail = () => {
                     <p className="text-xs text-muted-foreground truncate">{t.artist_name}</p>
                   </div>
                   <span className="text-xs text-muted-foreground shrink-0">{formatDuration(t.duration_ms)}</span>
-                  <AudioPreviewButton trackName={t.track_name} artistName={t.artist_name} size="sm" />
+                  <AudioPreviewButton trackId={t.spotify_track_id} previewUrl={null} size="sm" />
                 </div>
               ))}
               {tracks.length === 0 && (

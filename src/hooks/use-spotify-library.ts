@@ -95,12 +95,12 @@ async function fetchAllRows<T>(
   let offset = 0;
   const all: T[] = [];
   while (true) {
-    const { data, error } = await supabase
-      .from(table)
+    const { data, error } = await (supabase
+      .from(table as any)
       .select(select)
       .eq("user_id", userId)
       .order(orderCol, { ascending })
-      .range(offset, offset + PAGE - 1);
+      .range(offset, offset + PAGE - 1) as any);
     if (error || !data || data.length === 0) break;
     all.push(...(data as T[]));
     if (data.length < PAGE) break;

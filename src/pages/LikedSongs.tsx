@@ -64,7 +64,7 @@ const LikedSongs = () => {
                 <p className="text-sm font-medium truncate">{song.track_name}</p>
                 <p className="text-xs text-muted-foreground truncate">{song.artist_name}{song.album_name ? ` · ${song.album_name}` : ""}</p>
               </div>
-              <AudioPreviewButton trackName={song.track_name} artistName={song.artist_name} size="sm" />
+              <AudioPreviewButton trackId={song.spotify_track_id} previewUrl={null} size="sm" />
             </div>
           ))}
         </div>
