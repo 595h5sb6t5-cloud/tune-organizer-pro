@@ -1,21 +1,26 @@
 import { useEffect, useRef } from "react";
 import AppLayout from "@/components/app/AppLayout";
 import { Button } from "@/components/ui/button";
-import { ListMusic, Sparkles, Headphones, Music, RefreshCw, Loader2, Heart, Users, CheckCircle2, AlertCircle } from "lucide-react";
+import { ListMusic, Sparkles, Headphones, Music, RefreshCw, Loader2, Heart, Users, CheckCircle2, AlertCircle, Circle } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useAuth } from "@/hooks/use-auth";
-import { useSpotifyLibrary, type SyncPhase } from "@/hooks/use-spotify-library";
+import { useSpotifyLibrary, type SyncStageState } from "@/hooks/use-spotify-library";
 import { toast } from "sonner";
 
-const SYNC_PHASE_LABELS: Record<SyncPhase, string> = {
-  idle: "",
-  starting: "Starting sync…",
-  liked_songs: "Syncing liked songs…",
-  playlists: "Updating playlists…",
-  artists: "Importing followed artists…",
-  complete: "Sync complete!",
-  error: "Sync failed",
-};
+function StageIcon({ status }: { status: SyncStageState["status"] }) {
+  switch (status) {
+    case "done":
+      return <CheckCircle2 className="w-3.5 h-3.5 text-accent shrink-0" />;
+    case "active":
+      return <Loader2 className="w-3.5 h-3.5 text-accent animate-spin shrink-0" />;
+    case "error":
+      return <AlertCircle className="w-3.5 h-3.5 text-destructive shrink-0" />;
+    case "skipped":
+      return <Circle className="w-3.5 h-3.5 text-muted-foreground/40 shrink-0" />;
+    default:
+      return <Circle className="w-3.5 h-3.5 text-muted-foreground/30 shrink-0" />;
+  }
+}
 
 const Playlists = () => {
   const { profile } = useAuth();
@@ -27,10 +32,10 @@ const Playlists = () => {
     followedArtists,
     loading,
     syncing,
-    syncPhase,
+    syncStages,
+    allDone,
     lastSyncResult,
     lastSyncedLabel,
-    syncMeta,
     resync,
   } = useSpotifyLibrary();
 
@@ -42,10 +47,10 @@ const Playlists = () => {
     }
   };
 
-  // Show toast when sync completes
-  const prevSyncPhase = useRef(syncPhase);
+  // Show toast when sync finishes
+  const prevSyncing = useRef(syncing);
   useEffect(() => {
-    if (prevSyncPhase.current !== "idle" && syncPhase === "idle" && lastSyncResult) {
+    if (prevSyncing.current && !syncing && lastSyncResult) {
       const r = lastSyncResult;
       const mode = r.sync_mode === "incremental" ? "Quick sync" : "Full sync";
       const parts: string[] = [];
@@ -59,8 +64,8 @@ const Playlists = () => {
         description: parts.length > 0 ? parts.join(" · ") : "Everything is up to date",
       });
     }
-    prevSyncPhase.current = syncPhase;
-  }, [syncPhase, lastSyncResult]);
+    prevSyncing.current = syncing;
+  }, [syncing, lastSyncResult]);
 
   if (!spotifyConnected) {
     return (
@@ -88,6 +93,7 @@ const Playlists = () => {
   }
 
   const hasData = playlists.length > 0 || likedCount > 0;
+  const hasAnySyncActivity = syncStages.some(s => s.status !== "pending");
 
   return (
     <AppLayout>
@@ -126,17 +132,41 @@ const Playlists = () => {
           </div>
         </div>
 
-        {/* Sync progress banner */}
-        {syncing && syncPhase !== "idle" && (
-          <div className="mb-6 p-3 rounded-xl bg-accent/10 border border-accent/20 flex items-center gap-3">
-            {syncPhase === "complete" ? (
-              <CheckCircle2 className="w-4 h-4 text-accent shrink-0" />
-            ) : syncPhase === "error" ? (
-              <AlertCircle className="w-4 h-4 text-destructive shrink-0" />
-            ) : (
-              <Loader2 className="w-4 h-4 text-accent animate-spin shrink-0" />
-            )}
-            <span className="text-sm font-medium">{SYNC_PHASE_LABELS[syncPhase]}</span>
+        {/* Multi-stage sync progress banner */}
+        {(syncing || (allDone && hasAnySyncActivity)) && (
+          <div className="mb-6 p-4 rounded-xl bg-accent/5 border border-accent/15 space-y-2">
+            <div className="flex items-center gap-2 mb-3">
+              {syncing ? (
+                <Loader2 className="w-4 h-4 text-accent animate-spin" />
+              ) : (
+                <CheckCircle2 className="w-4 h-4 text-accent" />
+              )}
+              <span className="text-sm font-medium">
+                {syncing ? "Syncing your Spotify library…" : "Sync complete"}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+              {syncStages.map((s) => (
+                <div
+                  key={s.stage}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs transition-all ${
+                    s.status === "active"
+                      ? "bg-accent/10 text-foreground font-medium"
+                      : s.status === "done"
+                      ? "bg-accent/5 text-foreground"
+                      : s.status === "error"
+                      ? "bg-destructive/10 text-destructive"
+                      : "text-muted-foreground/60"
+                  }`}
+                >
+                  <StageIcon status={s.status} />
+                  <span className="truncate">{s.label}</span>
+                  {s.detail && s.status === "done" && (
+                    <span className="text-muted-foreground ml-auto text-[10px] shrink-0">{s.detail}</span>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
