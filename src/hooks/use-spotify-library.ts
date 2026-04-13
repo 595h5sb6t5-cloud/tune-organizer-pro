@@ -83,6 +83,32 @@ function formatTimeAgo(dateStr: string | null): string | null {
   return `${days}d ago`;
 }
 
+/** Fetch all rows from a table, bypassing the 1000-row default limit */
+async function fetchAllRows<T>(
+  table: string,
+  select: string,
+  userId: string,
+  orderCol: string,
+  ascending = true,
+): Promise<T[]> {
+  const PAGE = 1000;
+  let offset = 0;
+  const all: T[] = [];
+  while (true) {
+    const { data, error } = await supabase
+      .from(table)
+      .select(select)
+      .eq("user_id", userId)
+      .order(orderCol, { ascending })
+      .range(offset, offset + PAGE - 1);
+    if (error || !data || data.length === 0) break;
+    all.push(...(data as T[]));
+    if (data.length < PAGE) break;
+    offset += PAGE;
+  }
+  return all;
+}
+
 const INITIAL_STAGES: SyncStageState[] = [
   { stage: "liked_songs", label: "Liked songs", status: "pending" },
   { stage: "albums", label: "Saved albums", status: "pending" },
@@ -146,51 +172,56 @@ export function useSpotifyLibrary() {
 
   const refreshLiked = useCallback(async () => {
     if (!user) return;
-    const [countRes, listRes] = await Promise.all([
-      supabase.from("liked_songs").select("id", { count: "exact", head: true }).eq("user_id", user.id),
-      supabase.from("liked_songs")
-        .select("id, spotify_track_id, track_name, artist_name, album_name, image_url, added_at")
-        .eq("user_id", user.id)
-        .order("added_at", { ascending: false, nullsFirst: false })
-        .limit(50),
-    ]);
+    // Get count
+    const countRes = await supabase.from("liked_songs").select("id", { count: "exact", head: true }).eq("user_id", user.id);
     setLikedCount(countRes.count ?? 0);
-    setLikedSongs((listRes.data as LikedSong[]) ?? []);
+    // Fetch ALL liked songs
+    const all = await fetchAllRows<LikedSong>(
+      "liked_songs",
+      "id, spotify_track_id, track_name, artist_name, album_name, image_url, added_at",
+      user.id,
+      "added_at",
+      false,
+    );
+    setLikedSongs(all);
   }, [user]);
 
   const refreshPlaylists = useCallback(async () => {
     if (!user) return;
-    const { data } = await supabase
-      .from("spotify_playlists")
-      .select("id, spotify_playlist_id, name, description, image_url, track_count, is_owned_by_user, is_collaborative, owner_display_name, last_synced_at")
-      .eq("user_id", user.id)
-      .order("is_owned_by_user", { ascending: false })
-      .order("name");
-    setPlaylists((data as SpotifyPlaylist[]) ?? []);
+    const all = await fetchAllRows<SpotifyPlaylist>(
+      "spotify_playlists",
+      "id, spotify_playlist_id, name, description, image_url, track_count, is_owned_by_user, is_collaborative, owner_display_name, last_synced_at",
+      user.id,
+      "name",
+      true,
+    );
+    setPlaylists(all);
   }, [user]);
 
   const refreshArtists = useCallback(async () => {
     if (!user) return;
-    const { data } = await supabase
-      .from("spotify_followed_artists")
-      .select("id, spotify_artist_id, artist_name, image_url, genres, popularity")
-      .eq("user_id", user.id)
-      .order("artist_name");
-    setFollowedArtists((data as FollowedArtist[]) ?? []);
+    const all = await fetchAllRows<FollowedArtist>(
+      "spotify_followed_artists",
+      "id, spotify_artist_id, artist_name, image_url, genres, popularity",
+      user.id,
+      "artist_name",
+      true,
+    );
+    setFollowedArtists(all);
   }, [user]);
 
   const refreshAlbums = useCallback(async () => {
     if (!user) return;
-    const [countRes, listRes] = await Promise.all([
-      supabase.from("spotify_saved_albums").select("id", { count: "exact", head: true }).eq("user_id", user.id),
-      supabase.from("spotify_saved_albums")
-        .select("id, spotify_album_id, album_name, artist_name, image_url, release_date, total_tracks, album_type, added_at")
-        .eq("user_id", user.id)
-        .order("added_at", { ascending: false, nullsFirst: false })
-        .limit(50),
-    ]);
+    const countRes = await supabase.from("spotify_saved_albums").select("id", { count: "exact", head: true }).eq("user_id", user.id);
     setAlbumCount(countRes.count ?? 0);
-    setSavedAlbums((listRes.data as SavedAlbum[]) ?? []);
+    const all = await fetchAllRows<SavedAlbum>(
+      "spotify_saved_albums",
+      "id, spotify_album_id, album_name, artist_name, image_url, release_date, total_tracks, album_type, added_at",
+      user.id,
+      "added_at",
+      false,
+    );
+    setSavedAlbums(all);
   }, [user]);
 
   const refresh = useCallback(async () => {
@@ -230,7 +261,6 @@ export function useSpotifyLibrary() {
     const combinedResult: Record<string, any> = { success: true };
 
     try {
-      // Stage 1: Liked songs
       setStage("liked_songs", "active");
       const likedRes = await invokeSync("liked", forceFullSync);
       Object.assign(combinedResult, likedRes);
@@ -238,7 +268,6 @@ export function useSpotifyLibrary() {
       await refreshLiked();
       if (abortRef.current) return;
 
-      // Stage 2: Saved albums
       setStage("albums", "active");
       const albumRes = await invokeSync("albums", forceFullSync);
       Object.assign(combinedResult, albumRes);
@@ -246,7 +275,6 @@ export function useSpotifyLibrary() {
       await refreshAlbums();
       if (abortRef.current) return;
 
-      // Stage 3: Playlists
       setStage("playlists", "active");
       const plRes = await invokeSync("playlists", forceFullSync);
       Object.assign(combinedResult, plRes);
@@ -254,7 +282,6 @@ export function useSpotifyLibrary() {
       await refreshPlaylists();
       if (abortRef.current) return;
 
-      // Stage 4: Artists
       setStage("artists", "active");
       const artRes = await invokeSync("artists", forceFullSync);
       Object.assign(combinedResult, artRes);
@@ -262,7 +289,6 @@ export function useSpotifyLibrary() {
       await refreshArtists();
       if (abortRef.current) return;
 
-      // Stage 5: Audio analysis (background)
       setStage("analysis", "active");
       try {
         const analysisRes = await supabase.functions.invoke("spotify-import-tracks", {
