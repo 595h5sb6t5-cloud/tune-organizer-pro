@@ -116,7 +116,7 @@ ${dismissedHistory.map((s: any) => `- "${s.title}" by ${s.artist}`).join("\n")}`
 
     const systemPrompt = `You are Tempo's elite discovery AI — a deeply musical curator who has internalized this listener's entire sonic identity.
 
-YOUR CORE MISSION: Surface songs the user has NEVER heard that feel like they were made for them.
+YOUR CORE MISSION: Surface songs the user has NEVER heard that feel like they were made for them. Every recommendation must pass strict multi-dimensional compatibility checks.
 
 CRITICAL RULES:
 1. NEVER recommend any song from the exclusion list — these are songs the user already knows
@@ -128,6 +128,26 @@ CRITICAL RULES:
 7. Maintain diversity: vary tempo, energy, mood, and era across recommendations
 8. At least 40% of recommendations should be "deep-cut" popularity tier
 
+STRICT COMPATIBILITY REQUIREMENTS — every recommendation must pass MOST of these:
+1. Mood & emotional tone — same shade of emotion as the user's taste profile
+2. Atmosphere & sonic texture — compatible sonic world
+3. Production style — compatible production school
+4. Tempo & rhythm — within the user's preferred BPM range and rhythmic feel
+5. Energy profile — within the user's preferred energy range
+6. Instrumentation — compatible instrument families
+7. Vocal style — compatible vocal character
+8. Darkness vs brightness — aligned with user preference
+9. Transition compatibility — would flow in a playlist with the user's music
+
+LANGUAGE RULES — CRITICAL:
+- Analyze the user's library to detect their primary listening language(s).
+- If the user primarily listens in English, recommend English songs by default.
+- If the user primarily listens in Spanish, recommend Spanish songs by default.
+- Do NOT casually mix Spanish and English recommendations unless the user's library is already multilingual.
+- For the "perfect-for-your-playlists" category, MATCH the language of the target playlist.
+- Language mismatches make recommendations feel wrong — treat language as a strong compatibility signal.
+- For "try-something-different", you may cross languages only if it genuinely serves discovery and the vibe is compelling.
+
 DISCOVERY MODE: "${discoveryMode}" — ${modeInstructions[discoveryMode] || modeInstructions.balanced}
 
 COMPATIBILITY SCORING WEIGHTS:
@@ -135,8 +155,9 @@ COMPATIBILITY SCORING WEIGHTS:
 - Mood / emotional tone alignment: 20%
 - Tempo & rhythm compatibility: 15%
 - Energy level fit: 15%
-- Genre proximity (subgenre level): 10%
-- Artist network / scene adjacency: 10%
+- Language compatibility: 10%
+- Genre proximity (subgenre level): 5%
+- Artist network / scene adjacency: 5%
 - Novelty bonus (how fresh/unknown): 10%
 
 EXPLANATION QUALITY:
@@ -144,7 +165,6 @@ Each aiExplanation must be 2-3 sentences that reference SPECIFIC musical qualiti
 - Name exact BPM ranges, energy levels, production techniques
 - Reference specific moods, textures, vocal qualities
 - Connect to the user's actual listening patterns
-- Example: "At 87 BPM with breathy vocals over reverb-drenched guitar, this mirrors the late-night atmospheric pocket in your library. The lo-fi tape saturation and minor-key progressions echo your strongest sonic cluster."
 - NEVER say "fits your vibe" or "matches your taste" without specifics`;
 
     const userPrompt = `USER'S COMPLETE TASTE PROFILE:
@@ -255,7 +275,7 @@ Available playlist IDs: ${playlists.map((p: any) => `"${p.id}" (${p.name})`).joi
         ],
         tools,
         tool_choice: { type: "function", function: { name: "save_recommendations" } },
-        temperature: 0.9,
+        temperature: 0.7,
       }),
     });
 

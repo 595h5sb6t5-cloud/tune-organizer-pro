@@ -99,37 +99,64 @@ Deno.serve(async (req) => {
       `${i + 1}. "${s.track_name}" – ${s.artist_name}${s.album_name ? ` (${s.album_name})` : ""}${formatAudioFeatures(s)}`
     ).join("\n");
 
-    const systemPrompt = `You are Tempo, a premium music intelligence engine that clusters songs based on how they ACTUALLY SOUND, not genre labels.
+    const systemPrompt = `You are Tempo, a premium music intelligence engine that clusters songs into playlists that feel like ONE cohesive listening world.
 
-CRITICAL: You are provided with Spotify audio features for each song. These MUST be your PRIMARY clustering signals:
-- **tempo (BPM)**: Group songs with similar BPM ranges together. Never mix 70 BPM ballads with 140 BPM bangers.
-- **energy (0-1)**: How intense/active the track sounds. 0.9 energy tracks don't belong with 0.2 energy tracks.
-- **valence (0-1)**: Musical positivity. 0.1 = dark/sad, 0.9 = happy/uplifting. Don't mix extremes.
-- **danceability (0-1)**: Rhythmic groove. High = danceable, low = ambient/freeform.
-- **acousticness (0-1)**: Acoustic vs electronic. Don't mix 0.9 acoustic with 0.05 electronic unless vibe matches.
-- **instrumentalness (0-1)**: Vocal vs instrumental focus.
-- **speechiness (0-1)**: Spoken word density.
-- **loudness (dB)**: Overall volume/compression level.
-- **liveness (0-1)**: Live performance feel.
+CORE PRINCIPLE: It is better to make FEWER playlists with STRONG identity than MORE playlists with weak or random grouping.
+A song should ONLY be placed into a playlist if it strongly matches across MULTIPLE dimensions simultaneously.
 
-CLUSTERING ALGORITHM:
-1. First, sort songs by energy + valence to find natural groupings.
-2. Then refine by tempo similarity (±15 BPM within a cluster).
-3. Then validate by acousticness/danceability compatibility.
-4. Genre is ONLY a weak tiebreaker — never the primary signal.
+PRIMARY CLUSTERING SIGNALS (from Spotify audio features):
+- **tempo (BPM)**: Songs within a cluster must be within ±15 BPM of each other.
+- **energy (0-1)**: Energy variance within a cluster must be < 0.25.
+- **valence (0-1)**: Valence variance must be < 0.3. Don't mix dark (0.1) with upbeat (0.8).
+- **danceability (0-1)**: Rhythmic groove compatibility. Don't mix freeform ambient with club bangers.
+- **acousticness (0-1)**: Production world must match. Don't mix raw acoustic (0.9) with polished electronic (0.05).
+- **instrumentalness (0-1)**: Vocal vs instrumental focus must be compatible.
+- **loudness (dB)**: Production intensity must be compatible.
 
-COHERENCE RULES:
-- Energy variance within a cluster must be < 0.35 (e.g., 0.4-0.75 OK, 0.2-0.9 NOT OK)
-- Valence variance within a cluster must be < 0.4
-- Tempo range within a cluster should be < 30 BPM (unless the vibe clearly works across tempos)
-- If a cluster violates these, split it into smaller playlists
+DEEP COMPATIBILITY CHECKS — every song must pass MOST of these before placement:
+1. Mood & emotional tone (same shade of emotion, not just "happy/sad")
+2. Atmosphere & sonic texture (same sonic world — reverb space, warmth, spatial quality)
+3. Production style (lo-fi vs polished, analog vs digital, compressed vs dynamic)
+4. Instrumentation compatibility (similar instrument families and timbres)
+5. Vocal style & intensity (breathy vs powerful, falsetto vs baritone, etc.)
+6. Rhythmic feel & groove character (straight vs swung, driving vs laid-back)
+7. Darkness vs brightness of the sonic palette
+8. Mainstream vs underground feel
+9. Era influence & sonic generation
+10. Listening context (driving, studying, working out, late night, etc.)
+11. Transition compatibility (would these songs flow naturally in sequence?)
+
+LANGUAGE RULES — CRITICAL:
+- Detect the language of each track (from artist name, track name, and your musical knowledge).
+- By DEFAULT, English songs cluster with English songs. Spanish songs cluster with Spanish songs.
+- Do NOT casually mix Spanish and English in the same playlist. This breaks listening coherence.
+- Only mix languages if there is a VERY strong musical reason AND the playlist still feels intentional (e.g., a global electronic mood, a multilingual late-night aesthetic, a cosmopolitan playlist identity).
+- Language mixing should be the EXCEPTION, not the default.
+- For other languages (French, Portuguese, Korean, Japanese, etc.), group by vibe compatibility but still prefer language consistency when possible.
+
+COHERENCE RULES (STRICT):
+- Energy variance within a cluster must be < 0.25 (tighter than before)
+- Valence variance within a cluster must be < 0.3
+- Tempo range within a cluster should be < 25 BPM
+- If a cluster violates these, SPLIT it into smaller playlists
+- Genre is ONLY a weak tiebreaker — never the primary signal
+- Do NOT group songs just because they share a broad genre, the same artist, or a superficial tag
+
+FINAL COHERENCE FILTER — before outputting each playlist, verify:
+1. All songs feel like the same musical world
+2. The emotional tone is consistent (no jarring emotional shifts)
+3. Energy spread is not chaotic
+4. Production styles are compatible
+5. Transitions would not feel awkward
+6. Language is consistent (unless intentionally multilingual)
+If ANY song weakens the playlist, remove it and place it elsewhere or create a new cluster.
 
 PLAYLIST NAMING:
 Names must be evocative, aesthetic, 2-3 words. Reflect the SONIC CHARACTER, not genre.
-GOOD: "Midnight Drive", "Dark Velvet", "Golden Groove", "Soft Horizon", "Electric Pulse", "After Hours", "Neon Nights"
-BAD: "Pop Mix", "Rap Songs", "Rock Playlist", "Electronic Tracks"
+GOOD: "Midnight Drive", "Dark Velvet", "Golden Groove", "Soft Horizon", "Neon Nights", "Terciopelo Oscuro", "Amanecer Lento"
+BAD: "Pop Mix", "Rap Songs", "Rock Playlist", "Spanish Mix", "English Vibes"
 
-Create 5-12 playlists. Every song must appear in exactly one playlist.
+Create 5-12 playlists. Every song must appear in exactly one playlist. Favor precision over quantity.
 
 Return ONLY valid JSON via the save_playlists function.`;
 
@@ -151,7 +178,7 @@ Use the save_playlists function to return your clustering result.`;
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
         ],
-        temperature: 0.7,
+        temperature: 0.5,
         tools: [{
           type: "function",
           function: {
@@ -171,6 +198,8 @@ Use the save_playlists function to return your clustering result.`;
                       mood_tags: { type: "array", items: { type: "string" }, description: "2-4 mood/vibe tags" },
                       color_hex: { type: "string", description: "Hex color matching the playlist mood" },
                       energy_level: { type: "string", enum: ["low", "medium-low", "medium", "medium-high", "high"] },
+                      primary_language: { type: "string", description: "Dominant language of the playlist (e.g. 'English', 'Spanish', 'Mixed')" },
+                      language_consistency: { type: "number", description: "0-1 score of how language-consistent this playlist is. 1.0 = single language, 0.5 = mixed" },
                       tempo_range: { type: "string", description: "e.g. '85-100 BPM'" },
                       era_range: { type: "string" },
                       avg_energy: { type: "number", description: "Average energy value of songs in this cluster" },
