@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { type Track, type Recommendation } from "@/lib/sample-data";
+import { type Track, type Recommendation, samplePlaylists, sampleTracks } from "@/lib/sample-data";
 import { toast } from "sonner";
 
 interface UseAIRecommendationsOptions {
@@ -15,6 +15,8 @@ interface UseAIRecommendationsOptions {
 interface FeedbackTrack {
   title: string;
   artist: string;
+  genre?: string;
+  mood?: string;
 }
 
 export function useAIRecommendations({
@@ -34,6 +36,12 @@ export function useAIRecommendations({
   const generate = useCallback(async () => {
     setLoading(true);
     try {
+      // Build existing library for exclusion
+      const existingLibrary = sampleTracks.map((t) => ({
+        title: t.title,
+        artist: t.artist,
+      }));
+
       const { data, error } = await supabase.functions.invoke("recommend-songs", {
         body: {
           playlistName,
@@ -54,6 +62,8 @@ export function useAIRecommendations({
           discoveryMode,
           acceptedSongs,
           dismissedSongs,
+          existingLibrary,
+          count: 6,
         },
       });
 
@@ -83,6 +93,7 @@ export function useAIRecommendations({
           moodTags: r.moodTags || [],
           popularityTier: r.popularityTier || "mid",
           compatibilityBreakdown: r.compatibilityBreakdown || null,
+          insertPosition: r.insertPosition || "middle",
           targetPlaylistId: playlistId,
           status: "pending" as const,
         })
@@ -101,11 +112,11 @@ export function useAIRecommendations({
   }, [playlistId, playlistName, playlistMood, playlistDescription, tracks, discoveryMode, acceptedSongs, dismissedSongs]);
 
   const recordAccepted = useCallback((track: Track) => {
-    setAcceptedSongs((prev) => [...prev, { title: track.title, artist: track.artist }]);
+    setAcceptedSongs((prev) => [...prev, { title: track.title, artist: track.artist, genre: track.genre, mood: track.mood }]);
   }, []);
 
   const recordDismissed = useCallback((track: Track) => {
-    setDismissedSongs((prev) => [...prev, { title: track.title, artist: track.artist }]);
+    setDismissedSongs((prev) => [...prev, { title: track.title, artist: track.artist, genre: track.genre, mood: track.mood }]);
   }, []);
 
   return {
@@ -116,5 +127,7 @@ export function useAIRecommendations({
     setRecommendations,
     recordAccepted,
     recordDismissed,
+    acceptedSongs,
+    dismissedSongs,
   };
 }

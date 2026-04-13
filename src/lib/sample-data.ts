@@ -30,6 +30,8 @@ export interface Recommendation {
   reason: string;
   moodTags: string[];
   targetPlaylistId?: string;
+  targetPlaylistName?: string;
+  insertPosition?: string;
   status: "pending" | "accepted" | "dismissed" | "saved";
   popularityTier?: "deep-cut" | "mid" | "well-known";
   compatibilityBreakdown?: CompatibilityBreakdown | null;

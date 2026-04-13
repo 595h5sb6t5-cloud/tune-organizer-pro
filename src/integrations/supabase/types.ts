@@ -14,7 +14,182 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      recommendation_feedback: {
+        Row: {
+          action: string
+          created_at: string
+          id: string
+          playlist_id: string | null
+          recommendation_id: string | null
+          track_artist: string
+          track_genre: string | null
+          track_mood: string | null
+          track_title: string
+          user_id: string | null
+        }
+        Insert: {
+          action: string
+          created_at?: string
+          id?: string
+          playlist_id?: string | null
+          recommendation_id?: string | null
+          track_artist: string
+          track_genre?: string | null
+          track_mood?: string | null
+          track_title: string
+          user_id?: string | null
+        }
+        Update: {
+          action?: string
+          created_at?: string
+          id?: string
+          playlist_id?: string | null
+          recommendation_id?: string | null
+          track_artist?: string
+          track_genre?: string | null
+          track_mood?: string | null
+          track_title?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "recommendation_feedback_recommendation_id_fkey"
+            columns: ["recommendation_id"]
+            isOneToOne: false
+            referencedRelation: "recommendation_history"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      recommendation_history: {
+        Row: {
+          compatibility_breakdown: Json | null
+          compatibility_score: number | null
+          created_at: string
+          discovery_mode: string | null
+          id: string
+          mood_tags: string[] | null
+          playlist_id: string | null
+          playlist_name: string | null
+          popularity_tier: string | null
+          reason: string | null
+          status: string
+          track_album: string | null
+          track_artist: string
+          track_energy: number | null
+          track_genre: string | null
+          track_mood: string | null
+          track_tempo: number | null
+          track_title: string
+          track_valence: number | null
+          track_year: number | null
+          user_id: string | null
+        }
+        Insert: {
+          compatibility_breakdown?: Json | null
+          compatibility_score?: number | null
+          created_at?: string
+          discovery_mode?: string | null
+          id?: string
+          mood_tags?: string[] | null
+          playlist_id?: string | null
+          playlist_name?: string | null
+          popularity_tier?: string | null
+          reason?: string | null
+          status?: string
+          track_album?: string | null
+          track_artist: string
+          track_energy?: number | null
+          track_genre?: string | null
+          track_mood?: string | null
+          track_tempo?: number | null
+          track_title: string
+          track_valence?: number | null
+          track_year?: number | null
+          user_id?: string | null
+        }
+        Update: {
+          compatibility_breakdown?: Json | null
+          compatibility_score?: number | null
+          created_at?: string
+          discovery_mode?: string | null
+          id?: string
+          mood_tags?: string[] | null
+          playlist_id?: string | null
+          playlist_name?: string | null
+          popularity_tier?: string | null
+          reason?: string | null
+          status?: string
+          track_album?: string | null
+          track_artist?: string
+          track_energy?: number | null
+          track_genre?: string | null
+          track_mood?: string | null
+          track_tempo?: number | null
+          track_title?: string
+          track_valence?: number | null
+          track_year?: number | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
+      user_taste_profile: {
+        Row: {
+          accepted_count: number | null
+          created_at: string
+          discovery_preference: string | null
+          dismissed_count: number | null
+          favorite_artists: string[] | null
+          favorite_genres: string[] | null
+          favorite_moods: string[] | null
+          id: string
+          preferred_energy_max: number | null
+          preferred_energy_min: number | null
+          preferred_eras: string[] | null
+          preferred_tempo_max: number | null
+          preferred_tempo_min: number | null
+          taste_clusters: Json | null
+          updated_at: string
+          user_id: string | null
+        }
+        Insert: {
+          accepted_count?: number | null
+          created_at?: string
+          discovery_preference?: string | null
+          dismissed_count?: number | null
+          favorite_artists?: string[] | null
+          favorite_genres?: string[] | null
+          favorite_moods?: string[] | null
+          id?: string
+          preferred_energy_max?: number | null
+          preferred_energy_min?: number | null
+          preferred_eras?: string[] | null
+          preferred_tempo_max?: number | null
+          preferred_tempo_min?: number | null
+          taste_clusters?: Json | null
+          updated_at?: string
+          user_id?: string | null
+        }
+        Update: {
+          accepted_count?: number | null
+          created_at?: string
+          discovery_preference?: string | null
+          dismissed_count?: number | null
+          favorite_artists?: string[] | null
+          favorite_genres?: string[] | null
+          favorite_moods?: string[] | null
+          id?: string
+          preferred_energy_max?: number | null
+          preferred_energy_min?: number | null
+          preferred_eras?: string[] | null
+          preferred_tempo_max?: number | null
+          preferred_tempo_min?: number | null
+          taste_clusters?: Json | null
+          updated_at?: string
+          user_id?: string | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
