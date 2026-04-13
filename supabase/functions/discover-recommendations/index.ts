@@ -66,6 +66,9 @@ serve(async (req) => {
 
     const excludeList = allTracks.map((t: any) => `"${t.title}" by ${t.artist}`).join(", ");
 
+    // Build extended exclusion from all known songs
+    const knownExcludeList = knownSongs.slice(0, 300).map((s: any) => `"${s.title}" by ${s.artist}`).join(", ");
+
     let feedbackContext = "";
     if (acceptedSongs.length > 0) {
       feedbackContext += `\n\nPreviously ACCEPTED recommendations (user liked these — recommend similar sonic qualities):\n`;
