@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Music, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useSpotify, type SpotifyStatus } from "@/hooks/use-spotify";
@@ -9,6 +9,8 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "@/hooks/use-toast";
+
+const SPOTIFY_PENDING_CALLBACK_KEY = "spotify-pending-callback";
 
 function getSpotifyStatusCopy(status: SpotifyStatus) {
   switch (status) {
@@ -32,11 +34,51 @@ function getSpotifyStatusCopy(status: SpotifyStatus) {
 const Auth = () => {
   const { user, profile, updateProfile } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [step, setStep] = useState<"auth" | "connect">("auth");
+
+  const redirectAfterLogin = searchParams.get("redirect");
+
+  // After login, check for pending Spotify callback and resume
+  useEffect(() => {
+    if (!user) return;
+
+    const pendingRaw = localStorage.getItem(SPOTIFY_PENDING_CALLBACK_KEY);
+    if (pendingRaw) {
+      try {
+        const pending = JSON.parse(pendingRaw) as { code: string; state: string; savedAt: number };
+        // Only resume if saved less than 10 minutes ago (Spotify codes expire quickly)
+        const ageMs = Date.now() - (pending.savedAt || 0);
+        if (pending.code && ageMs < 10 * 60 * 1000) {
+          console.info("[Auth] Resuming pending Spotify callback", { ageMs, has_code: true });
+          localStorage.removeItem(SPOTIFY_PENDING_CALLBACK_KEY);
+          // Navigate back to spotify-callback with the saved params
+          const url = `/spotify-callback?code=${encodeURIComponent(pending.code)}${pending.state ? `&state=${encodeURIComponent(pending.state)}` : ""}`;
+          navigate(url, { replace: true });
+          return;
+        } else {
+          console.info("[Auth] Pending Spotify callback expired", { ageMs });
+          localStorage.removeItem(SPOTIFY_PENDING_CALLBACK_KEY);
+        }
+      } catch {
+        localStorage.removeItem(SPOTIFY_PENDING_CALLBACK_KEY);
+      }
+    }
+
+    // Handle explicit redirect param
+    if (redirectAfterLogin) {
+      navigate(redirectAfterLogin, { replace: true });
+      return;
+    }
+  }, [user, navigate, redirectAfterLogin]);
 
   useEffect(() => {
     if (user && profile?.onboarding_completed) {
-      navigate("/dashboard", { replace: true });
+      // Don't redirect away if we have a pending Spotify callback
+      const hasPending = localStorage.getItem(SPOTIFY_PENDING_CALLBACK_KEY);
+      if (!hasPending) {
+        navigate("/dashboard", { replace: true });
+      }
     }
   }, [user, profile?.onboarding_completed, navigate]);
 
