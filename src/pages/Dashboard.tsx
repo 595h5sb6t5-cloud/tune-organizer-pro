@@ -316,7 +316,7 @@ const Dashboard = () => {
                 title="Library Overview"
                 subtitle="Your Spotify library at a glance"
               />
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
                 <StatCard
                   icon={Heart}
                   value={stats.totalLikedSongs.toLocaleString()}
@@ -339,7 +339,7 @@ const Dashboard = () => {
                   label="Saved albums"
                 />
                 <StatCard
-                  icon={Disc3}
+                  icon={Sparkles}
                   value={stats.totalClusters}
                   label="Sonic clusters"
                 />
