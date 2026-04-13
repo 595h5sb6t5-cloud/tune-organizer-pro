@@ -781,7 +781,7 @@ const PlaylistDetail = () => {
                 </div>
                 <p className="text-sm text-muted-foreground truncate">{track.album_name || "—"}</p>
                 <div className="flex items-center gap-1">
-                  <AudioPreviewButton trackId={track.spotify_track_id} size="sm" />
+                  <AudioPreviewButton trackId={track.spotify_track_id} previewUrl={null} size="sm" />
                   {canEdit && (
                     <>
                       <button
