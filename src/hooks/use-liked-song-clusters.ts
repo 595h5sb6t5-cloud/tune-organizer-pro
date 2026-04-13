@@ -164,7 +164,7 @@ export function useLikedSongClusters() {
         // Quick check: are all songs already tagged?
         const [totalRes, taggedRes] = await Promise.all([
           supabase.from("liked_songs").select("id", { count: "exact", head: true }).eq("user_id", user.id),
-          supabase.from("liked_songs").select("id", { count: "exact", head: true }).eq("user_id", user.id).not("analyzed_at", "is", null),
+          supabase.from("liked_songs").select("id", { count: "exact", head: true }).eq("user_id", user.id).not("groove_feel", "is", null),
         ]);
         const total = totalRes.count ?? 0;
         const tagged = taggedRes.count ?? 0;
