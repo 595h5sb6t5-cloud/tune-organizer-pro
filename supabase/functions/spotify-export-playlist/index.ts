@@ -25,9 +25,9 @@ Deno.serve(async (req) => {
     }
 
     const body = await req.json();
-    const { cluster_id, name, description, track_ids } = body;
-    console.log("[spotify-export-playlist] received:", JSON.stringify({ cluster_id, name, track_ids_count: track_ids?.length ?? 0 }));
-    if (!cluster_id || !name || !track_ids?.length) {
+    const { cluster_id, name, description, track_ids, spotify_playlist_id: directSpotifyPlaylistId } = body;
+    console.log("[spotify-export-playlist] received:", JSON.stringify({ cluster_id, name, track_ids_count: track_ids?.length ?? 0, directSpotifyPlaylistId }));
+    if (!name || !track_ids?.length) {
       return new Response(JSON.stringify({ error: "Missing required fields", details: { has_cluster_id: !!cluster_id, has_name: !!name, track_ids_count: track_ids?.length ?? 0 } }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
