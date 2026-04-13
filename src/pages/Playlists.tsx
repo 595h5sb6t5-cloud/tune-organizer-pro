@@ -101,6 +101,9 @@ const Playlists = () => {
             </p>
           </div>
           <div className="flex items-center gap-2">
+            {lastSyncedLabel && !syncing && (
+              <span className="text-xs text-muted-foreground mr-1">Synced {lastSyncedLabel}</span>
+            )}
             <Button
               variant="ghost"
               size="sm"
