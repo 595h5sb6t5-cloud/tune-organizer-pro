@@ -143,12 +143,13 @@ export function useLikedSongClusters() {
     void loadClusters();
   }, [loadClusters]);
 
-  const runAnalysis = useCallback(async () => {
+  const runAnalysis = useCallback(async (options?: { forceRetag?: boolean }) => {
     if (!user) return;
+    const forceRetag = options?.forceRetag ?? false;
 
     setAnalyzing(true);
     setError(null);
-    setProgress({ totalAnalyzed: 0, totalSongs: likedCount, phase: "clustering" });
+    setProgress({ totalAnalyzed: 0, totalSongs: likedCount, phase: forceRetag ? "tagging" : "clustering" });
 
     try {
       const { data: sessionData } = await supabase.auth.getSession();
@@ -156,40 +157,26 @@ export function useLikedSongClusters() {
         throw new Error("Session expired. Please sign in again.");
       }
 
-      // Phase 1: Cluster all songs (this also tags the songs it clusters)
-      const clusterRes = await supabase.functions.invoke("analyze-liked-songs");
-      
-      if (clusterRes.error) {
-        throw new Error(clusterRes.error.message || "Analysis failed");
-      }
-      if (clusterRes.data?.error) {
-        throw new Error(clusterRes.data.error);
-      }
-
-      const clusterData = clusterRes.data;
-      setProgress({
-        totalAnalyzed: clusterData?.total_analyzed ?? 0,
-        totalSongs: clusterData?.total_liked_songs ?? likedCount,
-        phase: "tagging",
-      });
-
-      // Phase 2: Tag remaining unanalyzed songs in batches
-      if (!clusterData?.done) {
+      if (forceRetag) {
+        // Phase 1: Force re-tag all songs with deep analysis (clears old tags + clusters)
         let done = false;
         let batchNum = 0;
-        const maxBatches = 50; // safety limit
+        const maxBatches = 80;
 
         while (!done && batchNum < maxBatches) {
           batchNum++;
           const tagRes = await supabase.functions.invoke("analyze-liked-songs", {
-            body: { mode: "tag_only", batch_size: 150 },
+            body: {
+              mode: "tag_only",
+              batch_size: 150,
+              ...(batchNum === 1 ? { force_retag: true } : {}),
+            },
           });
 
           if (tagRes.error) {
             console.error("Tag batch error:", tagRes.error);
             break;
           }
-
           if (tagRes.data?.error) {
             console.error("Tag batch data error:", tagRes.data.error);
             break;
@@ -201,13 +188,75 @@ export function useLikedSongClusters() {
           setProgress({
             totalAnalyzed: tagData?.total_analyzed ?? 0,
             totalSongs: tagData?.total_liked_songs ?? likedCount,
-            phase: done ? "done" : "tagging",
+            phase: done ? "clustering" : "tagging",
           });
 
-          console.log(`[analyze] batch ${batchNum}: ${tagData?.total_analyzed}/${tagData?.total_liked_songs} analyzed, done=${done}`);
+          console.log(`[rebuild] tag batch ${batchNum}: ${tagData?.total_analyzed}/${tagData?.total_liked_songs} analyzed, done=${done}`);
         }
-      } else {
+
+        // Phase 2: Re-cluster with deep tags
+        setProgress(prev => ({ ...prev, phase: "clustering" }));
+        const clusterRes = await supabase.functions.invoke("analyze-liked-songs");
+        if (clusterRes.error) {
+          throw new Error(clusterRes.error.message || "Clustering failed");
+        }
+        if (clusterRes.data?.error) {
+          throw new Error(clusterRes.data.error);
+        }
         setProgress(prev => ({ ...prev, phase: "done" }));
+      } else {
+        // Standard flow: cluster first, then tag remaining
+        const clusterRes = await supabase.functions.invoke("analyze-liked-songs");
+        
+        if (clusterRes.error) {
+          throw new Error(clusterRes.error.message || "Analysis failed");
+        }
+        if (clusterRes.data?.error) {
+          throw new Error(clusterRes.data.error);
+        }
+
+        const clusterData = clusterRes.data;
+        setProgress({
+          totalAnalyzed: clusterData?.total_analyzed ?? 0,
+          totalSongs: clusterData?.total_liked_songs ?? likedCount,
+          phase: "tagging",
+        });
+
+        // Tag remaining unanalyzed songs in batches
+        if (!clusterData?.done) {
+          let done = false;
+          let batchNum = 0;
+          const maxBatches = 50;
+
+          while (!done && batchNum < maxBatches) {
+            batchNum++;
+            const tagRes = await supabase.functions.invoke("analyze-liked-songs", {
+              body: { mode: "tag_only", batch_size: 150 },
+            });
+
+            if (tagRes.error) {
+              console.error("Tag batch error:", tagRes.error);
+              break;
+            }
+            if (tagRes.data?.error) {
+              console.error("Tag batch data error:", tagRes.data.error);
+              break;
+            }
+
+            const tagData = tagRes.data;
+            done = tagData?.done ?? true;
+
+            setProgress({
+              totalAnalyzed: tagData?.total_analyzed ?? 0,
+              totalSongs: tagData?.total_liked_songs ?? likedCount,
+              phase: done ? "done" : "tagging",
+            });
+
+            console.log(`[analyze] batch ${batchNum}: ${tagData?.total_analyzed}/${tagData?.total_liked_songs} analyzed, done=${done}`);
+          }
+        } else {
+          setProgress(prev => ({ ...prev, phase: "done" }));
+        }
       }
 
       await loadClusters();
