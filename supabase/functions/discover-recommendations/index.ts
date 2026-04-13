@@ -6,6 +6,162 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+function extractJson(raw: string): any {
+  let cleaned = raw.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
+  const start = cleaned.search(/[\{\[]/);
+  if (start === -1) throw new Error("No JSON found in response");
+  cleaned = cleaned.substring(start);
+
+  const root = cleaned[0];
+  const rootClose = root === "[" ? "]" : "}";
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  let end = -1;
+
+  for (let i = 0; i < cleaned.length; i++) {
+    const ch = cleaned[i];
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (ch === "\\") {
+      escape = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (ch === root) depth++;
+    if (ch === rootClose) {
+      depth--;
+      if (depth === 0) {
+        end = i + 1;
+        break;
+      }
+    }
+  }
+
+  if (end !== -1) {
+    cleaned = cleaned.slice(0, end);
+  }
+
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    // Continue into repair mode for truncated / malformed JSON.
+  }
+
+  const opens = { "{": 0, "[": 0 };
+  inString = false;
+  escape = false;
+
+  for (const ch of cleaned) {
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (ch === "\\") {
+      escape = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (ch === "{") opens["{"]++;
+    if (ch === "}") opens["{"]--;
+    if (ch === "[") opens["["]++;
+    if (ch === "]") opens["["]--;
+  }
+
+  if (inString) cleaned += '"';
+
+  cleaned = cleaned
+    .replace(/,\s*"[^"]*"?\s*:?\s*"?[^"]*$/, "")
+    .replace(/,\s*\{[^}]*$/, "")
+    .replace(/,\s*\[[^\]]*$/, "")
+    .replace(/,\s*$/, "");
+
+  for (let i = 0; i < opens["["]; i++) cleaned += "]";
+  for (let i = 0; i < opens["{"]; i++) cleaned += "}";
+
+  cleaned = cleaned
+    .replace(/[\x00-\x1F\x7F]/g, " ")
+    .replace(/,\s*}/g, "}")
+    .replace(/,\s*]/g, "]");
+
+  return JSON.parse(cleaned);
+}
+
+function parseJsonLike(value: unknown): any {
+  if (value == null) throw new Error("AI response was empty");
+  if (typeof value !== "string") return value;
+
+  const trimmed = value.trim();
+  if (!trimmed) throw new Error("AI response was empty");
+
+  try {
+    const parsed = JSON.parse(trimmed);
+    return typeof parsed === "string" ? parseJsonLike(parsed) : parsed;
+  } catch {
+    return extractJson(trimmed);
+  }
+}
+
+function sanitizeCategories(categories: any[]): any[] {
+  return categories
+    .filter((category: any) => category && typeof category === "object")
+    .map((category: any, index: number) => ({
+      id: typeof category.id === "string" && category.id.trim() ? category.id : `category-${index + 1}`,
+      title: typeof category.title === "string" && category.title.trim() ? category.title : `Recommendations ${index + 1}`,
+      subtitle: typeof category.subtitle === "string" ? category.subtitle : "",
+      recommendations: Array.isArray(category.recommendations)
+        ? category.recommendations.filter((recommendation: any) => recommendation && typeof recommendation === "object")
+        : [],
+    }));
+}
+
+function normalizeRecommendationsPayload(parsed: any): { categories: any[] } | null {
+  if (Array.isArray(parsed)) {
+    return { categories: sanitizeCategories(parsed) };
+  }
+
+  const candidates = [parsed, parsed?.arguments, parsed?.data, parsed?.result];
+  for (const candidate of candidates) {
+    if (!candidate || typeof candidate !== "object") continue;
+
+    if (Array.isArray(candidate.categories)) {
+      return { categories: sanitizeCategories(candidate.categories) };
+    }
+
+    if (Array.isArray(candidate.recommendations)) {
+      return {
+        categories: sanitizeCategories([{
+          id: typeof candidate.id === "string" ? candidate.id : "for-you",
+          title: typeof candidate.title === "string" ? candidate.title : "For You",
+          subtitle: typeof candidate.subtitle === "string" ? candidate.subtitle : "Fresh picks selected for your taste",
+          recommendations: candidate.recommendations,
+        }]),
+      };
+    }
+  }
+
+  return null;
+}
+
+function previewValue(value: unknown): string {
+  if (typeof value === "string") return value.slice(0, 300);
+  try {
+    return JSON.stringify(value).slice(0, 300);
+  } catch {
+    return String(value).slice(0, 300);
+  }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -293,42 +449,43 @@ IMPORTANT: You MUST call the save_recommendations function with your results. Do
     }
 
     const data = await response.json();
-    
-    // Extract from tool call
-    let parsed: any;
-    const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
-    if (toolCall?.function?.arguments) {
+
+    const message = data.choices?.[0]?.message ?? {};
+    const toolArgs = message.tool_calls?.[0]?.function?.arguments;
+    const content = typeof message.content === "string"
+      ? message.content
+      : Array.isArray(message.content)
+        ? message.content
+            .map((part: any) => typeof part?.text === "string" ? part.text : "")
+            .join("\n")
+        : "";
+
+    let parsed: { categories: any[] } | null = null;
+    for (const source of [toolArgs, content]) {
+      if (!source) continue;
+
       try {
-        parsed = typeof toolCall.function.arguments === "string"
-          ? JSON.parse(toolCall.function.arguments)
-          : toolCall.function.arguments;
-      } catch {
-        // Try extracting JSON from malformed tool call
-        try {
-          const raw = toolCall.function.arguments as string;
-          const cleaned = raw.replace(/[\x00-\x1F\x7F]/g, ' ').replace(/,\s*}/g, '}').replace(/,\s*]/g, ']');
-          parsed = JSON.parse(cleaned);
-        } catch {
-          console.error("Failed to parse tool call args:", toolCall.function.arguments);
-          throw new Error("Failed to parse AI tool call response");
+        const candidate = normalizeRecommendationsPayload(parseJsonLike(source));
+        if (candidate) {
+          parsed = candidate;
+          break;
         }
+      } catch (error) {
+        console.warn("Failed to parse AI recommendation payload source:", {
+          sourceType: typeof source,
+          preview: previewValue(source),
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
-    } else {
-      // Fallback: AI returned text instead of tool call — generate empty categories
-      const content = data.choices?.[0]?.message?.content || "";
-      console.warn("AI returned text instead of tool call:", content.slice(0, 200));
-      // Try to extract JSON from the text content
-      try {
-        const jsonMatch = content.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          parsed = JSON.parse(jsonMatch[0].replace(/,\s*}/g, '}').replace(/,\s*]/g, ']'));
-        } else {
-          // Return empty categories so the UI can handle gracefully
-          parsed = { categories: [] };
-        }
-      } catch {
-        parsed = { categories: [] };
-      }
+    }
+
+    if (!parsed) {
+      console.warn("Unable to parse AI recommendations; returning empty categories", {
+        hasToolCall: Boolean(toolArgs),
+        hasContent: Boolean(content),
+        finishReason: data.choices?.[0]?.finish_reason ?? null,
+      });
+      parsed = { categories: [] };
     }
 
     return new Response(JSON.stringify(parsed), {
