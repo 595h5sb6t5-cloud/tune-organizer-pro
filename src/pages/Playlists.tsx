@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { Brain, Heart, Loader2, Music, RefreshCw, Sparkles, Headphones, Play, ListMusic, ExternalLink, Check, Upload, Plus } from "lucide-react";
+import { Brain, Heart, Loader2, Music, RefreshCw, Sparkles, Headphones, Play, ListMusic, ExternalLink, Check, Upload, Plus, Pencil } from "lucide-react";
 import AppLayout from "@/components/app/AppLayout";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -9,6 +9,7 @@ import { useLikedSongClusters, type LikedSongCluster } from "@/hooks/use-liked-s
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import CreatePlaylistDialog from "@/components/app/CreatePlaylistDialog";
+import PlaylistEditor from "@/components/app/PlaylistEditor";
 
 const Playlists = () => {
   const { profile } = useAuth();
