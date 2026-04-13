@@ -7,15 +7,11 @@ const corsHeaders = {
 };
 
 serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
-  }
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) {
-      throw new Error("LOVABLE_API_KEY is not configured");
-    }
+    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
 
     const {
       playlistName,
@@ -27,7 +23,8 @@ serve(async (req) => {
       dismissedSongs = [],
       existingLibrary = [],
       userTasteProfile = null,
-      count = 6,
+      vibeContext = null,
+      count = 8,
     } = await req.json();
 
     if (!playlistName || !tracks || !Array.isArray(tracks)) {
@@ -37,138 +34,117 @@ serve(async (req) => {
       );
     }
 
-    const trackAnalysis = tracks
-      .map((t: any) =>
-        `- "${t.title}" by ${t.artist} | genre: ${t.genre} | mood: ${t.mood} | ${t.tempo} BPM | energy: ${t.energy} | valence: ${t.valence} | acousticness: ${t.acousticness} | danceability: ${t.danceability} | year: ${t.year}`
-      )
-      .join("\n");
+    const trackList = tracks.slice(0, 60).map((t: any, i: number) =>
+      `${i + 1}. "${t.title}" by ${t.artist}`
+    ).join("\n");
 
-    const avgTempo = tracks.reduce((s: number, t: any) => s + (t.tempo || 100), 0) / tracks.length;
-    const avgEnergy = tracks.reduce((s: number, t: any) => s + (t.energy || 0.5), 0) / tracks.length;
-    const avgValence = tracks.reduce((s: number, t: any) => s + (t.valence || 0.5), 0) / tracks.length;
-    const avgAcousticness = tracks.reduce((s: number, t: any) => s + (t.acousticness || 0.3), 0) / tracks.length;
-    const avgDanceability = tracks.reduce((s: number, t: any) => s + (t.danceability || 0.5), 0) / tracks.length;
-    const genres = [...new Set(tracks.map((t: any) => t.genre))].join(", ");
-    const moods = [...new Set(tracks.map((t: any) => t.mood))].join(", ");
     const artists = [...new Set(tracks.map((t: any) => t.artist))].join(", ");
-    const yearRange = {
-      min: Math.min(...tracks.map((t: any) => t.year || 2000)),
-      max: Math.max(...tracks.map((t: any) => t.year || 2024)),
-    };
+
+    // Build vibe context section — this is the real intelligence
+    let vibeSection = "";
+    if (vibeContext) {
+      vibeSection = `
+PLAYLIST IDENTITY (analyzed by Tempo AI — treat as ground truth):
+Primary Identity: ${vibeContext.primaryVibe}
+${vibeContext.secondaryVibes?.length ? `Sub-identities: ${vibeContext.secondaryVibes.join(", ")}` : ""}
+${vibeContext.moodSummary ? `Emotional Landscape: ${vibeContext.moodSummary}` : ""}
+${vibeContext.energySummary ? `Energy Profile: ${vibeContext.energySummary}` : ""}
+${vibeContext.productionSummary ? `Production DNA: ${vibeContext.productionSummary}` : ""}
+${vibeContext.structuralFlow ? `Playlist Arc: ${vibeContext.structuralFlow}` : ""}
+${vibeContext.listeningContext ? `Listening Context: ${vibeContext.listeningContext}` : ""}
+${vibeContext.whatBelongs ? `WHAT BELONGS HERE: ${vibeContext.whatBelongs}` : ""}
+${vibeContext.whatBreaksIt ? `WHAT BREAKS IT (AVOID): ${vibeContext.whatBreaksIt}` : ""}
+${vibeContext.cohesionDescription ? `Cohesion Thread: ${vibeContext.cohesionDescription}` : ""}
+${vibeContext.sonicPalette?.length ? `Sonic Palette: ${vibeContext.sonicPalette.join(", ")}` : ""}
+${vibeContext.emotionalKeywords?.length ? `Emotional Core: ${vibeContext.emotionalKeywords.join(", ")}` : ""}
+${vibeContext.sonicDna ? `
+Sonic DNA:
+  - Key instruments: ${vibeContext.sonicDna.key_instruments?.join(", ") || "N/A"}
+  - Vocal character: ${vibeContext.sonicDna.vocal_character || "N/A"}
+  - Production school: ${vibeContext.sonicDna.production_school || "N/A"}
+  - Spatial quality: ${vibeContext.sonicDna.spatial_quality || "N/A"}
+  - Rhythmic identity: ${vibeContext.sonicDna.rhythmic_identity || "N/A"}` : ""}
+${vibeContext.genreBlend ? `Genre DNA: ${JSON.stringify(vibeContext.genreBlend)}` : ""}
+${vibeContext.emotionalArc?.length ? `Emotional Arc: ${vibeContext.emotionalArc.map((a: any) => `${a.segment}: energy ${a.energy}, ${a.mood}`).join(" → ")}` : ""}`;
+    }
 
     let feedbackContext = "";
     if (acceptedSongs.length > 0) {
-      feedbackContext += `\n\nPreviously ACCEPTED recommendations (the user liked these — lean into similar sonic qualities, moods, artist networks, and production styles):\n`;
+      feedbackContext += `\nPreviously ACCEPTED (lean into similar qualities):\n`;
       feedbackContext += acceptedSongs.map((s: any) => `- "${s.title}" by ${s.artist}`).join("\n");
     }
     if (dismissedSongs.length > 0) {
-      feedbackContext += `\n\nPreviously DISMISSED recommendations (the user rejected these — AVOID these artists entirely and avoid similar energy levels, moods, and production styles):\n`;
+      feedbackContext += `\nPreviously DISMISSED (avoid these artists and similar styles):\n`;
       feedbackContext += dismissedSongs.map((s: any) => `- "${s.title}" by ${s.artist}`).join("\n");
     }
 
     let tasteContext = "";
     if (userTasteProfile) {
-      tasteContext = `\n\nUSER TASTE PROFILE (aggregated from all their listening behavior):
-- Favorite genres: ${(userTasteProfile.favorite_genres || []).join(", ") || "not yet established"}
-- Favorite moods: ${(userTasteProfile.favorite_moods || []).join(", ") || "not yet established"}
-- Favorite artists: ${(userTasteProfile.favorite_artists || []).join(", ") || "not yet established"}
-- Preferred tempo range: ${userTasteProfile.preferred_tempo_min || 60}–${userTasteProfile.preferred_tempo_max || 140} BPM
-- Preferred energy range: ${userTasteProfile.preferred_energy_min || 0.2}–${userTasteProfile.preferred_energy_max || 0.8}
-- Preferred eras: ${(userTasteProfile.preferred_eras || []).join(", ") || "mixed"}
-- Total accepted: ${userTasteProfile.accepted_count || 0}, Total dismissed: ${userTasteProfile.dismissed_count || 0}
-Use this profile to bias recommendations toward the user's demonstrated taste patterns.`;
+      tasteContext = `\nUSER TASTE PROFILE:
+- Genres: ${(userTasteProfile.favorite_genres || []).join(", ") || "N/A"}
+- Moods: ${(userTasteProfile.favorite_moods || []).join(", ") || "N/A"}
+- Artists: ${(userTasteProfile.favorite_artists || []).join(", ") || "N/A"}
+- Tempo: ${userTasteProfile.preferred_tempo_min || 60}–${userTasteProfile.preferred_tempo_max || 140} BPM
+- Energy: ${userTasteProfile.preferred_energy_min || 0.2}–${userTasteProfile.preferred_energy_max || 0.8}`;
     }
-
-    const discoveryModeInstructions: Record<string, string> = {
-      "safe": "Lean toward well-known songs that strongly match the playlist DNA. Prioritize recognizable artists within the playlist's genre ecosystem. Still avoid the absolute top 10 most obvious hits.",
-      "balanced": "Mix 2 recognizable songs, 2 mid-popularity songs, and 2 deep cuts or hidden gems. Balance familiarity with discovery.",
-      "deep-cuts": "Prioritize deep cuts, B-sides, lesser-known album tracks, and underground artists. Avoid any song that would appear on a 'best of' or 'top hits' playlist. The user wants to discover music they've never heard of.",
-      "mainstream": "Include well-known songs but only if they truly match the playlist's mood and energy profile. Avoid the most overplayed hits. Prioritize songs that are popular but musically compatible.",
-      "underground": "Focus exclusively on independent, underground, and lesser-known artists. No major label hits. Think small labels, Bandcamp artists, SoundCloud discoveries, and cult favorites.",
-      "nostalgic": `Focus on songs from the era range ${yearRange.min}-${yearRange.max} or earlier. Prioritize songs that evoke nostalgia and match the emotional tone of the playlist. Include forgotten gems from that era.`,
-      "new-releases": "Focus on songs released in the last 2 years. Prioritize emerging artists and recent releases that match the playlist's sonic profile.",
-    };
-
-    const modeInstruction = discoveryModeInstructions[discoveryMode] || discoveryModeInstructions["balanced"];
 
     const excludeList = [
       ...tracks.map((t: any) => `"${t.title}" by ${t.artist}`),
-      ...existingLibrary.map((t: any) => `"${t.title}" by ${t.artist}`),
+      ...existingLibrary.slice(0, 300).map((t: any) => `ID:${t.spotifyId}`),
     ].join(", ");
 
-    const systemPrompt = `You are a world-class music curator AI for Tempo, a premium music organization app. You have the deep knowledge of a veteran record store owner, the analytical precision of a musicologist, and the taste of a critically acclaimed music journalist.
+    const discoveryInstructions: Record<string, string> = {
+      "safe": "Lean toward recognizable songs that strongly match the playlist identity. 70% well-known, 30% mid-tier.",
+      "balanced": "Mix: 2 well-known, 3 mid-tier discoveries, 3 deep cuts. Balance familiarity with surprise.",
+      "deep-cuts": "80% deep cuts and underground tracks. The user wants to discover music they've genuinely never heard. Push boundaries while maintaining sonic coherence.",
+      "underground": "100% independent and underground. Small labels, Bandcamp, cult favorites. Must still match the playlist's emotional and sonic identity.",
+      "new-releases": "Focus on releases from the last 18 months. Emerging artists preferred. Must match the playlist's sonic DNA.",
+    };
 
-YOUR CORE PHILOSOPHY:
-You do NOT recommend based on popularity or streaming numbers. You recommend based on MUSICAL COMPATIBILITY — how well a song fits the sonic, emotional, and contextual DNA of the target playlist and the user's demonstrated taste.
+    const modeInstruction = discoveryInstructions[discoveryMode] || discoveryInstructions["balanced"];
 
-You think like a trusted friend who has listened to thousands of albums and always knows exactly what song to play next.
+    const systemPrompt = `You are Tempo AI — an elite music curator who thinks about playlists as living organisms with emotional arcs, sonic identities, and cultural DNA.
 
-ANTI-POPULARITY BIAS RULES:
-1. NEVER default to the most streamed or most famous songs by an artist
-2. NEVER recommend songs just because they're well-known or charting
-3. Prefer album deep cuts over singles when the deep cut has better playlist fit
-4. Consider B-sides, bonus tracks, lesser-known albums, live versions, and overlooked releases
-5. If recommending a well-known artist, pick their less obvious but musically fitting track
-6. At least 2 of ${count} recommendations MUST be from artists with fewer than 5 million monthly streams (estimate)
-7. NEVER recommend more than 1 song from the same artist
-8. Avoid songs that appear on generic "Top Hits" or "Best Of" playlists
+YOUR CORE PRINCIPLE: Musical coherence over everything. A recommendation must feel like it BELONGS in the playlist — not just shares a genre tag, but resonates with the same emotional frequency, production aesthetic, and listening purpose.
 
-MUSICAL COMPATIBILITY SCORING:
-For each recommendation, calculate compatibility based on these weighted signals:
-- Mood similarity (25%): emotional tone, lyrical themes, atmospheric quality, production mood
-- Tempo compatibility (15%): BPM within ±15 of playlist average, rhythmic feel, groove pattern
-- Energy alignment (15%): dynamic range, intensity level, production density, loudness profile
-- Genre proximity (15%): subgenre accuracy, sonic palette, instrumentation overlap, production school
-- Artist network (10%): collaboration history, shared producers, label connections, similar fanbases, influence chains
-- Era compatibility (10%): production style of the era, cultural context, recording techniques
-- Vocal/instrumental texture (10%): vocal style (falsetto, breathy, raspy, etc.), key instrumentation, production techniques, sonic signature
+You think like a DJ building a set: every track must flow from the previous one and into the next. You think like a film score supervisor: every track serves the narrative.
 
-PLAYLIST FLOW INTELLIGENCE:
-Consider how each recommendation would sit within the playlist's arc:
-- Would it work as an opener, a middle track, or a closer?
-- Does it complement the energy curve of existing tracks?
-- Does it provide continuity or interesting contrast?
+${vibeContext ? "You have already analyzed this playlist's deep identity. USE IT AS YOUR PRIMARY GUIDE. Every recommendation MUST pass the identity test described in WHAT BELONGS HERE and must NOT match anything in WHAT BREAKS IT." : "No deep analysis available — infer the playlist's identity from the track list."}
 
-DIVERSITY RULES:
-- Maximum 1 song per artist
-- At least 3 different subgenres represented across ${count} songs
-- Mix of eras unless the playlist is era-specific
-- Vary the emotional arc (not all songs at the same intensity)
-- Include at least 1 song from a completely different but sonically compatible genre (cross-pollination)
+RECOMMENDATION PHILOSOPHY:
+1. SONIC COHERENCE — Does it share the production DNA? Same reverb space, similar rhythmic feel, compatible vocal textures?
+2. EMOTIONAL FIT — Does it belong in the same emotional landscape? Not just "happy/sad" but the specific shade of emotion?
+3. FLOW QUALITY — Where in the playlist does it sit? Does it maintain or enhance the arc?
+4. FRESHNESS — Is this a song the user hasn't heard? Does it add something new while still belonging?
 
-DISCOVERY MODE: ${modeInstruction}
+ANTI-GENERIC RULES:
+- NEVER say "fits the vibe" — explain WHICH sonic qualities match
+- NEVER recommend based on popularity — recommend based on musical compatibility
+- NEVER recommend more than 1 song per artist
+- At least 2 songs must be from artists with <5M monthly Spotify listeners
+- Prefer deep album tracks over hit singles when the album track fits better
+- Reference specific production elements: "the tape-saturated drums and pitched-down vocal samples" not "similar sound"
 
-IMPORTANT: Only return valid JSON. No markdown, no code fences, no explanation outside the JSON structure.`;
+INSERTION INTELLIGENCE:
+For each recommendation, identify where in the playlist it should go and which existing track it would sit next to. Explain the transition: "After [Track X]'s fading reverb, this track's opening bass pulse picks up the same frequency space..."
 
-    const userPrompt = `PLAYLIST ANALYSIS:
-Name: "${playlistName}"
-Mood: ${playlistMood || "mixed"}
-Description: ${playlistDescription || "N/A"}
+DISCOVERY MODE: ${modeInstruction}`;
 
-PLAYLIST SONIC PROFILE:
-- Average tempo: ${avgTempo.toFixed(0)} BPM (range: ${Math.min(...tracks.map((t: any) => t.tempo || 100))}–${Math.max(...tracks.map((t: any) => t.tempo || 100))})
-- Average energy: ${avgEnergy.toFixed(2)} (range: ${Math.min(...tracks.map((t: any) => t.energy || 0.5)).toFixed(2)}–${Math.max(...tracks.map((t: any) => t.energy || 0.5)).toFixed(2)})
-- Average valence: ${avgValence.toFixed(2)}
-- Average acousticness: ${avgAcousticness.toFixed(2)}
-- Average danceability: ${avgDanceability.toFixed(2)}
-- Genres present: ${genres}
-- Moods present: ${moods}
-- Artists present: ${artists}
-- Era range: ${yearRange.min}–${yearRange.max}
+    const userPrompt = `PLAYLIST: "${playlistName}"
+${playlistDescription ? `Description: ${playlistDescription}` : ""}
+${vibeSection}
 
-CURRENT TRACKS IN PLAYLIST:
-${trackAnalysis}
+CURRENT TRACKS (in playlist order):
+${trackList}
+
+Artists present: ${artists}
 ${feedbackContext}
 ${tasteContext}
 
-EXCLUDED SONGS (user already has these — do NOT recommend any of them):
+EXCLUDE (user already has these):
 ${excludeList}
 
-Generate exactly ${count} recommendations. For each, provide a detailed compatibility breakdown and a human-readable explanation of why this specific song fits this specific playlist.
-
-The explanation should reference specific sonic qualities, not generic phrases. Example: "The reverb-heavy guitar tone and 84 BPM groove mirror the late-night atmosphere of your Night Drive tracks" — NOT "This song fits the vibe."
-
-Return this exact JSON format:
+Generate exactly ${count} recommendations. Return this JSON:
 {
   "recommendations": [
     {
@@ -177,25 +153,22 @@ Return this exact JSON format:
       "album": "Album Name",
       "year": 2020,
       "genre": "Specific Subgenre",
-      "tempo": 100,
-      "energy": 0.6,
-      "valence": 0.5,
-      "danceability": 0.5,
-      "acousticness": 0.3,
       "mood": "Primary Mood",
       "matchScore": 88,
-      "reason": "Detailed, specific explanation referencing sonic qualities",
+      "reason": "3-4 sentences explaining SPECIFIC sonic and emotional reasons this track belongs. Reference production techniques, vocal textures, rhythmic patterns, or emotional qualities that connect it to the playlist's identity.",
       "moodTags": ["Tag1", "Tag2", "Tag3"],
-      "popularityTier": "deep-cut | mid | well-known",
+      "popularityTier": "deep-cut",
+      "insertAfterTrack": "Name of existing track it should go after",
+      "insertExplanation": "Explain the sonic transition — how this track picks up from the previous one and flows into the next",
+      "sonicConnection": "The specific sonic element that connects this to the playlist DNA (e.g. 'the same reverb-heavy guitar tone found throughout the playlist')",
       "compatibilityBreakdown": {
         "mood": 90,
-        "tempo": 85,
+        "production": 85,
         "energy": 88,
-        "genre": 82,
-        "artistNetwork": 75,
-        "era": 90
-      },
-      "insertPosition": "opener | early | middle | late | closer"
+        "emotion": 92,
+        "flow": 80,
+        "freshness": 85
+      }
     }
   ]
 }`;
@@ -212,7 +185,7 @@ Return this exact JSON format:
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
         ],
-        temperature: 0.9,
+        temperature: 0.85,
       }),
     });
 
@@ -220,26 +193,19 @@ Return this exact JSON format:
       const text = await response.text();
       console.error("AI gateway error:", response.status, text);
       if (response.status === 429) {
-        return new Response(
-          JSON.stringify({ error: "Rate limit exceeded. Please try again in a moment." }),
-          { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+        return new Response(JSON.stringify({ error: "Rate limit exceeded. Please try again in a moment." }), {
+          status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
       if (response.status === 402) {
-        return new Response(
-          JSON.stringify({ error: "AI credits exhausted. Please add funds." }),
-          { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+        return new Response(JSON.stringify({ error: "AI credits exhausted. Please add funds." }), {
+          status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
       throw new Error(`AI gateway error: ${response.status}`);
     }
 
     const data = await response.json();
     const content = data.choices?.[0]?.message?.content;
-
-    if (!content) {
-      throw new Error("No content in AI response");
-    }
+    if (!content) throw new Error("No content in AI response");
 
     let parsed;
     try {

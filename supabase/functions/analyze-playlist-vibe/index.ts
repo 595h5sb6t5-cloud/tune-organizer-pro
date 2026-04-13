@@ -41,50 +41,85 @@ serve(async (req) => {
       });
     }
 
-    const trackList = tracks.slice(0, 100).map((t: any, i: number) =>
+    const trackList = tracks.slice(0, 120).map((t: any, i: number) =>
       `${i + 1}. "${t.track_name}" by ${t.artist_name}${t.album_name ? ` (${t.album_name})` : ""}`
     ).join("\n");
 
-    const systemPrompt = `You are Tempo AI, a world-class music curator with deep knowledge of every genre, subgenre, production style, era, and cultural movement in music history.
+    const systemPrompt = `You are Tempo AI — a world-class musicologist, curator, and sonic analyst. You don't classify playlists by genre. You decode their true identity: the emotional DNA, the sonic fingerprint, the invisible thread connecting every track.
 
-Your task: Analyze a playlist's true identity — not just its genre. Understand mood, atmosphere, emotional arc, production DNA, rhythm profile, and listening purpose.
+You think about music the way a film director thinks about scenes — every track serves a purpose in the emotional arc. A playlist isn't a collection, it's a narrative.
 
-IMPORTANT RULES:
-- Do NOT reduce playlists to simple genre labels
-- A playlist with songs from the same genre can still be incoherent
-- A playlist with songs from multiple genres can still be perfectly cohesive
-- Analyze at the TRACK level, not artist level — same artist can fit different vibes
-- Be specific and evocative, not generic
+YOUR ANALYSIS MUST COVER:
 
-Return a JSON object with EXACTLY these fields:
-{
-  "primary_vibe": "A specific, evocative label (e.g. 'dark atmospheric late-night rap', 'warm nostalgic sunset drive', 'elegant dinner jazz fusion')",
-  "secondary_vibes": ["3-5 supporting sub-vibes"],
-  "mood_summary": "2-3 sentences about the emotional landscape",
-  "energy_summary": "Energy profile description (intensity, dynamics, peaks/valleys)",
-  "tempo_summary": "Rhythm and tempo character",
-  "production_summary": "Production style, instrumentation, sonic texture",
-  "era_summary": "Temporal character and era influences",
-  "language_summary": "Languages present and cultural context if relevant, or 'Primarily English' etc",
-  "listening_context": "What this playlist is for (driving, studying, dinner, etc.)",
-  "structural_flow": "How the playlist behaves over time (steady, builds, arcs, contrasts)",
-  "user_intent": "The inferred purpose/occasion",
-  "ai_explanation": "A rich 2-3 sentence description of the playlist's identity as a whole",
-  "cohesion_description": "What makes this playlist feel cohesive",
-  "what_belongs": "What kind of songs would fit perfectly",
-  "what_breaks_it": "What kind of songs would break the vibe",
-  "vibe_color_hex": "A hex color that represents this playlist's mood (e.g. #1a1a2e for dark moody, #f0d78c for warm golden)"
-}`;
+1. IDENTITY — What this playlist IS at its core, beyond genre labels. The feeling you'd have if this playlist were a room, a season, a memory.
 
-    const userPrompt = `Analyze this playlist deeply:
+2. EMOTIONAL ARC — How the playlist flows emotionally from start to finish. Map the journey: where does it build, where does it breathe, where does it peak?
 
-Playlist name: "${playlistName}"
-Track count: ${tracks.length}
+3. SONIC DNA — The specific production signatures, instruments, vocal textures, and recording techniques that define this playlist's sound. Be precise: "tape-saturated lo-fi drums" not "chill beats".
 
-Tracks (in order):
+4. TRACK HIGHLIGHTS — 3-5 tracks that are the pillars of this playlist's identity. Explain WHY each one is essential to the vibe.
+
+5. ENERGY CURVE — Map the energy across the playlist in 5 segments (opening, early, middle, late, closing). Each segment gets a 0-100 energy score and a one-line description.
+
+6. GENRE BLEND — Weighted breakdown of genres/subgenres present (e.g. {"neo-soul": 35, "alternative R&B": 25, "indie pop": 20, "ambient": 20}).
+
+7. COHESION INTELLIGENCE — What holds this playlist together even if genres vary. What would BREAK it.
+
+RULES:
+- Be specific and evocative, never generic
+- Reference actual sonic qualities, not vibes buzzwords
+- A playlist can be cohesive across genres if the emotional thread connects
+- Same artist can have tracks that fit AND tracks that don't — analyze at track level
+- The primary_vibe should be a phrase you'd use to describe the playlist to a friend who knows music deeply`;
+
+    const userPrompt = `Analyze this playlist with full depth:
+
+Playlist: "${playlistName}"
+${tracks.length} tracks (in order):
+
 ${trackList}
 
-Provide your analysis as a single JSON object. Be musically literate, emotionally intelligent, and specific. Avoid generic labels.`;
+Return your analysis as a single JSON object with these exact fields:
+
+{
+  "primary_vibe": "A specific, evocative identity phrase (e.g. 'velvet midnight confessionals', 'sun-bleached coastal psychedelia')",
+  "secondary_vibes": ["4-6 supporting sub-identities"],
+  "mood_summary": "3-4 sentences — the emotional landscape, not just 'happy/sad' but the specific shade of emotion",
+  "energy_summary": "How energy moves through this playlist — dynamics, intensity patterns, breathing room",
+  "tempo_summary": "Rhythm character — not just BPM but groove feel, swing, pulse",
+  "production_summary": "The sonic signature — specific instruments, production techniques, recording aesthetics",
+  "era_summary": "When this playlist 'lives' — not just release dates but the sonic era it evokes",
+  "language_summary": "Languages and cultural textures present",
+  "listening_context": "The perfect scenario for this playlist — be vivid and specific",
+  "structural_flow": "How the playlist arc works — opener to closer narrative",
+  "user_intent": "What the curator was trying to create — the invisible purpose",
+  "ai_explanation": "A rich 3-4 sentence identity statement — this is the playlist's autobiography",
+  "cohesion_description": "The invisible thread connecting every track — what makes this coherent",
+  "what_belongs": "Specific sonic/emotional qualities a new track needs to earn its place here",
+  "what_breaks_it": "What would feel jarring — be specific about why",
+  "vibe_color_hex": "A hex color capturing this playlist's essence",
+  "sonic_palette": ["6-10 specific sonic descriptors, e.g. 'reverb-drenched guitars', '808 sub-bass', 'breathy falsetto', 'vinyl crackle'"],
+  "emotional_keywords": ["5-8 precise emotional words, e.g. 'yearning', 'defiant', 'wistful', 'euphoric'"],
+  "emotional_arc": [
+    {"segment": "opening", "energy": 65, "mood": "contemplative warmth", "description": "The playlist opens with..."},
+    {"segment": "early", "energy": 72, "mood": "...", "description": "..."},
+    {"segment": "middle", "energy": 80, "mood": "...", "description": "..."},
+    {"segment": "late", "energy": 70, "mood": "...", "description": "..."},
+    {"segment": "closing", "energy": 55, "mood": "...", "description": "The playlist resolves with..."}
+  ],
+  "sonic_dna": {
+    "key_instruments": ["list of defining instruments/sounds"],
+    "vocal_character": "Description of vocal textures present",
+    "production_school": "The production philosophy (e.g. 'Pharrell-era Neptunes crispness meets bedroom pop warmth')",
+    "spatial_quality": "How the mix feels — intimate/wide/layered/sparse",
+    "rhythmic_identity": "The groove DNA — swing, straight, syncopated, polyrhythmic"
+  },
+  "track_highlights": [
+    {"track_name": "...", "artist_name": "...", "role": "Identity Anchor / Emotional Peak / Palette Setter / etc", "why": "Why this track is essential to the playlist's identity"},
+    ...
+  ],
+  "genre_blend": {"subgenre1": 30, "subgenre2": 25, "subgenre3": 20, "subgenre4": 15, "subgenre5": 10}
+}`;
 
     const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -102,7 +137,7 @@ Provide your analysis as a single JSON object. Be musically literate, emotionall
           type: "function",
           function: {
             name: "playlist_vibe_analysis",
-            description: "Return the complete vibe analysis for a playlist",
+            description: "Return the complete deep vibe analysis for a playlist",
             parameters: {
               type: "object",
               properties: {
@@ -122,12 +157,54 @@ Provide your analysis as a single JSON object. Be musically literate, emotionall
                 what_belongs: { type: "string" },
                 what_breaks_it: { type: "string" },
                 vibe_color_hex: { type: "string" },
+                sonic_palette: { type: "array", items: { type: "string" } },
+                emotional_keywords: { type: "array", items: { type: "string" } },
+                emotional_arc: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      segment: { type: "string" },
+                      energy: { type: "number" },
+                      mood: { type: "string" },
+                      description: { type: "string" },
+                    },
+                    required: ["segment", "energy", "mood", "description"],
+                  },
+                },
+                sonic_dna: {
+                  type: "object",
+                  properties: {
+                    key_instruments: { type: "array", items: { type: "string" } },
+                    vocal_character: { type: "string" },
+                    production_school: { type: "string" },
+                    spatial_quality: { type: "string" },
+                    rhythmic_identity: { type: "string" },
+                  },
+                  required: ["key_instruments", "vocal_character", "production_school", "spatial_quality", "rhythmic_identity"],
+                },
+                track_highlights: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      track_name: { type: "string" },
+                      artist_name: { type: "string" },
+                      role: { type: "string" },
+                      why: { type: "string" },
+                    },
+                    required: ["track_name", "artist_name", "role", "why"],
+                  },
+                },
+                genre_blend: { type: "object" },
               },
               required: [
                 "primary_vibe", "secondary_vibes", "mood_summary", "energy_summary",
                 "tempo_summary", "production_summary", "era_summary", "language_summary",
                 "listening_context", "structural_flow", "user_intent", "ai_explanation",
                 "cohesion_description", "what_belongs", "what_breaks_it", "vibe_color_hex",
+                "sonic_palette", "emotional_keywords", "emotional_arc", "sonic_dna",
+                "track_highlights", "genre_blend",
               ],
               additionalProperties: false,
             },
@@ -161,7 +238,7 @@ Provide your analysis as a single JSON object. Be musically literate, emotionall
 
     const analysis = JSON.parse(toolCall.function.arguments);
 
-    // Upsert into DB using service role
+    // Upsert into DB
     const serviceClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const { error: upsertErr } = await serviceClient
       .from("playlist_vibe_analysis")
@@ -184,6 +261,13 @@ Provide your analysis as a single JSON object. Be musically literate, emotionall
         what_belongs: analysis.what_belongs,
         what_breaks_it: analysis.what_breaks_it,
         vibe_color_hex: analysis.vibe_color_hex || "#6366f1",
+        sonic_palette: analysis.sonic_palette || [],
+        emotional_keywords: analysis.emotional_keywords || [],
+        emotional_arc: analysis.emotional_arc || [],
+        sonic_dna: analysis.sonic_dna || {},
+        track_highlights: analysis.track_highlights || [],
+        genre_blend: analysis.genre_blend || {},
+        energy_curve: analysis.emotional_arc || [],
         analysis_model: "google/gemini-2.5-flash",
         updated_at: new Date().toISOString(),
       }, { onConflict: "user_id,playlist_id" });

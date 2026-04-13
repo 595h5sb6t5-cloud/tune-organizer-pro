@@ -218,8 +218,12 @@ export type Database = {
           analysis_model: string | null
           cohesion_description: string | null
           created_at: string
+          emotional_arc: Json | null
+          emotional_keywords: string[] | null
+          energy_curve: Json | null
           energy_summary: string | null
           era_summary: string | null
+          genre_blend: Json | null
           id: string
           language_summary: string | null
           listening_context: string | null
@@ -228,8 +232,11 @@ export type Database = {
           primary_vibe: string
           production_summary: string | null
           secondary_vibes: string[] | null
+          sonic_dna: Json | null
+          sonic_palette: string[] | null
           structural_flow: string | null
           tempo_summary: string | null
+          track_highlights: Json | null
           updated_at: string
           user_id: string
           user_intent: string | null
@@ -242,8 +249,12 @@ export type Database = {
           analysis_model?: string | null
           cohesion_description?: string | null
           created_at?: string
+          emotional_arc?: Json | null
+          emotional_keywords?: string[] | null
+          energy_curve?: Json | null
           energy_summary?: string | null
           era_summary?: string | null
+          genre_blend?: Json | null
           id?: string
           language_summary?: string | null
           listening_context?: string | null
@@ -252,8 +263,11 @@ export type Database = {
           primary_vibe: string
           production_summary?: string | null
           secondary_vibes?: string[] | null
+          sonic_dna?: Json | null
+          sonic_palette?: string[] | null
           structural_flow?: string | null
           tempo_summary?: string | null
+          track_highlights?: Json | null
           updated_at?: string
           user_id: string
           user_intent?: string | null
@@ -266,8 +280,12 @@ export type Database = {
           analysis_model?: string | null
           cohesion_description?: string | null
           created_at?: string
+          emotional_arc?: Json | null
+          emotional_keywords?: string[] | null
+          energy_curve?: Json | null
           energy_summary?: string | null
           era_summary?: string | null
+          genre_blend?: Json | null
           id?: string
           language_summary?: string | null
           listening_context?: string | null
@@ -276,8 +294,11 @@ export type Database = {
           primary_vibe?: string
           production_summary?: string | null
           secondary_vibes?: string[] | null
+          sonic_dna?: Json | null
+          sonic_palette?: string[] | null
           structural_flow?: string | null
           tempo_summary?: string | null
+          track_highlights?: Json | null
           updated_at?: string
           user_id?: string
           user_intent?: string | null
