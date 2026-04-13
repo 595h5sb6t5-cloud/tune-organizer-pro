@@ -275,7 +275,7 @@ Available playlist IDs: ${playlists.map((p: any) => `"${p.id}" (${p.name})`).joi
         ],
         tools,
         tool_choice: { type: "function", function: { name: "save_recommendations" } },
-        temperature: 0.9,
+        temperature: 0.7,
       }),
     });
 

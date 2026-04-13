@@ -197,7 +197,7 @@ Generate exactly ${count} recommendations. Return this JSON:
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
         ],
-        temperature: 0.85,
+        temperature: 0.65,
       }),
     });
 
