@@ -112,6 +112,9 @@ export type Database = {
           mood_tags: string[] | null
           name: string
           sort_order: number
+          spotify_exported_at: string | null
+          spotify_playlist_id: string | null
+          spotify_playlist_url: string | null
           tempo_range: string | null
           track_count: number
           updated_at: string
@@ -131,6 +134,9 @@ export type Database = {
           mood_tags?: string[] | null
           name: string
           sort_order?: number
+          spotify_exported_at?: string | null
+          spotify_playlist_id?: string | null
+          spotify_playlist_url?: string | null
           tempo_range?: string | null
           track_count?: number
           updated_at?: string
@@ -150,6 +156,9 @@ export type Database = {
           mood_tags?: string[] | null
           name?: string
           sort_order?: number
+          spotify_exported_at?: string | null
+          spotify_playlist_id?: string | null
+          spotify_playlist_url?: string | null
           tempo_range?: string | null
           track_count?: number
           updated_at?: string
