@@ -162,10 +162,9 @@ async function fetchAudioFeatures(trackIds: string[], token: string): Promise<Ma
         if (feat && feat.id) featureMap.set(feat.id, feat);
       }
     } catch (e) {
-      // Audio features API returns 403 for apps without the scope — skip gracefully
       if (e instanceof SpotifyImportError && e.status === 403) {
-        console.warn("[spotify-import-tracks] audio features API returned 403 — skipping (likely deprecated for this app)");
-        return featureMap; // stop trying further batches
+        console.warn("[spotify-import-tracks] audio features API returned 403 — skipping");
+        return featureMap;
       }
       console.warn("[spotify-import-tracks] audio features batch failed:", e);
     }
@@ -177,7 +176,6 @@ async function getAllUnfetchedAudioFeatureIds(adminClient: any, userId: string):
   const ids: string[] = [];
   const pageSize = 1000;
   let from = 0;
-
   while (true) {
     const { data, error } = await adminClient
       .from("liked_songs")
@@ -185,16 +183,12 @@ async function getAllUnfetchedAudioFeatureIds(adminClient: any, userId: string):
       .eq("user_id", userId)
       .is("audio_features_fetched_at", null)
       .range(from, from + pageSize - 1);
-
     if (error) throw error;
-
     const rows = data || [];
     ids.push(...rows.map((row: any) => row.spotify_track_id).filter(Boolean));
-
     if (rows.length < pageSize) break;
     from += pageSize;
   }
-
   return ids;
 }
 
@@ -210,20 +204,16 @@ function shouldDoFullSync(connection: SpotifyConnectionRow, forceFullSync: boole
 
 /**
  * LIKED SONGS — full bidirectional sync.
- * Fetches ALL Spotify liked track IDs, diffs against DB, adds new, removes deleted.
  */
 async function syncLikedSongs(
   adminClient: any, userId: string, token: string, isFullSync: boolean, existingTrackIds: Set<string>
 ): Promise<{ added: number; removed: number; total: number }> {
-  // Fetch all liked song IDs + metadata from Spotify
   const spotifyLiked: TrackRow[] = [];
   const spotifyLikedIds = new Set<string>();
   let offset = 0;
   let total = Infinity;
-
-  // For incremental: stop early once we hit a run of known tracks
   let consecutiveKnown = 0;
-  const KNOWN_THRESHOLD = 100; // stop after 100 consecutive known tracks in incremental mode
+  const KNOWN_THRESHOLD = 100;
 
   while (offset < total) {
     const data = await spotifyGet(`https://api.spotify.com/v1/me/tracks?limit=50&offset=${offset}`, token);
@@ -234,7 +224,6 @@ async function syncLikedSongs(
       const t = extractTrack(item, userId);
       if (!t) continue;
       spotifyLikedIds.add(t.spotify_track_id);
-
       if (!existingTrackIds.has(t.spotify_track_id)) {
         spotifyLiked.push(t);
         consecutiveKnown = 0;
@@ -244,54 +233,211 @@ async function syncLikedSongs(
     }
 
     offset += 50;
-
-    // Log progress every 500 tracks
     if (offset % 500 === 0) {
-      console.log(`[spotify-import-tracks] liked songs pagination: ${offset}/${total}, new: ${spotifyLiked.length}`);
+      console.log(`[spotify-import-tracks] liked songs: ${offset}/${total}, new: ${spotifyLiked.length}`);
     }
-
-    // In incremental mode, stop early if we've hit a long run of known tracks
     if (!isFullSync && consecutiveKnown >= KNOWN_THRESHOLD) {
-      console.log("[spotify-import-tracks] incremental: stopping liked songs scan after consecutive known run");
+      console.log("[spotify-import-tracks] incremental: stopping liked songs scan");
       break;
     }
-
-    // If no items returned, we're done regardless of total
     if (items.length === 0) break;
   }
 
-  console.log(`[spotify-import-tracks] liked songs pagination complete: scanned ${offset}, total ${total}, new ${spotifyLiked.length}`);
+  console.log(`[spotify-import-tracks] liked songs done: scanned ${offset}, total ${total}, new ${spotifyLiked.length}`);
 
-  // Upsert new tracks
   for (let i = 0; i < spotifyLiked.length; i += 100) {
     const batch = spotifyLiked.slice(i, i + 100);
     await adminClient.from("liked_songs").upsert(batch, { onConflict: "user_id,spotify_track_id", ignoreDuplicates: true });
     await adminClient.from("imported_tracks").upsert(batch, { onConflict: "user_id,spotify_track_id", ignoreDuplicates: true });
   }
 
-  // Delete removed tracks (only in full sync when we've scanned everything)
   let removedCount = 0;
   if (isFullSync && offset >= total) {
-    // Find tracks in DB that are no longer in Spotify
     const toRemove: string[] = [];
     for (const existingId of existingTrackIds) {
-      if (!spotifyLikedIds.has(existingId)) {
-        toRemove.push(existingId);
-      }
+      if (!spotifyLikedIds.has(existingId)) toRemove.push(existingId);
     }
-
     if (toRemove.length > 0) {
-      // Delete in batches
       for (let i = 0; i < toRemove.length; i += 100) {
-        const batch = toRemove.slice(i, i + 100);
-        await adminClient.from("liked_songs").delete().eq("user_id", userId).in("spotify_track_id", batch);
+        await adminClient.from("liked_songs").delete().eq("user_id", userId).in("spotify_track_id", toRemove.slice(i, i + 100));
       }
       removedCount = toRemove.length;
-      console.info("[spotify-import-tracks] removed liked songs no longer in Spotify:", removedCount);
+      console.info("[spotify-import-tracks] removed liked songs:", removedCount);
     }
   }
 
   return { added: spotifyLiked.length, removed: removedCount, total };
+}
+
+/**
+ * SAVED ALBUMS — full bidirectional sync with album tracks.
+ */
+async function syncSavedAlbums(
+  adminClient: any, userId: string, token: string, isFullSync: boolean, existingAlbumIds: Set<string>
+): Promise<{ added: number; removed: number; total: number; tracksImported: number }> {
+  const spotifyAlbums: any[] = [];
+  const spotifyAlbumIds = new Set<string>();
+  let offset = 0;
+  let total = Infinity;
+  let consecutiveKnown = 0;
+  const KNOWN_THRESHOLD = 50;
+
+  try {
+    while (offset < total) {
+      const data = await spotifyGet(`https://api.spotify.com/v1/me/albums?limit=50&offset=${offset}`, token);
+      total = data.total ?? 0;
+      const items = data.items || [];
+
+      for (const item of items) {
+        const album = item?.album;
+        if (!album || !album.id) continue;
+        spotifyAlbumIds.add(album.id);
+
+        const artists = (album.artists || []).map((a: any) => a?.name).filter(Boolean).join(", ");
+        spotifyAlbums.push({
+          user_id: userId,
+          spotify_album_id: album.id,
+          album_name: album.name || "Untitled",
+          artist_name: artists,
+          image_url: album.images?.[0]?.url || null,
+          release_date: album.release_date || null,
+          total_tracks: album.total_tracks || 0,
+          album_type: album.album_type || null,
+          genres: album.genres || [],
+          label: album.label || null,
+          popularity: album.popularity || null,
+          added_at: item.added_at || null,
+        });
+
+        if (existingAlbumIds.has(album.id)) {
+          consecutiveKnown++;
+        } else {
+          consecutiveKnown = 0;
+        }
+      }
+
+      offset += 50;
+      if (offset % 200 === 0) {
+        console.log(`[spotify-import-tracks] saved albums: ${offset}/${total}, collected: ${spotifyAlbums.length}`);
+      }
+      if (!isFullSync && consecutiveKnown >= KNOWN_THRESHOLD) {
+        console.log("[spotify-import-tracks] incremental: stopping albums scan");
+        break;
+      }
+      if (items.length === 0) break;
+    }
+
+    console.log(`[spotify-import-tracks] saved albums done: ${spotifyAlbums.length} total`);
+  } catch (e) {
+    if (isInsufficientScopeError(e)) {
+      console.warn("[spotify-import-tracks] saved albums skipped - missing scope");
+      return { added: 0, removed: 0, total: 0, tracksImported: 0 };
+    }
+    throw e;
+  }
+
+  // Upsert albums
+  const newAlbums = spotifyAlbums.filter(a => !existingAlbumIds.has(a.spotify_album_id));
+  for (let i = 0; i < spotifyAlbums.length; i += 50) {
+    await adminClient.from("spotify_saved_albums").upsert(
+      spotifyAlbums.slice(i, i + 50),
+      { onConflict: "user_id,spotify_album_id" }
+    );
+  }
+
+  // Remove albums no longer saved (full sync only)
+  let removedCount = 0;
+  if (isFullSync && offset >= total) {
+    const toRemove: string[] = [];
+    for (const existingId of existingAlbumIds) {
+      if (!spotifyAlbumIds.has(existingId)) toRemove.push(existingId);
+    }
+    if (toRemove.length > 0) {
+      // Get DB IDs for these albums to delete their tracks too
+      const { data: albumRows } = await adminClient
+        .from("spotify_saved_albums")
+        .select("id, spotify_album_id")
+        .eq("user_id", userId)
+        .in("spotify_album_id", toRemove);
+      
+      for (const row of albumRows || []) {
+        await adminClient.from("spotify_album_tracks").delete().eq("album_id", row.id);
+      }
+      
+      for (let i = 0; i < toRemove.length; i += 100) {
+        await adminClient.from("spotify_saved_albums").delete().eq("user_id", userId).in("spotify_album_id", toRemove.slice(i, i + 100));
+      }
+      removedCount = toRemove.length;
+      console.info("[spotify-import-tracks] removed saved albums:", removedCount);
+    }
+  }
+
+  // Import tracks for NEW albums only (or all in full sync with no prior data)
+  const albumsToFetchTracks = newAlbums.length > 0 ? newAlbums : [];
+  
+  // Get DB IDs for the new albums
+  let totalTracksImported = 0;
+  if (albumsToFetchTracks.length > 0) {
+    const newAlbumSpotifyIds = albumsToFetchTracks.map(a => a.spotify_album_id);
+    const { data: dbAlbums } = await adminClient
+      .from("spotify_saved_albums")
+      .select("id, spotify_album_id")
+      .eq("user_id", userId)
+      .in("spotify_album_id", newAlbumSpotifyIds);
+    
+    const dbIdMap = new Map<string, string>();
+    for (const row of dbAlbums || []) {
+      dbIdMap.set(row.spotify_album_id, row.id);
+    }
+
+    for (const album of albumsToFetchTracks) {
+      const dbId = dbIdMap.get(album.spotify_album_id);
+      if (!dbId) continue;
+
+      try {
+        const trackRows: any[] = [];
+        let trackOffset = 0;
+
+        while (true) {
+          const data = await spotifyGet(
+            `https://api.spotify.com/v1/albums/${album.spotify_album_id}/tracks?limit=50&offset=${trackOffset}`,
+            token
+          );
+          const items = data.items || [];
+
+          for (const track of items) {
+            if (!track || !track.id) continue;
+            const artists = (track.artists || []).map((a: any) => a?.name).filter(Boolean).join(", ");
+            trackRows.push({
+              user_id: userId,
+              album_id: dbId,
+              spotify_track_id: track.id,
+              track_name: track.name || "Untitled",
+              artist_name: artists,
+              track_number: track.track_number || 1,
+              disc_number: track.disc_number || 1,
+              duration_ms: track.duration_ms || null,
+            });
+          }
+
+          if (items.length === 0 || trackOffset + items.length >= (data.total || 0)) break;
+          trackOffset += 50;
+        }
+
+        for (let i = 0; i < trackRows.length; i += 100) {
+          await adminClient.from("spotify_album_tracks").upsert(
+            trackRows.slice(i, i + 100),
+            { onConflict: "album_id,spotify_track_id", ignoreDuplicates: true }
+          );
+        }
+        totalTracksImported += trackRows.length;
+      } catch (e) {
+        console.warn(`[spotify-import-tracks] Failed to import tracks for album ${album.album_name}:`, e);
+      }
+    }
+  }
+
+  return { added: newAlbums.length, removed: removedCount, total: spotifyAlbums.length, tracksImported: totalTracksImported };
 }
 
 type PlaylistMeta = {
@@ -309,8 +455,6 @@ type PlaylistMeta = {
 
 /**
  * PLAYLISTS — full bidirectional sync.
- * Fetches all playlists from Spotify library, upserts metadata,
- * removes playlists no longer in library, re-imports tracks for changed playlists.
  */
 async function syncPlaylists(
   adminClient: any, userId: string, token: string, spotifyUserId: string,
@@ -342,10 +486,10 @@ async function syncPlaylists(
         });
       }
       offset += 50;
-      console.log(`[spotify-import-tracks] playlists pagination: ${offset}/${totalPl}, collected: ${playlists.length}`);
+      console.log(`[spotify-import-tracks] playlists: ${offset}/${totalPl}, collected: ${playlists.length}`);
       if (items.length === 0) break;
     }
-    console.log(`[spotify-import-tracks] playlists pagination complete: ${playlists.length} total`);
+    console.log(`[spotify-import-tracks] playlists done: ${playlists.length} total`);
   } catch (e) {
     if (isInsufficientScopeError(e)) {
       warning = "Spotify connection is missing playlist read access. Reconnect Spotify to sync playlists.";
@@ -355,7 +499,6 @@ async function syncPlaylists(
     throw e;
   }
 
-  // Detect changed playlists (via snapshot_id comparison)
   const changedPlaylistIds: string[] = [];
   for (const pl of playlists) {
     const oldSnapshot = existingSnapshots.get(pl.id);
@@ -364,7 +507,6 @@ async function syncPlaylists(
     }
   }
 
-  // Upsert all playlist metadata
   const playlistRows = playlists.map(pl => ({
     user_id: userId,
     spotify_playlist_id: pl.id,
@@ -387,7 +529,6 @@ async function syncPlaylists(
     );
   }
 
-  // Remove playlists no longer in user's library
   const currentSpotifyIds = new Set(playlists.map(p => p.id));
   const { data: dbPlaylists } = await adminClient
     .from("spotify_playlists")
@@ -404,7 +545,6 @@ async function syncPlaylists(
     }
   }
 
-  // Re-import tracks for changed playlists
   const playlistIdMap = new Map<string, string>();
   const { data: freshDbPlaylists } = await adminClient
     .from("spotify_playlists")
@@ -451,7 +591,7 @@ async function syncPlaylists(
             position: plOffset + idx,
           });
         }
-        console.log(`[spotify-import-tracks] playlist ${pl.name} pagination: ${plOffset + items.length}/${pl.track_count}`);
+        console.log(`[spotify-import-tracks] playlist ${pl.name}: ${plOffset + items.length}/${pl.track_count}`);
         if (items.length === 0) break;
         plOffset += 50;
       }
@@ -473,7 +613,6 @@ async function syncPlaylists(
 
 /**
  * FOLLOWED ARTISTS — full bidirectional sync.
- * Fetches all followed artists, upserts, removes unfollowed.
  */
 async function syncFollowedArtists(
   adminClient: any, userId: string, token: string, existingArtistIds: Set<string>
@@ -506,20 +645,19 @@ async function syncFollowedArtists(
 
       after = data?.artists?.cursors?.after || null;
       page++;
-      console.log(`[spotify-import-tracks] artists pagination page ${page}: collected ${artists.length}, has_next: ${Boolean(after)}`);
+      console.log(`[spotify-import-tracks] artists page ${page}: collected ${artists.length}`);
       if (!after) break;
     }
-    console.log(`[spotify-import-tracks] artists pagination complete: ${artists.length} total`);
+    console.log(`[spotify-import-tracks] artists done: ${artists.length} total`);
   } catch (e) {
     if (isInsufficientScopeError(e)) {
-      console.warn("[spotify-import-tracks] followed artists skipped - missing user-follow-read scope");
+      console.warn("[spotify-import-tracks] followed artists skipped - missing scope");
       return { added: 0, removed: 0, total: 0 };
     }
     console.warn("[spotify-import-tracks] followed artists import failed:", e);
     return { added: 0, removed: 0, total: 0 };
   }
 
-  // Upsert artists
   for (let i = 0; i < artists.length; i += 50) {
     await adminClient.from("spotify_followed_artists").upsert(
       artists.slice(i, i + 50),
@@ -527,18 +665,14 @@ async function syncFollowedArtists(
     );
   }
 
-  // Remove unfollowed artists
   let removedCount = 0;
   const toRemove: string[] = [];
   for (const existingId of existingArtistIds) {
-    if (!spotifyArtistIds.has(existingId)) {
-      toRemove.push(existingId);
-    }
+    if (!spotifyArtistIds.has(existingId)) toRemove.push(existingId);
   }
   if (toRemove.length > 0) {
     for (let i = 0; i < toRemove.length; i += 100) {
-      const batch = toRemove.slice(i, i + 100);
-      await adminClient.from("spotify_followed_artists").delete().eq("user_id", userId).in("spotify_artist_id", batch);
+      await adminClient.from("spotify_followed_artists").delete().eq("user_id", userId).in("spotify_artist_id", toRemove.slice(i, i + 100));
     }
     removedCount = toRemove.length;
   }
@@ -569,13 +703,12 @@ Deno.serve(async (req) => {
     const { data: { user }, error: userError } = await supabase.auth.getUser();
     if (userError || !user) return fail("user_session", "Invalid session.", 401);
 
-    // Parse request body for sync options
     let forceFullSync = false;
-    let syncScope: "all" | "liked" | "playlists" | "artists" = "all";
+    let syncScope: "all" | "liked" | "playlists" | "artists" | "albums" = "all";
     try {
       const body = await req.json();
       if (body?.force_full) forceFullSync = true;
-      if (body?.scope && ["liked", "playlists", "artists"].includes(body.scope)) {
+      if (body?.scope && ["liked", "playlists", "artists", "albums"].includes(body.scope)) {
         syncScope = body.scope;
       }
     } catch { /* no body is fine */ }
@@ -585,15 +718,13 @@ Deno.serve(async (req) => {
 
     const isFullSync = shouldDoFullSync(connection, forceFullSync);
     const syncMode = isFullSync ? "full" : "incremental";
-    console.log("[spotify-import-tracks] === STARTING SYNC ===", { user_id: user.id, mode: syncMode, scope: syncScope, forceFullSync });
+    console.log("[spotify-import-tracks] === STARTING SYNC ===", { user_id: user.id, mode: syncMode, scope: syncScope });
 
-    // Update sync status
     await adminClient.from("spotify_connections").update({
       sync_status: "syncing",
       sync_error: null,
     }).eq("user_id", user.id);
 
-    // Get Spotify profile
     let spotifyUserId = "";
     try {
       const profile = await spotifyGet("https://api.spotify.com/v1/me", accessToken);
@@ -606,10 +737,11 @@ Deno.serve(async (req) => {
     }
 
     // Load existing data for diffing
-    const [trackRes, playlistRes, artistRes] = await Promise.all([
+    const [trackRes, playlistRes, artistRes, albumRes] = await Promise.all([
       adminClient.from("liked_songs").select("spotify_track_id").eq("user_id", user.id),
       adminClient.from("spotify_playlists").select("spotify_playlist_id, snapshot_id").eq("user_id", user.id),
       adminClient.from("spotify_followed_artists").select("spotify_artist_id").eq("user_id", user.id),
+      adminClient.from("spotify_saved_albums").select("spotify_album_id").eq("user_id", user.id),
     ]);
 
     const existingTrackIds = new Set((trackRes.data || []).map((r: any) => r.spotify_track_id));
@@ -618,6 +750,7 @@ Deno.serve(async (req) => {
       if (p.snapshot_id) existingSnapshots.set(p.spotify_playlist_id, p.snapshot_id);
     }
     const existingArtistIds = new Set((artistRes.data || []).map((r: any) => r.spotify_artist_id));
+    const existingAlbumIds = new Set((albumRes.data || []).map((r: any) => r.spotify_album_id));
 
     const now = new Date().toISOString();
     const result: Record<string, any> = { success: true, sync_mode: syncMode };
@@ -631,19 +764,13 @@ Deno.serve(async (req) => {
       result.liked_songs_removed = likedResult.removed;
       result.liked_songs_total = likedResult.total;
       console.log("[spotify-import-tracks] liked_songs_done", likedResult);
-
       await adminClient.from("spotify_connections").update({ last_library_sync_at: now }).eq("user_id", user.id);
 
-      // Fetch audio features for NEW tracks only (skip in scoped sync to be fast)
       if (syncScope === "all") {
         step = "fetch_audio_features";
         const pendingAudioFeatureIds = await getAllUnfetchedAudioFeatureIds(adminClient, user.id);
-
         if (pendingAudioFeatureIds.length > 0) {
-          console.log("[spotify-import-tracks] fetching audio features for all remaining tracks", {
-            pending: pendingAudioFeatureIds.length,
-          });
-
+          console.log("[spotify-import-tracks] fetching audio features", { pending: pendingAudioFeatureIds.length });
           const featureMap = await fetchAudioFeatures(pendingAudioFeatureIds, accessToken);
           const featNow = new Date().toISOString();
           for (const [trackId, feat] of featureMap) {
@@ -665,25 +792,22 @@ Deno.serve(async (req) => {
           }
           result.audio_features = featureMap.size;
         }
-
-        const [analyzedCountRes, likedCountRes] = await Promise.all([
-          adminClient
-            .from("liked_songs")
-            .select("id", { count: "exact", head: true })
-            .eq("user_id", user.id)
-            .not("audio_features_fetched_at", "is", null),
-          adminClient
-            .from("liked_songs")
-            .select("id", { count: "exact", head: true })
-            .eq("user_id", user.id),
-        ]);
-
-        result.audio_features_analyzed = analyzedCountRes.count ?? 0;
-        result.audio_features_total = likedCountRes.count ?? 0;
       }
     }
 
-    // Step 2: Playlists + playlist tracks
+    // Step 2: Saved Albums
+    if (syncScope === "all" || syncScope === "albums") {
+      step = "sync_saved_albums";
+      const albumResult = await syncSavedAlbums(adminClient, user.id, accessToken, isFullSync, existingAlbumIds);
+      result.albums_total = albumResult.total;
+      result.albums_added = albumResult.added;
+      result.albums_removed = albumResult.removed;
+      result.album_tracks_imported = albumResult.tracksImported;
+      console.log("[spotify-import-tracks] saved_albums_done", albumResult);
+      await adminClient.from("spotify_connections").update({ last_album_sync_at: now }).eq("user_id", user.id);
+    }
+
+    // Step 3: Playlists + playlist tracks
     if (syncScope === "all" || syncScope === "playlists") {
       step = "sync_playlists";
       const plResult = await syncPlaylists(adminClient, user.id, accessToken, spotifyUserId, existingSnapshots);
@@ -693,11 +817,10 @@ Deno.serve(async (req) => {
       result.playlist_tracks_synced = plResult.tracksSynced;
       if (plResult.warning) warnings.push(plResult.warning);
       console.log("[spotify-import-tracks] playlists_done", plResult);
-
       await adminClient.from("spotify_connections").update({ last_playlist_sync_at: now }).eq("user_id", user.id);
     }
 
-    // Step 3: Followed artists
+    // Step 4: Followed artists
     if (syncScope === "all" || syncScope === "artists") {
       step = "sync_followed_artists";
       const artistResult = await syncFollowedArtists(adminClient, user.id, accessToken, existingArtistIds);
@@ -705,15 +828,12 @@ Deno.serve(async (req) => {
       result.artists_added = artistResult.added;
       result.artists_removed = artistResult.removed;
       console.log("[spotify-import-tracks] followed_artists_done", artistResult);
-
       await adminClient.from("spotify_connections").update({ last_artist_sync_at: now }).eq("user_id", user.id);
     }
 
     // Update final sync timestamps
     const syncUpdate: Record<string, any> = { sync_status: "idle", sync_error: null };
-    if (isFullSync) {
-      syncUpdate.last_full_sync_at = now;
-    }
+    if (isFullSync) syncUpdate.last_full_sync_at = now;
     syncUpdate.last_incremental_sync_at = now;
     await adminClient.from("spotify_connections").update(syncUpdate).eq("user_id", user.id);
 
@@ -722,7 +842,6 @@ Deno.serve(async (req) => {
 
     return json(result);
   } catch (e) {
-    // Mark sync as failed with error message
     const errorMessage = e instanceof Error ? e.message : "Spotify import failed.";
     try {
       const supabaseUrl = Deno.env.get("SUPABASE_URL")!;

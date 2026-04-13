@@ -7,6 +7,7 @@ import { useAuth } from "./use-auth";
  * - liked songs
  * - imported tracks
  * - spotify playlist tracks
+ * - saved album tracks
  * - accepted recommendation history
  *
  * Returns a Set<string> of spotify_track_id values for filtering.
@@ -28,12 +29,13 @@ export function useKnownTracks() {
     const ids = new Set<string>();
     const titles = new Set<string>();
 
-    // Fetch in parallel
-    const [likedRes, importedRes, playlistTracksRes, acceptedRes] = await Promise.all([
+    // Fetch in parallel — all sources of known music
+    const [likedRes, importedRes, playlistTracksRes, acceptedRes, albumTracksRes] = await Promise.all([
       supabase.from("liked_songs").select("spotify_track_id, track_name, artist_name").eq("user_id", user.id),
       supabase.from("imported_tracks").select("spotify_track_id, track_name, artist_name").eq("user_id", user.id),
       supabase.from("spotify_playlist_tracks").select("spotify_track_id, track_name, artist_name").eq("user_id", user.id),
       supabase.from("recommendation_history").select("track_title, track_artist").eq("user_id", user.id).eq("status", "accepted"),
+      supabase.from("spotify_album_tracks").select("spotify_track_id, track_name, artist_name").eq("user_id", user.id),
     ]);
 
     for (const row of likedRes.data || []) {
@@ -45,6 +47,10 @@ export function useKnownTracks() {
       titles.add(`${row.track_name}|||${row.artist_name}`.toLowerCase());
     }
     for (const row of playlistTracksRes.data || []) {
+      ids.add(row.spotify_track_id);
+      titles.add(`${row.track_name}|||${row.artist_name}`.toLowerCase());
+    }
+    for (const row of albumTracksRes.data || []) {
       ids.add(row.spotify_track_id);
       titles.add(`${row.track_name}|||${row.artist_name}`.toLowerCase());
     }

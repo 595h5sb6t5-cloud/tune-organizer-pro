@@ -34,8 +34,20 @@ export interface FollowedArtist {
   popularity: number | null;
 }
 
+export interface SavedAlbum {
+  id: string;
+  spotify_album_id: string;
+  album_name: string;
+  artist_name: string;
+  image_url: string | null;
+  release_date: string | null;
+  total_tracks: number;
+  album_type: string | null;
+  added_at: string | null;
+}
+
 /** Each stage the sync pipeline goes through, in order */
-export type SyncStage = "liked_songs" | "playlists" | "artists" | "analysis";
+export type SyncStage = "liked_songs" | "albums" | "playlists" | "artists" | "analysis";
 
 export type StageStatus = "pending" | "active" | "done" | "error" | "skipped";
 
@@ -56,6 +68,7 @@ export interface SyncMetadata {
   lastLibrarySyncAt: string | null;
   lastPlaylistSyncAt: string | null;
   lastArtistSyncAt: string | null;
+  lastAlbumSyncAt: string | null;
 }
 
 function formatTimeAgo(dateStr: string | null): string | null {
@@ -72,6 +85,7 @@ function formatTimeAgo(dateStr: string | null): string | null {
 
 const INITIAL_STAGES: SyncStageState[] = [
   { stage: "liked_songs", label: "Liked songs", status: "pending" },
+  { stage: "albums", label: "Saved albums", status: "pending" },
   { stage: "playlists", label: "Playlists", status: "pending" },
   { stage: "artists", label: "Followed artists", status: "pending" },
   { stage: "analysis", label: "Audio analysis", status: "pending" },
@@ -85,6 +99,8 @@ export function useSpotifyLibrary() {
   const [likedSongs, setLikedSongs] = useState<LikedSong[]>([]);
   const [likedCount, setLikedCount] = useState(0);
   const [followedArtists, setFollowedArtists] = useState<FollowedArtist[]>([]);
+  const [savedAlbums, setSavedAlbums] = useState<SavedAlbum[]>([]);
+  const [albumCount, setAlbumCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncStages, setSyncStages] = useState<SyncStageState[]>(INITIAL_STAGES);
@@ -97,9 +113,9 @@ export function useSpotifyLibrary() {
     lastLibrarySyncAt: null,
     lastPlaylistSyncAt: null,
     lastArtistSyncAt: null,
+    lastAlbumSyncAt: null,
   });
 
-  // Helpers to update a single stage
   const setStage = useCallback((stage: SyncStage, status: StageStatus, detail?: string) => {
     setSyncStages(prev =>
       prev.map(s => s.stage === stage ? { ...s, status, detail: detail ?? s.detail } : s)
@@ -110,7 +126,7 @@ export function useSpotifyLibrary() {
     if (!user || !spotifyConnected) return;
     const { data } = await supabase
       .from("spotify_connections")
-      .select("sync_status, sync_error, last_full_sync_at, last_incremental_sync_at, last_library_sync_at, last_playlist_sync_at, last_artist_sync_at")
+      .select("sync_status, sync_error, last_full_sync_at, last_incremental_sync_at, last_library_sync_at, last_playlist_sync_at, last_artist_sync_at, last_album_sync_at")
       .eq("user_id", user.id)
       .single();
 
@@ -123,11 +139,11 @@ export function useSpotifyLibrary() {
         lastLibrarySyncAt: data.last_library_sync_at || null,
         lastPlaylistSyncAt: data.last_playlist_sync_at || null,
         lastArtistSyncAt: data.last_artist_sync_at || null,
+        lastAlbumSyncAt: (data as any).last_album_sync_at || null,
       });
     }
   }, [user, spotifyConnected]);
 
-  // Refresh just one data section from DB
   const refreshLiked = useCallback(async () => {
     if (!user) return;
     const [countRes, listRes] = await Promise.all([
@@ -163,20 +179,35 @@ export function useSpotifyLibrary() {
     setFollowedArtists((data as FollowedArtist[]) ?? []);
   }, [user]);
 
+  const refreshAlbums = useCallback(async () => {
+    if (!user) return;
+    const [countRes, listRes] = await Promise.all([
+      supabase.from("spotify_saved_albums").select("id", { count: "exact", head: true }).eq("user_id", user.id),
+      supabase.from("spotify_saved_albums")
+        .select("id, spotify_album_id, album_name, artist_name, image_url, release_date, total_tracks, album_type, added_at")
+        .eq("user_id", user.id)
+        .order("added_at", { ascending: false, nullsFirst: false })
+        .limit(50),
+    ]);
+    setAlbumCount(countRes.count ?? 0);
+    setSavedAlbums((listRes.data as SavedAlbum[]) ?? []);
+  }, [user]);
+
   const refresh = useCallback(async () => {
     if (!user || !spotifyConnected) {
       setPlaylists([]);
       setLikedSongs([]);
       setLikedCount(0);
       setFollowedArtists([]);
+      setSavedAlbums([]);
+      setAlbumCount(0);
       return;
     }
     setLoading(true);
-    await Promise.all([refreshLiked(), refreshPlaylists(), refreshArtists(), loadSyncMeta()]);
+    await Promise.all([refreshLiked(), refreshPlaylists(), refreshArtists(), refreshAlbums(), loadSyncMeta()]);
     setLoading(false);
-  }, [user, spotifyConnected, refreshLiked, refreshPlaylists, refreshArtists, loadSyncMeta]);
+  }, [user, spotifyConnected, refreshLiked, refreshPlaylists, refreshArtists, refreshAlbums, loadSyncMeta]);
 
-  // Invoke a scoped sync and return result
   const invokeSync = useCallback(async (scope: string, forceFullSync: boolean) => {
     const body: Record<string, any> = { scope };
     if (forceFullSync) body.force_full = true;
@@ -186,7 +217,6 @@ export function useSpotifyLibrary() {
     return res.data as Record<string, any>;
   }, []);
 
-  // Abort ref so we can cancel background work
   const abortRef = useRef(false);
 
   const resync = useCallback(async (forceFullSync = false) => {
@@ -200,40 +230,40 @@ export function useSpotifyLibrary() {
     const combinedResult: Record<string, any> = { success: true };
 
     try {
-      // ── Stage 1: Liked songs ──
+      // Stage 1: Liked songs
       setStage("liked_songs", "active");
       const likedRes = await invokeSync("liked", forceFullSync);
       Object.assign(combinedResult, likedRes);
       setStage("liked_songs", "done", `+${likedRes.liked_songs_added ?? 0}`);
-      // Immediately show new liked songs
       await refreshLiked();
-
       if (abortRef.current) return;
 
-      // ── Stage 2: Playlists ──
+      // Stage 2: Saved albums
+      setStage("albums", "active");
+      const albumRes = await invokeSync("albums", forceFullSync);
+      Object.assign(combinedResult, albumRes);
+      setStage("albums", "done", `+${albumRes.albums_added ?? 0}`);
+      await refreshAlbums();
+      if (abortRef.current) return;
+
+      // Stage 3: Playlists
       setStage("playlists", "active");
       const plRes = await invokeSync("playlists", forceFullSync);
       Object.assign(combinedResult, plRes);
       setStage("playlists", "done", `${plRes.playlists_changed ?? 0} updated`);
-      // Immediately show new playlists
       await refreshPlaylists();
-
       if (abortRef.current) return;
 
-      // ── Stage 3: Artists ──
+      // Stage 4: Artists
       setStage("artists", "active");
       const artRes = await invokeSync("artists", forceFullSync);
       Object.assign(combinedResult, artRes);
       setStage("artists", "done", `+${artRes.artists_added ?? 0}`);
-      // Immediately show new artists
       await refreshArtists();
-
       if (abortRef.current) return;
 
-      // ── Stage 4: Audio analysis (background, non-blocking) ──
+      // Stage 5: Audio analysis (background)
       setStage("analysis", "active");
-      // Call full sync which will only fetch audio features for tracks missing them
-      // This is fast when core data is already synced
       try {
         const analysisRes = await supabase.functions.invoke("spotify-import-tracks", {
           body: { scope: "all", skip_core: false, ...(forceFullSync ? { force_full: true } : {}) },
@@ -248,7 +278,6 @@ export function useSpotifyLibrary() {
       setLastSyncResult(combinedResult);
       await loadSyncMeta();
     } catch (e: any) {
-      // Mark current active stage as errored
       setSyncStages(prev =>
         prev.map(s => s.status === "active" ? { ...s, status: "error" as StageStatus, detail: e.message } : s)
       );
@@ -257,20 +286,17 @@ export function useSpotifyLibrary() {
     } finally {
       setSyncing(false);
     }
-  }, [syncing, user, spotifyConnected, invokeSync, refreshLiked, refreshPlaylists, refreshArtists, loadSyncMeta, setStage]);
+  }, [syncing, user, spotifyConnected, invokeSync, refreshLiked, refreshAlbums, refreshPlaylists, refreshArtists, loadSyncMeta, setStage]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
 
-  // Clean up on unmount
   useEffect(() => {
     return () => { abortRef.current = true; };
   }, []);
 
   const lastSyncedLabel = formatTimeAgo(syncMeta.lastIncrementalSyncAt || syncMeta.lastFullSyncAt);
-
-  // Derived: is every stage done?
   const allDone = syncing === false && syncStages.some(s => s.status === "done");
 
   return {
@@ -278,6 +304,8 @@ export function useSpotifyLibrary() {
     likedSongs,
     likedCount,
     followedArtists,
+    savedAlbums,
+    albumCount,
     loading,
     syncing,
     syncStages,
