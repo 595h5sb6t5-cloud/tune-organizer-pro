@@ -52,8 +52,6 @@ function fmtAudio(s: any): string {
   if (s.audio_danceability != null) p.push(`d:${s.audio_danceability.toFixed(2)}`);
   if (s.audio_acousticness != null) p.push(`ac:${s.audio_acousticness.toFixed(2)}`);
   if (s.audio_instrumentalness != null) p.push(`in:${s.audio_instrumentalness.toFixed(2)}`);
-  if (s.audio_speechiness != null) p.push(`sp:${s.audio_speechiness.toFixed(2)}`);
-  if (s.audio_loudness != null) p.push(`L:${s.audio_loudness.toFixed(1)}`);
   return p.length > 0 ? ` [${p.join(",")}]` : "";
 }
 
@@ -62,15 +60,9 @@ function fmtTags(s: any): string {
   if (s.mood) t.push(`mood:"${s.mood}"`);
   if (s.groove_feel) t.push(`grv:"${s.groove_feel}"`);
   if (s.sonic_brightness) t.push(`brt:${s.sonic_brightness}`);
-  if (s.spatial_quality) t.push(`spc:"${s.spatial_quality}"`);
   if (s.rhythmic_identity) t.push(`rhy:"${s.rhythmic_identity}"`);
   if (s.production_style) t.push(`prd:"${s.production_style}"`);
   if (s.vocal_style) t.push(`voc:"${s.vocal_style}"`);
-  if (s.sonic_texture) t.push(`tex:"${s.sonic_texture}"`);
-  if (s.atmosphere) t.push(`atm:"${s.atmosphere}"`);
-  if (s.listening_context) t.push(`ctx:"${s.listening_context}"`);
-  if (s.intimacy_scale) t.push(`scl:"${s.intimacy_scale}"`);
-  if (s.tension_level) t.push(`ten:"${s.tension_level}"`);
   if (s.energy) t.push(`E:${s.energy}`);
   if (s.genre_tags?.length) t.push(`g:[${s.genre_tags.join(",")}]`);
   return t.length > 0 ? ` {${t.join(", ")}}` : "";
@@ -405,7 +397,7 @@ Deno.serve(async (req) => {
     if (ue || !user) return json({ error: "Invalid session" }, 401);
 
     let mode = "tag_only";
-    let batchSize = 150;
+    let batchSize = 200;
     let forceRetag = false;
     let worldDefs: any[] = [];
     let offset = 0;
@@ -467,19 +459,29 @@ Deno.serve(async (req) => {
 
       const ts = p.songs || [];
       const now = new Date().toISOString();
-      for (const tg of ts) {
+
+      // Batch updates instead of one-by-one
+      const updates = ts.map((tg: any) => {
         const idx = (tg.index || 0) - 1;
-        if (idx < 0 || idx >= songs.length) continue;
-        await adm.from("liked_songs").update({
-          genre_tags: tg.genre_tags || [], mood: tg.mood, energy: tg.energy,
-          tempo_estimate: tg.tempo_estimate, era: tg.era, atmosphere: tg.atmosphere,
-          production_style: tg.production_style, groove_feel: tg.groove_feel,
-          vocal_style: tg.vocal_style, sonic_brightness: tg.sonic_brightness,
-          spatial_quality: tg.spatial_quality, rhythmic_identity: tg.rhythmic_identity,
-          listening_context: tg.listening_context, sonic_texture: tg.sonic_texture,
-          intimacy_scale: tg.intimacy_scale, tension_level: tg.tension_level,
-          analyzed_at: now,
-        }).eq("id", songs[idx].id);
+        if (idx < 0 || idx >= songs.length) return null;
+        return { id: songs[idx].id, tg };
+      }).filter(Boolean);
+
+      // Run updates in parallel batches of 10
+      for (let i = 0; i < updates.length; i += 10) {
+        const batch = updates.slice(i, i + 10);
+        await Promise.all(batch.map((u: any) =>
+          adm.from("liked_songs").update({
+            genre_tags: u.tg.genre_tags || [], mood: u.tg.mood, energy: u.tg.energy,
+            tempo_estimate: u.tg.tempo_estimate, era: u.tg.era, atmosphere: u.tg.atmosphere,
+            production_style: u.tg.production_style, groove_feel: u.tg.groove_feel,
+            vocal_style: u.tg.vocal_style, sonic_brightness: u.tg.sonic_brightness,
+            spatial_quality: u.tg.spatial_quality, rhythmic_identity: u.tg.rhythmic_identity,
+            listening_context: u.tg.listening_context, sonic_texture: u.tg.sonic_texture,
+            intimacy_scale: u.tg.intimacy_scale, tension_level: u.tg.tension_level,
+            analyzed_at: now,
+          }).eq("id", u.id)
+        ));
       }
 
       const { count: an } = await sb.from("liked_songs").select("id", { count: "exact", head: true })
@@ -493,12 +495,20 @@ Deno.serve(async (req) => {
       const tagged = all.filter((s: any) => s.groove_feel != null);
       if (tagged.length < 10) return json({ error: "Need more tagged songs. Run tagging first.", needs_tagging: true, tagged: tagged.length, total: all.length }, 400);
 
-      // Full playlists with tracklists
+      // Fetch all playlists
       const pls = await fetchAll(sb, "spotify_playlists", user.id, "id, name, description, track_count, is_owned_by_user, is_collaborative");
+
+      // OPTIMIZATION: Fetch ALL playlist tracks in one go instead of N+1
+      const allPlTracks = await fetchAll(sb, "spotify_playlist_tracks", user.id, "playlist_id, track_name, artist_name, position");
+      const plTrackMap = new Map<string, any[]>();
+      for (const t of allPlTracks) {
+        if (!plTrackMap.has(t.playlist_id)) plTrackMap.set(t.playlist_id, []);
+        plTrackMap.get(t.playlist_id)!.push(t);
+      }
+
       const plBlocks: string[] = [];
       for (const pl of pls) {
-        const tks = await fetchAll(sb, "spotify_playlist_tracks", user.id, "track_name, artist_name, position", { col: "playlist_id", val: pl.id });
-        tks.sort((a: any, b: any) => (a.position || 0) - (b.position || 0));
+        const tks = (plTrackMap.get(pl.id) || []).sort((a: any, b: any) => (a.position || 0) - (b.position || 0));
         const shown = tks.slice(0, 50);
         if (shown.length > 0) {
           const tl = shown.map((t: any) => `  - "${t.track_name}" – ${t.artist_name}`).join("\n");
@@ -507,10 +517,13 @@ Deno.serve(async (req) => {
         }
       }
 
-      const arts = await fetchAll(sb, "spotify_followed_artists", user.id, "artist_name, genres, popularity");
-      const artL = arts.map((a: any) => `- ${a.artist_name}${a.genres?.length ? ` [${a.genres.slice(0, 4).join(", ")}]` : ""}`).join("\n");
+      // Fetch artists and albums in parallel
+      const [arts, albs] = await Promise.all([
+        fetchAll(sb, "spotify_followed_artists", user.id, "artist_name, genres, popularity"),
+        fetchAll(sb, "spotify_saved_albums", user.id, "album_name, artist_name, genres, release_date, total_tracks"),
+      ]);
 
-      const albs = await fetchAll(sb, "spotify_saved_albums", user.id, "album_name, artist_name, genres, release_date, total_tracks");
+      const artL = arts.map((a: any) => `- ${a.artist_name}${a.genres?.length ? ` [${a.genres.slice(0, 4).join(", ")}]` : ""}`).join("\n");
       const albL = albs.map((a: any) => `- "${a.album_name}" by ${a.artist_name} (${a.release_date || "?"})${a.genres?.length ? ` [${a.genres.slice(0, 3).join(", ")}]` : ""}`).join("\n");
 
       const sample = stratSample(tagged, 500);
@@ -535,7 +548,8 @@ ${sampleL}`;
 
       console.info(`[worlds] ${sample.length} sample, ${pls.length} playlists, ${arts.length} artists, ${albs.length} albums`);
 
-      const p = await callAI(API_KEY, "google/gemini-2.5-pro", WORLDS_SYS,
+      // Use flash model for speed — pro is too slow for this step
+      const p = await callAI(API_KEY, "google/gemini-2.5-flash", WORLDS_SYS,
         `Study this COMPLETE ecosystem and define ALL sonic worlds.
 Use playlists as PRIMARY reference. Aim for ${suggest}+ worlds for ${all.length} songs. Be specific.\n${ctx}\n\nUse define_sonic_worlds.`,
         [WORLDS_TOOL], { type: "function", function: { name: "define_sonic_worlds" } }, 0.4);
@@ -553,11 +567,10 @@ Use playlists as PRIMARY reference. Aim for ${suggest}+ worlds for ${all.length}
       const batch = all.slice(offset, offset + batchSize);
       if (batch.length === 0) return json({ success: true, done: true, assignments: [], total: all.length });
 
+      // Compact world descriptions to reduce token count
       const ws = worldDefs.map((w: any) =>
         `[${w.world_id}] "${w.name}" — ${w.vibe_description}
-  Groove: ${w.groove_identity || "?"} | Bright: ${w.sonic_brightness || "?"} | Space: ${w.spatial_quality || "?"}
-  Prod: ${w.production_identity || "?"} | Atm: ${w.atmosphere || "?"} | Vocal: ${w.vocal_character || "?"}
-  Ctx: ${w.listening_context || "?"} | Lang: ${w.primary_language || "any"} | Energy: ${w.energy_level || "?"}
+  Groove: ${w.groove_identity || "?"} | Bright: ${w.sonic_brightness || "?"} | Energy: ${w.energy_level || "?"}
   ✅ ${w.what_belongs || "N/A"}
   ❌ ${w.what_breaks_it || "N/A"}`
       ).join("\n\n");
@@ -565,6 +578,7 @@ Use playlists as PRIMARY reference. Aim for ${suggest}+ worlds for ${all.length}
       const sl = batch.map((s: any, i: number) => fmtSong(s, i)).join("\n");
       console.info(`[assign] ${batch.length} songs (off ${offset}) → ${worldDefs.length} worlds`);
 
+      // Use flash-lite for assignment — it's a simpler classification task
       const p = await callAI(API_KEY, "google/gemini-2.5-flash", ASSIGN_SYS,
         `WORLDS (${worldDefs.length}):\n${ws}\n\nSONGS (${batch.length}):\n${sl}\n\n10-point check each. 7+ to assign. Use assign_songs.`,
         [ASSIGN_TOOL], { type: "function", function: { name: "assign_songs" } });
@@ -589,13 +603,19 @@ Use playlists as PRIMARY reference. Aim for ${suggest}+ worlds for ${all.length}
       const sm = new Map<string, any>();
       for (const s of allS) sm.set(s.id, s);
 
-      const wcm: Record<string, string> = {};
+      // Fetch ALL cluster tracks in one query instead of N+1
+      const allClusterTracks = await fetchAll(sb, "liked_song_cluster_tracks", user.id, "id, liked_song_id, cluster_id");
       const ctk: Record<string, { id: string; liked_song_id: string }[]> = {};
+      for (const t of allClusterTracks) {
+        if (!ctk[t.cluster_id]) ctk[t.cluster_id] = [];
+        ctk[t.cluster_id].push(t);
+      }
+
+      const wcm: Record<string, string> = {};
       const sums: string[] = [];
 
       for (const c of cls) {
-        const tks = await fetchAll(sb, "liked_song_cluster_tracks", user.id, "id, liked_song_id", { col: "cluster_id", val: c.id });
-        ctk[c.id] = tks;
+        const tks = ctk[c.id] || [];
         const wid = c.name.toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "");
         wcm[wid] = c.id;
         const tl = tks.map((t: any, i: number) => { const s = sm.get(t.liked_song_id); return s ? fmtSong(s, i) : `${i + 1}. [?]`; }).join("\n");
