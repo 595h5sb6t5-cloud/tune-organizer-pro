@@ -1,6 +1,6 @@
 import AppLayout from "@/components/app/AppLayout";
 import { sampleRecommendations, samplePlaylists, getRecommendationsForPlaylist, getNewVibeRecommendations, type Recommendation } from "@/lib/sample-data";
-import { Sparkles, Plus, X, Bookmark, ChevronRight, Check } from "lucide-react";
+import { Sparkles, Plus, X, Bookmark, ChevronRight, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
 import { useState } from "react";
@@ -13,6 +13,7 @@ const Discover = () => {
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
   const [acceptedIds, setAcceptedIds] = useState<Set<string>>(new Set());
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
+  const [switching, setSwitching] = useState(false);
 
   const hiddenIds = new Set([...dismissedIds, ...acceptedIds]);
 
@@ -43,9 +44,24 @@ const Discover = () => {
     });
   };
 
+  const handleModeSwitch = (mode: string) => {
+    if (mode === activeMode) return;
+    setSwitching(true);
+    setActiveMode(mode);
+    // Reset dismissed/accepted for fresh view on mode switch
+    setDismissedIds(new Set());
+    setAcceptedIds(new Set());
+    setTimeout(() => {
+      setSwitching(false);
+      toast.success(`Discovery mode: ${mode}`);
+    }, 600);
+  };
+
   const pendingCount = sampleRecommendations.filter(
     (r) => r.status === "pending" && !hiddenIds.has(r.id)
   ).length;
+
+  const allHidden = pendingCount === 0 && !switching;
 
   return (
     <AppLayout>
@@ -66,85 +82,105 @@ const Discover = () => {
           {discoveryModes.map((mode) => (
             <button
               key={mode}
-              onClick={() => {
-                setActiveMode(mode);
-                toast(`Discovery mode: ${mode}`, { description: "Recommendations will be refreshed." });
-              }}
+              onClick={() => handleModeSwitch(mode)}
+              disabled={switching}
               className={`px-4 py-2 rounded-xl text-sm transition-all ${
                 activeMode === mode
                   ? "bg-primary text-primary-foreground"
                   : "bg-secondary text-muted-foreground hover:text-foreground"
-              }`}
+              } ${switching ? "opacity-50" : ""}`}
             >
               {mode}
             </button>
           ))}
         </div>
 
-        {/* Recs grouped by playlist */}
-        {samplePlaylists.map((pl) => {
-          const recs = getRecommendationsForPlaylist(pl.id).filter(
-            (r) => r.status === "pending" && !hiddenIds.has(r.id)
-          );
-          if (recs.length === 0) return null;
-          return (
-            <div key={pl.id} className="mb-8">
-              <div className="flex items-center justify-between mb-4">
-                <Link to={`/playlists/${pl.id}`} className="flex items-center gap-3 group">
-                  <span className="text-2xl">{pl.emoji}</span>
-                  <div>
-                    <h3 className="font-heading text-xl group-hover:text-accent transition-colors">{pl.name}</h3>
-                    <p className="text-xs text-muted-foreground">{recs.length} suggestions</p>
+        {switching ? (
+          <div className="flex flex-col items-center justify-center py-16 gap-3">
+            <Loader2 className="w-6 h-6 animate-spin text-accent" />
+            <p className="text-sm text-muted-foreground">Switching to {activeMode} mode…</p>
+          </div>
+        ) : allHidden ? (
+          <div className="text-center py-16">
+            <Sparkles className="w-8 h-8 text-accent mx-auto mb-3" />
+            <p className="text-lg text-muted-foreground mb-2">All caught up!</p>
+            <p className="text-sm text-muted-foreground mb-4">You've reviewed all current suggestions. Try a different discovery mode or check back later.</p>
+            <Button variant="secondary" className="rounded-xl" onClick={() => {
+              setDismissedIds(new Set());
+              setAcceptedIds(new Set());
+              toast.success("Suggestions reset");
+            }}>
+              Reset Suggestions
+            </Button>
+          </div>
+        ) : (
+          <>
+            {/* Recs grouped by playlist */}
+            {samplePlaylists.map((pl) => {
+              const recs = getRecommendationsForPlaylist(pl.id).filter(
+                (r) => r.status === "pending" && !hiddenIds.has(r.id)
+              );
+              if (recs.length === 0) return null;
+              return (
+                <div key={pl.id} className="mb-8">
+                  <div className="flex items-center justify-between mb-4">
+                    <Link to={`/playlists/${pl.id}`} className="flex items-center gap-3 group">
+                      <span className="text-2xl">{pl.emoji}</span>
+                      <div>
+                        <h3 className="font-heading text-xl group-hover:text-accent transition-colors">{pl.name}</h3>
+                        <p className="text-xs text-muted-foreground">{recs.length} suggestions</p>
+                      </div>
+                    </Link>
+                    <Link to={`/playlists/${pl.id}`} className="text-xs text-accent hover:underline flex items-center gap-0.5">
+                      View playlist <ChevronRight className="w-3 h-3" />
+                    </Link>
                   </div>
-                </Link>
-                <Link to={`/playlists/${pl.id}`} className="text-xs text-accent hover:underline flex items-center gap-0.5">
-                  View playlist <ChevronRight className="w-3 h-3" />
-                </Link>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {recs.map((rec) => (
-                  <RecommendationCard
-                    key={rec.id}
-                    rec={rec}
-                    isSaved={savedIds.has(rec.id)}
-                    onAdd={() => handleAdd(rec)}
-                    onDismiss={() => handleDismiss(rec)}
-                    onSave={() => handleSave(rec)}
-                  />
-                ))}
-              </div>
-            </div>
-          );
-        })}
-
-        {/* New Vibe Suggestions */}
-        {(() => {
-          const newVibes = getNewVibeRecommendations().filter((r) => !hiddenIds.has(r.id));
-          if (newVibes.length === 0) return null;
-          return (
-            <div className="mb-8">
-              <div className="flex items-center gap-3 mb-4">
-                <span className="text-2xl">🔮</span>
-                <div>
-                  <h3 className="font-heading text-xl">New Vibe Suggestions</h3>
-                  <p className="text-xs text-muted-foreground">Songs that don't fit existing playlists — potential new directions</p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {recs.map((rec) => (
+                      <RecommendationCard
+                        key={rec.id}
+                        rec={rec}
+                        isSaved={savedIds.has(rec.id)}
+                        onAdd={() => handleAdd(rec)}
+                        onDismiss={() => handleDismiss(rec)}
+                        onSave={() => handleSave(rec)}
+                      />
+                    ))}
+                  </div>
                 </div>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {newVibes.map((rec) => (
-                  <RecommendationCard
-                    key={rec.id}
-                    rec={rec}
-                    isSaved={savedIds.has(rec.id)}
-                    onAdd={() => handleAdd(rec)}
-                    onDismiss={() => handleDismiss(rec)}
-                    onSave={() => handleSave(rec)}
-                  />
-                ))}
-              </div>
-            </div>
-          );
-        })()}
+              );
+            })}
+
+            {/* New Vibe Suggestions */}
+            {(() => {
+              const newVibes = getNewVibeRecommendations().filter((r) => !hiddenIds.has(r.id));
+              if (newVibes.length === 0) return null;
+              return (
+                <div className="mb-8">
+                  <div className="flex items-center gap-3 mb-4">
+                    <span className="text-2xl">🔮</span>
+                    <div>
+                      <h3 className="font-heading text-xl">New Vibe Suggestions</h3>
+                      <p className="text-xs text-muted-foreground">Songs that don't fit existing playlists — potential new directions</p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {newVibes.map((rec) => (
+                      <RecommendationCard
+                        key={rec.id}
+                        rec={rec}
+                        isSaved={savedIds.has(rec.id)}
+                        onAdd={() => handleAdd(rec)}
+                        onDismiss={() => handleDismiss(rec)}
+                        onSave={() => handleSave(rec)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+          </>
+        )}
       </div>
     </AppLayout>
   );
