@@ -14,6 +14,45 @@ export type Database = {
   }
   public: {
     Tables: {
+      imported_tracks: {
+        Row: {
+          added_at: string | null
+          album_name: string | null
+          artist_name: string
+          created_at: string
+          id: string
+          image_url: string | null
+          release_date: string | null
+          spotify_track_id: string
+          track_name: string
+          user_id: string
+        }
+        Insert: {
+          added_at?: string | null
+          album_name?: string | null
+          artist_name: string
+          created_at?: string
+          id?: string
+          image_url?: string | null
+          release_date?: string | null
+          spotify_track_id: string
+          track_name: string
+          user_id: string
+        }
+        Update: {
+          added_at?: string | null
+          album_name?: string | null
+          artist_name?: string
+          created_at?: string
+          id?: string
+          image_url?: string | null
+          release_date?: string | null
+          spotify_track_id?: string
+          track_name?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           apple_music_connected: boolean
@@ -175,6 +214,39 @@ export type Database = {
           track_valence?: number | null
           track_year?: number | null
           user_id?: string | null
+        }
+        Relationships: []
+      }
+      spotify_connections: {
+        Row: {
+          access_token: string
+          created_at: string
+          expires_at: string
+          id: string
+          refresh_token: string
+          spotify_user_id: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          access_token: string
+          created_at?: string
+          expires_at: string
+          id?: string
+          refresh_token: string
+          spotify_user_id?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          access_token?: string
+          created_at?: string
+          expires_at?: string
+          id?: string
+          refresh_token?: string
+          spotify_user_id?: string | null
+          updated_at?: string
+          user_id?: string
         }
         Relationships: []
       }
