@@ -10,13 +10,12 @@ import { useAuth } from "@/hooks/use-auth";
 import { supabase } from "@/integrations/supabase/client";
 
 const discoveryModes = [
-  { id: "balanced", label: "Balanced" },
-  { id: "deep-cuts", label: "Deep Cuts" },
-  { id: "underground", label: "Underground" },
-  { id: "nostalgic", label: "Nostalgic" },
-  { id: "new-releases", label: "New Releases" },
-  { id: "safe", label: "Safe Picks" },
-  { id: "mainstream", label: "Mainstream" },
+  { id: "balanced", label: "Balanced", desc: "Well-rounded mix" },
+  { id: "deep-cuts", label: "Deep Cuts", desc: "Hidden gems" },
+  { id: "underground", label: "Underground", desc: "Under the radar" },
+  { id: "exploratory", label: "Exploratory", desc: "Expand your taste" },
+  { id: "nostalgic", label: "Nostalgic", desc: "Classic vibes" },
+  { id: "new-releases", label: "New Releases", desc: "Fresh drops" },
 ];
 
 const tierConfig = {
@@ -29,6 +28,7 @@ const categoryEmoji: Record<string, string> = {
   "best-for-you": "🎯",
   "hidden-gems": "💎",
   "perfect-for-your-playlists": "🎵",
+  "sonic-neighbors": "🔊",
   "try-something-different": "🔮",
 };
 
@@ -42,9 +42,8 @@ const Discover = () => {
   const [acceptedIds, setAcceptedIds] = useState<Set<string>>(new Set());
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
 
-  const { categories, loading, hasLoaded, generate, recordAccepted, recordDismissed } = useDiscoverRecommendations();
+  const { categories, loading, hasLoaded, generate, recordFeedback } = useDiscoverRecommendations();
 
-  // Check if user has imported tracks
   useEffect(() => {
     if (!user || !spotifyConnected) {
       setTrackCount(spotifyConnected ? null : 0);
@@ -87,13 +86,13 @@ const Discover = () => {
 
   const handleAdd = (rec: Recommendation) => {
     setAcceptedIds((prev) => new Set(prev).add(rec.id));
-    recordAccepted(rec.track);
+    recordFeedback(rec.track, "accepted", rec);
     toast.success(`Added "${rec.track.title}" to your library`);
   };
 
   const handleDismiss = (rec: Recommendation) => {
     setDismissedIds((prev) => new Set(prev).add(rec.id));
-    recordDismissed(rec.track);
+    recordFeedback(rec.track, "dismissed", rec);
     toast("Dismissed", { description: `"${rec.track.title}" won't be suggested again.` });
   };
 
@@ -168,7 +167,7 @@ const Discover = () => {
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="font-heading text-3xl mb-1">Discover</h1>
-            <p className="text-muted-foreground">AI-curated songs tailored to your taste and playlists.</p>
+            <p className="text-muted-foreground">Songs you haven't heard yet, curated for your taste.</p>
           </div>
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-2 text-xs">
@@ -197,6 +196,7 @@ const Discover = () => {
               key={mode.id}
               onClick={() => handleModeSwitch(mode.id)}
               disabled={loading}
+              title={mode.desc}
               className={`px-4 py-2 rounded-xl text-sm transition-all ${
                 activeMode === mode.id
                   ? "bg-primary text-primary-foreground"
@@ -216,8 +216,8 @@ const Discover = () => {
               <Sparkles className="w-4 h-4 text-accent absolute -top-1 -right-1 animate-pulse" />
             </div>
             <div className="text-center">
-              <p className="text-sm font-medium mb-1">AI is analyzing your music DNA…</p>
-              <p className="text-xs text-muted-foreground">Scanning genres, moods, tempos, and artist networks to find perfect matches</p>
+              <p className="text-sm font-medium mb-1">AI is building your taste profile…</p>
+              <p className="text-xs text-muted-foreground">Analyzing audio features, moods, production styles, and playlist identities</p>
             </div>
           </div>
         ) : hasLoaded && categories.length > 0 ? (
@@ -299,8 +299,9 @@ function RecCard({
 
   return (
     <div className="rounded-2xl bg-surface-elevated border border-border/50 hover:border-accent/30 hover:shadow-sm transition-all overflow-hidden">
-      <div className="group flex gap-4 p-4">
-        <div className="w-12 h-12 rounded-xl bg-secondary flex items-center justify-center text-lg flex-shrink-0">
+      <div className="flex gap-4 p-4">
+        {/* Album art placeholder */}
+        <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-accent/20 to-primary/10 flex items-center justify-center text-lg flex-shrink-0 border border-border/30">
           🎵
         </div>
         <div className="flex-1 min-w-0">
@@ -308,16 +309,16 @@ function RecCard({
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <p className="text-sm font-medium truncate">{rec.track.title}</p>
-                <span className="text-xs font-medium text-accent flex-shrink-0">{rec.matchScore}%</span>
+                <span className="text-xs font-semibold text-accent flex-shrink-0">{rec.matchScore}%</span>
                 <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${tier.className} flex-shrink-0`}>
                   <TierIcon className="w-2.5 h-2.5" />
                   {tier.label}
                 </span>
               </div>
-              <p className="text-xs text-muted-foreground">{rec.track.artist} · {rec.track.album} ({rec.track.year})</p>
+              <p className="text-xs text-muted-foreground">{rec.track.artist} · {rec.track.album}</p>
             </div>
           </div>
-          <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{rec.reason}</p>
+          <p className="text-xs text-muted-foreground/80 mt-1 line-clamp-2 leading-relaxed">{rec.reason}</p>
 
           {/* Why this song? */}
           {rec.aiExplanation && (
@@ -349,14 +350,14 @@ function RecCard({
                   {showDetails ? "Hide" : "Details"}
                 </button>
               )}
-              <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button className="w-7 h-7 rounded-lg inline-flex items-center justify-center text-accent hover:bg-accent/10 transition-colors" title="Add to playlist" onClick={onAdd}>
+              <div className="flex gap-0.5">
+                <button className="w-7 h-7 rounded-lg inline-flex items-center justify-center text-accent hover:bg-accent/10 transition-colors" title="Add to library" onClick={onAdd}>
                   <Plus className="w-3.5 h-3.5" />
                 </button>
                 <button className={`w-7 h-7 rounded-lg inline-flex items-center justify-center hover:bg-secondary transition-colors ${isSaved ? "text-warm" : "text-muted-foreground"}`} title="Save for later" onClick={onSave}>
                   <Bookmark className={`w-3.5 h-3.5 ${isSaved ? "fill-current" : ""}`} />
                 </button>
-                <button className="w-7 h-7 rounded-lg inline-flex items-center justify-center text-muted-foreground hover:bg-secondary transition-colors" title="Dismiss" onClick={onDismiss}>
+                <button className="w-7 h-7 rounded-lg inline-flex items-center justify-center text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors" title="Not for me" onClick={onDismiss}>
                   <X className="w-3.5 h-3.5" />
                 </button>
               </div>
@@ -384,7 +385,8 @@ function RecCard({
             {Object.entries(breakdown).map(([key, value]) => {
               const labels: Record<string, string> = {
                 mood: "Mood", tempo: "Tempo", energy: "Energy",
-                genre: "Genre", artistNetwork: "Artist Network", era: "Era",
+                genre: "Genre", artistNetwork: "Artist", era: "Era",
+                production: "Production", rhythm: "Rhythm", novelty: "Novelty",
               };
               const numValue = Number(value);
               return (
