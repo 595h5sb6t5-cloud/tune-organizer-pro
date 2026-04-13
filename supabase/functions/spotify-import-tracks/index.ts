@@ -456,6 +456,7 @@ async function syncFollowedArtists(
   let after: string | null = null;
 
   try {
+    let page = 0;
     while (true) {
       const url = `https://api.spotify.com/v1/me/following?type=artist&limit=50${after ? `&after=${after}` : ""}`;
       const data = await spotifyGet(url, token);
@@ -477,8 +478,11 @@ async function syncFollowedArtists(
       }
 
       after = data?.artists?.cursors?.after || null;
+      page++;
+      console.log(`[spotify-import-tracks] artists pagination page ${page}: collected ${artists.length}, has_next: ${Boolean(after)}`);
       if (!after) break;
     }
+    console.log(`[spotify-import-tracks] artists pagination complete: ${artists.length} total`);
   } catch (e) {
     if (isInsufficientScopeError(e)) {
       console.warn("[spotify-import-tracks] followed artists skipped - missing user-follow-read scope");
