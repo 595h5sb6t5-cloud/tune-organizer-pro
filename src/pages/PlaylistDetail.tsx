@@ -34,6 +34,7 @@ interface VibeRecommendation {
   album: string;
   matchScore: number;
   reason: string;
+  aiExplanation: string | null;
   moodTags: string[];
   insertAfterTrack: string | null;
   insertExplanation: string | null;
@@ -499,6 +500,7 @@ const PlaylistDetail = () => {
         album: r.album || "Unknown",
         matchScore: r.matchScore || 80,
         reason: r.reason || "Fits the playlist identity",
+        aiExplanation: r.aiExplanation || null,
         moodTags: r.moodTags || [],
         insertAfterTrack: r.insertAfterTrack || null,
         insertExplanation: r.insertExplanation || null,
