@@ -118,6 +118,17 @@ export function useDiscoverRecommendations() {
         artistCounts[t.artist_name] = (artistCounts[t.artist_name] || 0) + 1;
       }
 
+      // Include saved album artists and genres in taste signals
+      const savedAlbums = albumsRes.data ?? [];
+      for (const a of savedAlbums) {
+        artistCounts[a.artist_name] = (artistCounts[a.artist_name] || 0) + 2; // albums = stronger signal
+        for (const g of a.genres || []) genreTagCounts[g] = (genreTagCounts[g] || 0) + 1;
+        if (a.release_date) {
+          const decade = a.release_date.slice(0, 3) + "0s";
+          eraCounts[decade] = (eraCounts[decade] || 0) + 1;
+        }
+      }
+
       const topN = (obj: Record<string, number>, n: number) =>
         Object.entries(obj).sort((a, b) => b[1] - a[1]).slice(0, n).map(e => e[0]);
 
@@ -132,6 +143,15 @@ export function useDiscoverRecommendations() {
         name: pl.name,
         description: pl.description || "",
         trackCount: pl.track_count,
+      }));
+
+      // Build saved albums summary for AI context
+      const albumsSummary = savedAlbums.slice(0, 30).map(a => ({
+        name: a.album_name,
+        artist: a.artist_name,
+        type: a.album_type,
+        genres: a.genres || [],
+        year: a.release_date?.slice(0, 4) || null,
       }));
 
       const { data, error } = await supabase.functions.invoke("discover-recommendations", {
