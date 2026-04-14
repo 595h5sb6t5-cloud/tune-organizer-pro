@@ -693,6 +693,7 @@ async function syncPlaylists(
             user_id: userId,
             playlist_id: dbId,
             spotify_track_id: track.id,
+            track_uri: track.uri || `spotify:track:${track.id}`,
             track_name: track.name || "Untitled",
             artist_name: artists,
             album_name: track.album?.name || null,
