@@ -225,7 +225,7 @@ export function useLikedSongClusters() {
   }, []);
 
   const triggerPipeline = useCallback(async (jobId: string, forceRetag: boolean, isRetry = false) => {
-    const body = { mode: "run_pipeline", job_id: jobId, force_retag: forceRetag, batch_size: 20 };
+    const body = { mode: "run_pipeline", job_id: jobId, force_retag: forceRetag, batch_size: 10 };
     const { data: { session } } = await supabase.auth.getSession();
 
     if (!session?.access_token) {

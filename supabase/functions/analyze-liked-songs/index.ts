@@ -55,45 +55,37 @@ async function callAI(
   if (tools) body.tools = tools;
   if (toolChoice) body.tool_choice = toolChoice;
 
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 50_000);
-      const res = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-        signal: ctrl.signal,
-      });
-      clearTimeout(timer);
+  // Single attempt with 45s timeout — edge functions have 60s wall clock
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 45_000);
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+    clearTimeout(timer);
 
-      if (!res.ok) {
-        const text = await res.text();
-        console.error(`[callAI] attempt ${attempt + 1} failed: ${res.status} ${text.substring(0, 200)}`);
-        if (res.status === 429) { await new Promise(r => setTimeout(r, 3000 * (attempt + 1))); continue; }
-        if (res.status === 402) throw new Error("CREDITS_EXHAUSTED");
-        if (attempt < 2) { await new Promise(r => setTimeout(r, 2000)); continue; }
-        throw new Error(`AI error ${res.status}: ${text.substring(0, 200)}`);
-      }
-
-      const data = await res.json();
-      const tc = data.choices?.[0]?.message?.tool_calls?.[0];
-      if (tc?.function?.arguments) {
-        try { return JSON.parse(tc.function.arguments); } catch { return extractJson(tc.function.arguments); }
-      }
-      const content = data.choices?.[0]?.message?.content;
-      if (!content) { if (attempt < 2) continue; throw new Error("Empty AI response"); }
-      return extractJson(content);
-    } catch (e: any) {
-      console.error(`[callAI] attempt ${attempt + 1} error:`, e.message);
-      if (e.message === "CREDITS_EXHAUSTED") throw e;
-      if (e.name === "AbortError") {
-        console.warn(`[callAI] timeout on attempt ${attempt + 1}, will ${attempt < 2 ? "retry" : "fail"}`);
-        if (attempt < 2) { await new Promise(r => setTimeout(r, 1000)); continue; }
-      }
-      if (attempt < 2) { await new Promise(r => setTimeout(r, 1000)); continue; }
-      throw e;
+    if (!res.ok) {
+      const text = await res.text();
+      console.error(`[callAI] failed: ${res.status} ${text.substring(0, 200)}`);
+      if (res.status === 429) throw new Error("RATE_LIMITED");
+      if (res.status === 402) throw new Error("CREDITS_EXHAUSTED");
+      throw new Error(`AI error ${res.status}: ${text.substring(0, 200)}`);
     }
+
+    const data = await res.json();
+    const tc = data.choices?.[0]?.message?.tool_calls?.[0];
+    if (tc?.function?.arguments) {
+      try { return JSON.parse(tc.function.arguments); } catch { return extractJson(tc.function.arguments); }
+    }
+    const content = data.choices?.[0]?.message?.content;
+    if (!content) throw new Error("Empty AI response");
+    return extractJson(content);
+  } catch (e: any) {
+    console.error(`[callAI] error:`, e.message);
+    throw e;
   }
   throw new Error("AI failed after retries");
 }
@@ -413,38 +405,28 @@ async function queueNextStep(
   functionUrl: string, anonKey: string, serviceKey: string,
   jobId: string, userId: string, forceRetag: boolean,
 ): Promise<boolean> {
-  for (let retry = 0; retry < 2; retry++) {
-    try {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 55_000);
-      const res = await fetch(functionUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${serviceKey}`,
-          apikey: anonKey,
-          [INTERNAL_HEADER]: "1",
-        },
-        body: JSON.stringify({ mode: "process_step", job_id: jobId, user_id: userId, force_retag: forceRetag }),
-        signal: ctrl.signal,
-      });
-      clearTimeout(timer);
-      if (!res.ok) {
-        const text = await res.text();
-        console.error(`[pipeline] queue attempt ${retry + 1} failed ${res.status}: ${text.substring(0, 200)}`);
-        if (retry < 1) { await new Promise(r => setTimeout(r, 2000)); continue; }
-        return false;
-      }
-      // Consume body to prevent resource leak
-      await res.text();
-      return true;
-    } catch (e) {
-      console.error(`[pipeline] queue attempt ${retry + 1} error:`, e);
-      if (retry < 1) { await new Promise(r => setTimeout(r, 2000)); continue; }
-      return false;
-    }
+  // Fire-and-forget: just confirm the request was accepted, don't wait for processing
+  try {
+    const res = await fetch(functionUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${serviceKey}`,
+        apikey: anonKey,
+        [INTERNAL_HEADER]: "1",
+      },
+      body: JSON.stringify({ mode: "process_step", job_id: jobId, user_id: userId, force_retag: forceRetag }),
+    });
+    // Don't await res.text() — the response won't arrive until the step finishes
+    // Just check that the function was invoked (status will be available from headers)
+    console.log(`[pipeline] queued next step, status: ${res.status}`);
+    // Consume body in background to prevent leak, but don't block on it
+    res.text().catch(() => {});
+    return true;
+  } catch (e: any) {
+    console.error(`[pipeline] queue error:`, e.message);
+    return false;
   }
-  return false;
 }
 
 /* ══════════════════════════════════════════════
@@ -464,7 +446,7 @@ Deno.serve(async (req) => {
     const functionUrl = `${url}/functions/v1/analyze-liked-songs`;
 
     let mode = "tag_batch";
-    let batchSize = 25;
+    let batchSize = 10;
     let forceRetag = false;
     let jobId: string | null = null;
     let internalUserId: string | null = null;
@@ -472,7 +454,7 @@ Deno.serve(async (req) => {
     try {
       const b = await req.json();
       if (b?.mode) mode = String(b.mode);
-      if (typeof b?.batch_size === "number") batchSize = Math.min(b.batch_size, 30);
+      if (typeof b?.batch_size === "number") batchSize = Math.min(b.batch_size, 15);
       if (b?.force_retag) forceRetag = true;
       if (b?.job_id) jobId = b.job_id;
       if (typeof b?.user_id === "string") internalUserId = b.user_id;
@@ -560,11 +542,14 @@ Deno.serve(async (req) => {
         error_message: null,
       });
 
-      // Directly invoke the first step — don't use waitUntil which is unreliable
-      const success = await queueNextStep(functionUrl, anon, svc, jobId, userId, forceRetag);
-      if (!success) {
-        await failJob(adm, jobId, "Failed to start the processing pipeline. Please retry.");
-        return json({ error: "Failed to start pipeline" }, 500);
+      // Fire-and-forget: dispatch first step without blocking
+      // We can't await queueNextStep because fetch() blocks until process_step finishes
+      const dispatchPromise = queueNextStep(functionUrl, anon, svc, jobId, userId, forceRetag);
+      // @ts-ignore EdgeRuntime is a Deno Deploy global
+      if (typeof EdgeRuntime !== "undefined" && EdgeRuntime.waitUntil) {
+        EdgeRuntime.waitUntil(dispatchPromise);
+      } else {
+        dispatchPromise.catch(e => console.error("[pipeline] dispatch error:", e));
       }
 
       return json({ success: true, job_id: jobId, message: "Pipeline started" }, 202);
@@ -587,10 +572,13 @@ Deno.serve(async (req) => {
         return json({ success: true, terminal: true });
       }
 
-      const queue = async () => {
-        const ok = await queueNextStep(functionUrl, anon, svc, jobId!, userId, forceRetag);
-        if (!ok) {
-          console.error("[pipeline] Failed to queue next step — job will stall until frontend retries");
+      const queue = () => {
+        const p = queueNextStep(functionUrl, anon, svc, jobId!, userId, forceRetag);
+        // @ts-ignore EdgeRuntime is a Deno Deploy global
+        if (typeof EdgeRuntime !== "undefined" && EdgeRuntime.waitUntil) {
+          EdgeRuntime.waitUntil(p);
+        } else {
+          p.catch(e => console.error("[pipeline] queue error:", e));
         }
       };
 
