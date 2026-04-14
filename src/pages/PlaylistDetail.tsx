@@ -2,7 +2,7 @@ import AppLayout from "@/components/app/AppLayout";
 import { Button } from "@/components/ui/button";
 import { useParams, Link } from "react-router-dom";
 import { ArrowLeft, RefreshCw, Plus, X, Bookmark, Sparkles, Loader2, Gem, TrendingUp, Music, Brain, Eye, EyeOff, Zap, Clock, Palette, Target, Shield, Lightbulb, MapPin, Mic2, Radio, Layers, Star, ChevronDown, ChevronUp, Edit3, Upload, ExternalLink, Users, Lock, Trash2, GripVertical } from "lucide-react";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
 import { usePlaylistVibe, type PlaylistVibeAnalysis, type EmotionalArcSegment, type SonicDna, type TrackHighlight } from "@/hooks/use-playlist-vibe";
@@ -464,9 +464,11 @@ const PlaylistDetail = () => {
   const [playlist, setPlaylist] = useState<SpotifyPlaylistInfo | null>(null);
   const [tracks, setTracks] = useState<PlaylistTrack[]>([]);
   const [loadingPlaylist, setLoadingPlaylist] = useState(true);
+  const [recoveringTracks, setRecoveringTracks] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editedName, setEditedName] = useState("");
   const [exporting, setExporting] = useState(false);
+  const attemptedTrackRecoveryRef = useRef<string | null>(null);
 
   const { vibe, loading: vibeLoading, analyzing, analyze } = usePlaylistVibe(id);
 
@@ -481,21 +483,103 @@ const PlaylistDetail = () => {
 
   const canEdit = playlist?.is_owned_by_user || playlist?.is_collaborative;
 
+  const loadPlaylistData = useCallback(async () => {
+    if (!id || !user) return null;
+
+    setLoadingPlaylist(true);
+    try {
+      const [plRes, trRes] = await Promise.all([
+        supabase
+          .from("spotify_playlists")
+          .select("id, spotify_playlist_id, name, description, image_url, track_count, is_owned_by_user, is_collaborative, owner_display_name, spotify_owner_id")
+          .eq("id", id)
+          .single(),
+        supabase
+          .from("spotify_playlist_tracks")
+          .select("id, spotify_track_id, track_name, artist_name, album_name, image_url, position")
+          .eq("playlist_id", id)
+          .eq("user_id", user.id)
+          .order("position"),
+      ]);
+
+      if (plRes.error) throw plRes.error;
+      if (trRes.error) throw trRes.error;
+
+      const playlistData = (plRes.data as SpotifyPlaylistInfo | null) ?? null;
+      const trackData = (trRes.data as PlaylistTrack[] | null) ?? [];
+
+      setPlaylist(playlistData);
+      setEditedName(playlistData?.name ?? "");
+      setTracks(trackData);
+
+      return { playlist: playlistData, tracks: trackData };
+    } catch (error) {
+      console.error("[PlaylistDetail] Failed to load playlist details", error);
+      toast.error("Failed to load playlist details");
+      return null;
+    } finally {
+      setLoadingPlaylist(false);
+    }
+  }, [id, user]);
+
+  const repairMissingTracks = useCallback(async (silent = false) => {
+    if (!id) return false;
+
+    setRecoveringTracks(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("spotify-import-tracks", {
+        body: { scope: "playlists" },
+      });
+
+      if (error) throw new Error(error.message);
+      if (data?.error) throw new Error(data.error);
+
+      const refreshed = await loadPlaylistData();
+      const recoveredCount = refreshed?.tracks.length ?? 0;
+
+      if (recoveredCount > 0) {
+        if (!silent) toast.success("Playlist tracks refreshed");
+        return true;
+      }
+
+      if (!silent) {
+        toast.error("Playlist tracks are still missing. Reconnect Spotify and sync again from Library.");
+      }
+      return false;
+    } catch (error) {
+      console.error("[PlaylistDetail] Failed to refresh playlist tracks", error);
+      if (!silent) toast.error("Failed to refresh playlist tracks");
+      return false;
+    } finally {
+      setRecoveringTracks(false);
+    }
+  }, [id, loadPlaylistData]);
+
   useEffect(() => {
     if (!id || !user) return;
-    setLoadingPlaylist(true);
-    Promise.all([
-      supabase.from("spotify_playlists").select("id, spotify_playlist_id, name, description, image_url, track_count, is_owned_by_user, is_collaborative, owner_display_name, spotify_owner_id").eq("id", id).single(),
-      supabase.from("spotify_playlist_tracks").select("id, spotify_track_id, track_name, artist_name, album_name, image_url, position").eq("playlist_id", id).eq("user_id", user.id).order("position"),
-    ]).then(([plRes, trRes]) => {
-      if (plRes.data) {
-        setPlaylist(plRes.data as SpotifyPlaylistInfo);
-        setEditedName(plRes.data.name);
+
+    let cancelled = false;
+
+    const bootstrap = async () => {
+      const loaded = await loadPlaylistData();
+      if (cancelled || !loaded?.playlist) return;
+
+      if (
+        loaded.playlist.track_count > 0 &&
+        loaded.tracks.length === 0 &&
+        attemptedTrackRecoveryRef.current !== id
+      ) {
+        attemptedTrackRecoveryRef.current = id;
+        await repairMissingTracks(true);
       }
-      setTracks((trRes.data as PlaylistTrack[]) || []);
-      setLoadingPlaylist(false);
-    });
-  }, [id, user]);
+    };
+
+    void bootstrap();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [id, user, loadPlaylistData, repairMissingTracks]);
 
   const handleRemoveTrack = useCallback(async (trackId: string) => {
     if (!canEdit || !user) return;
@@ -763,8 +847,25 @@ const PlaylistDetail = () => {
             <span />
           </div>
           {tracks.length === 0 ? (
-            <div className="text-center py-12">
-              <p className="text-sm text-muted-foreground">No tracks imported yet. Re-sync your library to load tracks.</p>
+            <div className="text-center py-12 space-y-3">
+              <p className="text-sm text-muted-foreground">
+                {recoveringTracks
+                  ? "Refreshing playlist tracks from Spotify…"
+                  : playlist?.track_count > 0
+                    ? "This playlist exists in Spotify, but its tracks have not been stored locally yet."
+                    : "No tracks imported yet. Re-sync your library to load tracks."}
+              </p>
+              {playlist?.track_count > 0 && (
+                <Button
+                  variant="secondary"
+                  className="rounded-xl gap-2"
+                  onClick={() => repairMissingTracks()}
+                  disabled={recoveringTracks}
+                >
+                  {recoveringTracks ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                  {recoveringTracks ? "Refreshing tracks…" : "Refresh playlist tracks"}
+                </Button>
+              )}
             </div>
           ) : (
             tracks.map((track, i) => (
