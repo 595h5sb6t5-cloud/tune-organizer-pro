@@ -58,7 +58,7 @@ async function callAI(
     try {
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), 55_000);
-      const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      const res = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -372,8 +372,8 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!API_KEY) throw new Error("LOVABLE_API_KEY not configured");
+    const API_KEY = Deno.env.get("OPENAI_API_KEY");
+    if (!API_KEY) throw new Error("OPENAI_API_KEY not configured");
 
     const url = Deno.env.get("SUPABASE_URL")!;
     const anon = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -432,7 +432,7 @@ Deno.serve(async (req) => {
         `${i + 1}. "${s.track_name}" – ${s.artist_name}${s.album_name ? ` (${s.album_name})` : ""}${fmtAudio(s)}`
       ).join("\n");
 
-      const p = await callAI(API_KEY, "google/gemini-2.5-flash", TAG_SYS,
+      const p = await callAI(API_KEY, "gpt-4o-mini", TAG_SYS,
         `Analyze these ${songs.length} songs. Be SPECIFIC.\n\n${list}\n\nUse tag_songs.`,
         [TAG_TOOL], { type: "function", function: { name: "tag_songs" } });
 
@@ -551,7 +551,7 @@ Deno.serve(async (req) => {
             `${i + 1}. "${s.track_name}" – ${s.artist_name}${s.album_name ? ` (${s.album_name})` : ""}${fmtAudio(s)}`
           ).join("\n");
 
-          const p = await callAI(API_KEY, "google/gemini-2.5-flash", TAG_SYS,
+          const p = await callAI(API_KEY, "gpt-4o-mini", TAG_SYS,
             `Analyze these ${songs.length} songs. Be SPECIFIC.\n\n${list}\n\nUse tag_songs.`,
             [TAG_TOOL], { type: "function", function: { name: "tag_songs" } });
 
@@ -623,7 +623,7 @@ Deno.serve(async (req) => {
 
           const ctx = `LIBRARY: ${allSongs.length} songs (${tagged.length} analyzed)\n\nPLAYLISTS (${pls.length}):\n${plBlocks.join("\n\n") || "None"}\n\nARTISTS (${arts.length}):\n${arts.slice(0, 60).map((a: any) => `- ${a.artist_name}${a.genres?.length ? ` [${a.genres.slice(0, 3).join(", ")}]` : ""}`).join("\n") || "None"}\n\nALBUMS (${albs.length}):\n${albs.slice(0, 40).map((a: any) => `- "${a.album_name}" by ${a.artist_name}`).join("\n") || "None"}\n\nTAGGED SAMPLE (${sample.length}):\n${sample.map((s: any, i: number) => fmtSong(s, i)).join("\n")}`;
 
-          const result = await callAI(API_KEY, "google/gemini-2.5-flash", WORLDS_SYS,
+          const result = await callAI(API_KEY, "gpt-4o-mini", WORLDS_SYS,
             `Define ALL sonic worlds. NEVER group by language. Aim for ${suggest}+ worlds.\n\n${ctx}\n\nUse define_sonic_worlds.`,
             [WORLDS_TOOL], { type: "function", function: { name: "define_sonic_worlds" } }, 0.4);
 
@@ -728,7 +728,7 @@ Deno.serve(async (req) => {
             ).join("\n\n");
 
             const sl = songs.map((s: any, i: number) => fmtSong(s, i)).join("\n");
-            const p = await callAI(API_KEY, "google/gemini-2.5-flash", ASSIGN_SYS,
+            const p = await callAI(API_KEY, "gpt-4o-mini", ASSIGN_SYS,
               `WORLDS (${assignable.length}):\n${ws}\n\nSONGS (${songs.length}):\n${sl}\n\nAssign each song. Use assign_songs.`,
               [ASSIGN_TOOL], { type: "function", function: { name: "assign_songs" } });
 
@@ -853,7 +853,7 @@ Deno.serve(async (req) => {
                 sums.push(`📋 [${wid}] "${c.name}" (${tks.length} songs)\nVibe: ${c.vibe_description || "?"}\n${tl}`);
               }
 
-              const v = await callAI(API_KEY, "google/gemini-2.5-flash", VALIDATE_SYS,
+              const v = await callAI(API_KEY, "gpt-4o-mini", VALIDATE_SYS,
                 `Review these ${cls.length} playlists.\n\n${sums.join("\n\n")}\n\nUse validate_playlists.`,
                 [VALIDATE_TOOL], { type: "function", function: { name: "validate_playlists" } });
 

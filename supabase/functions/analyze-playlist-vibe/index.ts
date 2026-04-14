@@ -11,8 +11,8 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
+    const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
+    if (!OPENAI_API_KEY) throw new Error("OPENAI_API_KEY is not configured");
 
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
@@ -121,14 +121,14 @@ Return your analysis as a single JSON object with these exact fields:
   "genre_blend": {"subgenre1": 30, "subgenre2": 25, "subgenre3": 20, "subgenre4": 15, "subgenre5": 10}
 }`;
 
-    const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const aiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
+        model: "gpt-4o-mini",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
@@ -268,7 +268,7 @@ Return your analysis as a single JSON object with these exact fields:
         track_highlights: analysis.track_highlights || [],
         genre_blend: analysis.genre_blend || {},
         energy_curve: analysis.emotional_arc || [],
-        analysis_model: "google/gemini-2.5-flash",
+        analysis_model: "gpt-4o-mini",
         updated_at: new Date().toISOString(),
       }, { onConflict: "user_id,playlist_id" });
 
