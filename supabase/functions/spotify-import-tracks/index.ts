@@ -498,7 +498,7 @@ async function syncPlaylists(
   adminClient: any, userId: string, token: string, spotifyUserId: string,
   existingSnapshots: Map<string, string>,
   targetPlaylistDbId?: string,
-): Promise<{ total: number; changed: number; removed: number; tracksSynced: number; warning: string | null }> {
+): Promise<{ total: number; changed: number; removed: number; tracksSynced: number; playlistsRemaining: number; warning: string | null }> {
   const playlists: PlaylistMeta[] = [];
   let offset = 0;
   let totalPl = Infinity;
@@ -538,7 +538,7 @@ async function syncPlaylists(
     if (isInsufficientScopeError(e)) {
       warning = "Spotify connection is missing playlist read access. Reconnect Spotify to sync playlists.";
       console.warn("[spotify-import-tracks] playlist import skipped due to missing scope");
-      return { total: 0, changed: 0, removed: 0, tracksSynced: 0, warning };
+      return { total: 0, changed: 0, removed: 0, tracksSynced: 0, playlistsRemaining: 0, warning };
     }
     throw e;
   }
@@ -668,17 +668,19 @@ async function syncPlaylists(
     if (!dbId) continue;
 
     try {
-      await ensureDbWrite(
-        adminClient.from("spotify_playlist_tracks").delete().eq("playlist_id", dbId),
-        "sync_playlist_tracks_delete_existing",
-        { playlist_id: dbId, spotify_playlist_id: pl.id, playlist_name: pl.name },
-      );
+      // Delete existing tracks first for clean re-import
+      const delResult = await adminClient.from("spotify_playlist_tracks").delete().eq("playlist_id", dbId);
+      if (delResult.error) {
+        console.warn(`[spotify-import-tracks] delete old tracks failed for ${pl.name}:`, delResult.error.message);
+      }
 
       const trackRows: any[] = [];
-      let nextUrl: string | null = `https://api.spotify.com/v1/playlists/${pl.id}/items?limit=100&offset=0&fields=items(added_at,track(id,name,uri,preview_url,duration_ms,artists(name),album(name,images))),next,total`;
+      let nextUrl: string | null = `https://api.spotify.com/v1/playlists/${pl.id}/items?limit=100&offset=0`;
       let expectedTotal = pl.track_count;
+      let pageNum = 0;
 
       while (nextUrl) {
+        pageNum++;
         const data = await spotifyGet(nextUrl, token);
         const items = data.items || [];
         if (typeof data.total === "number") {
@@ -704,27 +706,28 @@ async function syncPlaylists(
             position: trackRows.length,
           });
         }
-        console.log(`[spotify-import-tracks] playlist ${pl.name}: ${trackRows.length}/${expectedTotal}`);
+        console.log(`[spotify-import-tracks] playlist "${pl.name}" page ${pageNum}: ${trackRows.length}/${expectedTotal} tracks`);
         nextUrl = typeof data.next === "string" && data.next.length > 0 ? data.next : null;
         if (items.length === 0) break;
       }
 
+      console.log(`[spotify-import-tracks] playlist "${pl.name}": inserting ${trackRows.length} tracks into DB`);
+
+      // Insert tracks in batches — use insert, not upsert, since we deleted first
       for (let i = 0; i < trackRows.length; i += 100) {
         const batch = trackRows.slice(i, i + 100);
-        await ensureDbWrite(
-          adminClient.from("spotify_playlist_tracks").upsert(batch, {
+        const insertResult = await adminClient.from("spotify_playlist_tracks").insert(batch);
+        if (insertResult.error) {
+          console.error(`[spotify-import-tracks] insert batch failed for "${pl.name}" batch ${i}:`, insertResult.error.message);
+          // Fallback to upsert for this batch
+          const upsertResult = await adminClient.from("spotify_playlist_tracks").upsert(batch, {
             onConflict: "playlist_id,spotify_track_id",
             ignoreDuplicates: true,
-          }),
-          "sync_playlist_tracks_upsert",
-          {
-            playlist_id: dbId,
-            spotify_playlist_id: pl.id,
-            playlist_name: pl.name,
-            batch_start: i,
-            batch_size: batch.length,
-          },
-        );
+          });
+          if (upsertResult.error) {
+            console.error(`[spotify-import-tracks] upsert fallback also failed:`, upsertResult.error.message);
+          }
+        }
       }
 
       await ensureDbWrite(
