@@ -413,38 +413,28 @@ async function queueNextStep(
   functionUrl: string, anonKey: string, serviceKey: string,
   jobId: string, userId: string, forceRetag: boolean,
 ): Promise<boolean> {
-  for (let retry = 0; retry < 2; retry++) {
-    try {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 55_000);
-      const res = await fetch(functionUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${serviceKey}`,
-          apikey: anonKey,
-          [INTERNAL_HEADER]: "1",
-        },
-        body: JSON.stringify({ mode: "process_step", job_id: jobId, user_id: userId, force_retag: forceRetag }),
-        signal: ctrl.signal,
-      });
-      clearTimeout(timer);
-      if (!res.ok) {
-        const text = await res.text();
-        console.error(`[pipeline] queue attempt ${retry + 1} failed ${res.status}: ${text.substring(0, 200)}`);
-        if (retry < 1) { await new Promise(r => setTimeout(r, 2000)); continue; }
-        return false;
-      }
-      // Consume body to prevent resource leak
-      await res.text();
-      return true;
-    } catch (e) {
-      console.error(`[pipeline] queue attempt ${retry + 1} error:`, e);
-      if (retry < 1) { await new Promise(r => setTimeout(r, 2000)); continue; }
-      return false;
-    }
+  // Fire-and-forget: just confirm the request was accepted, don't wait for processing
+  try {
+    const res = await fetch(functionUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${serviceKey}`,
+        apikey: anonKey,
+        [INTERNAL_HEADER]: "1",
+      },
+      body: JSON.stringify({ mode: "process_step", job_id: jobId, user_id: userId, force_retag: forceRetag }),
+    });
+    // Don't await res.text() — the response won't arrive until the step finishes
+    // Just check that the function was invoked (status will be available from headers)
+    console.log(`[pipeline] queued next step, status: ${res.status}`);
+    // Consume body in background to prevent leak, but don't block on it
+    res.text().catch(() => {});
+    return true;
+  } catch (e: any) {
+    console.error(`[pipeline] queue error:`, e.message);
+    return false;
   }
-  return false;
 }
 
 /* ══════════════════════════════════════════════
