@@ -454,7 +454,7 @@ Deno.serve(async (req) => {
     try {
       const b = await req.json();
       if (b?.mode) mode = String(b.mode);
-      if (typeof b?.batch_size === "number") batchSize = Math.min(b.batch_size, 30);
+      if (typeof b?.batch_size === "number") batchSize = Math.min(b.batch_size, 15);
       if (b?.force_retag) forceRetag = true;
       if (b?.job_id) jobId = b.job_id;
       if (typeof b?.user_id === "string") internalUserId = b.user_id;
