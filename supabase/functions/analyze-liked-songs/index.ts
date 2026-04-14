@@ -55,45 +55,37 @@ async function callAI(
   if (tools) body.tools = tools;
   if (toolChoice) body.tool_choice = toolChoice;
 
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 50_000);
-      const res = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-        signal: ctrl.signal,
-      });
-      clearTimeout(timer);
+  // Single attempt with 45s timeout — edge functions have 60s wall clock
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 45_000);
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+    clearTimeout(timer);
 
-      if (!res.ok) {
-        const text = await res.text();
-        console.error(`[callAI] attempt ${attempt + 1} failed: ${res.status} ${text.substring(0, 200)}`);
-        if (res.status === 429) { await new Promise(r => setTimeout(r, 3000 * (attempt + 1))); continue; }
-        if (res.status === 402) throw new Error("CREDITS_EXHAUSTED");
-        if (attempt < 2) { await new Promise(r => setTimeout(r, 2000)); continue; }
-        throw new Error(`AI error ${res.status}: ${text.substring(0, 200)}`);
-      }
-
-      const data = await res.json();
-      const tc = data.choices?.[0]?.message?.tool_calls?.[0];
-      if (tc?.function?.arguments) {
-        try { return JSON.parse(tc.function.arguments); } catch { return extractJson(tc.function.arguments); }
-      }
-      const content = data.choices?.[0]?.message?.content;
-      if (!content) { if (attempt < 2) continue; throw new Error("Empty AI response"); }
-      return extractJson(content);
-    } catch (e: any) {
-      console.error(`[callAI] attempt ${attempt + 1} error:`, e.message);
-      if (e.message === "CREDITS_EXHAUSTED") throw e;
-      if (e.name === "AbortError") {
-        console.warn(`[callAI] timeout on attempt ${attempt + 1}, will ${attempt < 2 ? "retry" : "fail"}`);
-        if (attempt < 2) { await new Promise(r => setTimeout(r, 1000)); continue; }
-      }
-      if (attempt < 2) { await new Promise(r => setTimeout(r, 1000)); continue; }
-      throw e;
+    if (!res.ok) {
+      const text = await res.text();
+      console.error(`[callAI] failed: ${res.status} ${text.substring(0, 200)}`);
+      if (res.status === 429) throw new Error("RATE_LIMITED");
+      if (res.status === 402) throw new Error("CREDITS_EXHAUSTED");
+      throw new Error(`AI error ${res.status}: ${text.substring(0, 200)}`);
     }
+
+    const data = await res.json();
+    const tc = data.choices?.[0]?.message?.tool_calls?.[0];
+    if (tc?.function?.arguments) {
+      try { return JSON.parse(tc.function.arguments); } catch { return extractJson(tc.function.arguments); }
+    }
+    const content = data.choices?.[0]?.message?.content;
+    if (!content) throw new Error("Empty AI response");
+    return extractJson(content);
+  } catch (e: any) {
+    console.error(`[callAI] error:`, e.message);
+    throw e;
   }
   throw new Error("AI failed after retries");
 }
