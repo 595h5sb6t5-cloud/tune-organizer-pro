@@ -523,12 +523,13 @@ const PlaylistDetail = () => {
   }, [id, user]);
 
   const repairMissingTracks = useCallback(async (silent = false) => {
-    if (!id) return false;
+    if (!id || !playlist) return false;
 
     setRecoveringTracks(true);
     try {
+      // Targeted single-playlist sync — fast, avoids timeout
       const { data, error } = await supabase.functions.invoke("spotify-import-tracks", {
-        body: { scope: "playlists" },
+        body: { playlist_id: id },
       });
 
       if (error) throw new Error(error.message);
@@ -538,7 +539,7 @@ const PlaylistDetail = () => {
       const recoveredCount = refreshed?.tracks.length ?? 0;
 
       if (recoveredCount > 0) {
-        if (!silent) toast.success("Playlist tracks refreshed");
+        if (!silent) toast.success(`Loaded ${recoveredCount} tracks`);
         return true;
       }
 
@@ -553,7 +554,7 @@ const PlaylistDetail = () => {
     } finally {
       setRecoveringTracks(false);
     }
-  }, [id, loadPlaylistData]);
+  }, [id, playlist, loadPlaylistData]);
 
   useEffect(() => {
     if (!id || !user) return;

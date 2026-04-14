@@ -949,7 +949,7 @@ Deno.serve(async (req) => {
     // Step 3: Playlists + playlist tracks
     if (syncScope === "all" || syncScope === "playlists") {
       step = "sync_playlists";
-      const plResult = await syncPlaylists(adminClient, user.id, accessToken, spotifyUserId, existingSnapshots);
+      const plResult = await syncPlaylists(adminClient, user.id, accessToken, spotifyUserId, existingSnapshots, targetPlaylistId);
       result.playlists_total = plResult.total;
       result.playlists_changed = plResult.changed;
       result.playlists_removed = plResult.removed;
