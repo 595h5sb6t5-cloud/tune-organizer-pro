@@ -39,6 +39,32 @@ function fail(step: string, error: string, status = 500, details: Record<string,
   return json({ error, step, status, ...details }, status);
 }
 
+type SupabaseMutationResult = {
+  error: {
+    message: string;
+    code?: string;
+    details?: string | null;
+    hint?: string | null;
+  } | null;
+};
+
+async function ensureDbWrite<T extends SupabaseMutationResult>(
+  promise: Promise<T>,
+  step: string,
+  details: Record<string, unknown> = {},
+) {
+  const result = await promise;
+  if (result.error) {
+    throw new SpotifyImportError(step, result.error.message, 500, {
+      ...details,
+      db_code: result.error.code ?? null,
+      db_details: result.error.details ?? null,
+      db_hint: result.error.hint ?? null,
+    });
+  }
+  return result;
+}
+
 type SpotifyConnectionRow = {
   access_token: string;
   refresh_token: string;
@@ -540,33 +566,49 @@ async function syncPlaylists(
   }));
 
   for (let i = 0; i < playlistRows.length; i += 50) {
-    await adminClient.from("spotify_playlists").upsert(
-      playlistRows.slice(i, i + 50),
-      { onConflict: "user_id,spotify_playlist_id" }
+    const batch = playlistRows.slice(i, i + 50);
+    await ensureDbWrite(
+      adminClient.from("spotify_playlists").upsert(batch, { onConflict: "user_id,spotify_playlist_id" }),
+      "sync_playlists",
+      { batch_start: i, batch_size: batch.length },
     );
   }
 
   const currentSpotifyIds = new Set(playlists.map(p => p.id));
-  const { data: dbPlaylists } = await adminClient
+  const { data: dbPlaylists, error: dbPlaylistsError } = await adminClient
     .from("spotify_playlists")
     .select("id, spotify_playlist_id")
     .eq("user_id", userId);
+  if (dbPlaylistsError) {
+    throw new SpotifyImportError("sync_playlists", dbPlaylistsError.message, 500);
+  }
 
   let removedCount = 0;
   for (const dbPl of dbPlaylists || []) {
     if (!currentSpotifyIds.has(dbPl.spotify_playlist_id)) {
-      await adminClient.from("spotify_playlist_tracks").delete().eq("playlist_id", dbPl.id);
+      await ensureDbWrite(
+        adminClient.from("spotify_playlist_tracks").delete().eq("playlist_id", dbPl.id),
+        "sync_playlists_cleanup_tracks",
+        { playlist_id: dbPl.id, spotify_playlist_id: dbPl.spotify_playlist_id },
+      );
       await adminClient.from("playlist_vibe_analysis").delete().eq("playlist_id", dbPl.id);
-      await adminClient.from("spotify_playlists").delete().eq("id", dbPl.id);
+      await ensureDbWrite(
+        adminClient.from("spotify_playlists").delete().eq("id", dbPl.id),
+        "sync_playlists_cleanup_playlist",
+        { playlist_id: dbPl.id, spotify_playlist_id: dbPl.spotify_playlist_id },
+      );
       removedCount++;
     }
   }
 
   const playlistIdMap = new Map<string, string>();
-  const { data: freshDbPlaylists } = await adminClient
+  const { data: freshDbPlaylists, error: freshDbPlaylistsError } = await adminClient
     .from("spotify_playlists")
     .select("id, spotify_playlist_id")
     .eq("user_id", userId);
+  if (freshDbPlaylistsError) {
+    throw new SpotifyImportError("sync_playlists", freshDbPlaylistsError.message, 500);
+  }
   for (const p of freshDbPlaylists || []) {
     playlistIdMap.set(p.spotify_playlist_id, p.id);
   }
@@ -574,10 +616,13 @@ async function syncPlaylists(
   // Also force re-import for playlists that have 0 tracks in DB
   const trackCountByPlaylist = new Map<string, number>();
   for (const p of freshDbPlaylists || []) {
-    const { count } = await adminClient
+    const { count, error: countError } = await adminClient
       .from("spotify_playlist_tracks")
       .select("id", { count: "exact", head: true })
       .eq("playlist_id", p.id);
+    if (countError) {
+      throw new SpotifyImportError("sync_playlists", countError.message, 500, { playlist_id: p.id });
+    }
     trackCountByPlaylist.set(p.spotify_playlist_id, count ?? 0);
   }
 
@@ -591,13 +636,18 @@ async function syncPlaylists(
   const toSync = playlists.filter(pl => changedSet.has(pl.id));
   console.log(`[spotify-import-tracks] playlists to sync tracks: ${toSync.length} (${changedPlaylistIds.length} changed + ${toSync.length - changedPlaylistIds.length} missing tracks)`);
   let totalTracks = 0;
+  const failedPlaylists: string[] = [];
 
   for (const pl of toSync) {
     const dbId = playlistIdMap.get(pl.id);
     if (!dbId) continue;
 
     try {
-      await adminClient.from("spotify_playlist_tracks").delete().eq("playlist_id", dbId);
+      await ensureDbWrite(
+        adminClient.from("spotify_playlist_tracks").delete().eq("playlist_id", dbId),
+        "sync_playlist_tracks_delete_existing",
+        { playlist_id: dbId, spotify_playlist_id: pl.id, playlist_name: pl.name },
+      );
 
       const trackRows: any[] = [];
       let nextUrl: string | null = `https://api.spotify.com/v1/playlists/${pl.id}/items?limit=100&offset=0&fields=items(added_at,track(id,name,uri,preview_url,duration_ms,artists(name),album(name,images))),next,total`;
@@ -632,24 +682,50 @@ async function syncPlaylists(
       }
 
       for (let i = 0; i < trackRows.length; i += 100) {
-        await adminClient.from("spotify_playlist_tracks").upsert(
-          trackRows.slice(i, i + 100),
-          { onConflict: "playlist_id,spotify_track_id", ignoreDuplicates: true }
+        const batch = trackRows.slice(i, i + 100);
+        await ensureDbWrite(
+          adminClient.from("spotify_playlist_tracks").upsert(batch, {
+            onConflict: "playlist_id,spotify_track_id",
+            ignoreDuplicates: true,
+          }),
+          "sync_playlist_tracks_upsert",
+          {
+            playlist_id: dbId,
+            spotify_playlist_id: pl.id,
+            playlist_name: pl.name,
+            batch_start: i,
+            batch_size: batch.length,
+          },
         );
       }
 
-      await adminClient
-        .from("spotify_playlists")
-        .update({
-          track_count: trackRows.length,
-          last_synced_at: new Date().toISOString(),
-        })
-        .eq("id", dbId);
+      await ensureDbWrite(
+        adminClient
+          .from("spotify_playlists")
+          .update({
+            track_count: trackRows.length,
+            last_synced_at: new Date().toISOString(),
+          })
+          .eq("id", dbId),
+        "sync_playlists_update_metadata",
+        {
+          playlist_id: dbId,
+          spotify_playlist_id: pl.id,
+          playlist_name: pl.name,
+          imported_tracks: trackRows.length,
+        },
+      );
 
       totalTracks += trackRows.length;
     } catch (e) {
+      failedPlaylists.push(pl.name);
       console.warn(`[spotify-import-tracks] Failed to import tracks for playlist ${pl.name}:`, e);
     }
+  }
+
+  if (failedPlaylists.length > 0) {
+    const failureWarning = `Some playlist tracks could not be saved: ${failedPlaylists.slice(0, 3).join(", ")}${failedPlaylists.length > 3 ? ` +${failedPlaylists.length - 3} more` : ""}.`;
+    warning = warning ? `${warning} ${failureWarning}` : failureWarning;
   }
 
   return { total: playlists.length, changed: changedPlaylistIds.length, removed: removedCount, tracksSynced: totalTracks, warning };
