@@ -688,6 +688,8 @@ async function syncPlaylists(
             artist_name: artists,
             album_name: track.album?.name || null,
             image_url: track.album?.images?.[0]?.url || null,
+            duration_ms: track.duration_ms || null,
+            preview_url: track.preview_url || null,
             added_at: item.added_at || null,
             position: trackRows.length,
           });
