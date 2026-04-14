@@ -61,11 +61,11 @@ const INITIAL_PROGRESS: AnalysisProgress = {
   worldsCount: 0, assignedCount: 0, savedWorlds: 0, totalWorlds: 0, statusMessage: "",
 };
 
-const QUEUED_RETRY_MS = 8_000;
-const QUEUED_TIMEOUT_MS = 20_000;
-const PROCESSOR_REQUEST_TIMEOUT_MS = 15_000;
-const RUNNING_STALE_MS = 20_000;
-const RUNNING_RESUME_MAX = 3;
+const QUEUED_RETRY_MS = 10_000;
+const QUEUED_TIMEOUT_MS = 30_000;
+const PROCESSOR_REQUEST_TIMEOUT_MS = 20_000;
+const RUNNING_STALE_MS = 30_000;
+const RUNNING_RESUME_MAX = 5;
 
 type JobSnapshot = {
   status: string;
