@@ -37,6 +37,7 @@ export interface ClusterTrack {
 
 export type AnalysisPhase =
   | "idle"
+  | "queued"
   | "tagging"
   | "defining_worlds"
   | "assigning"
@@ -60,6 +61,41 @@ const INITIAL_PROGRESS: AnalysisProgress = {
   worldsCount: 0, assignedCount: 0, savedWorlds: 0, totalWorlds: 0, statusMessage: "",
 };
 
+const QUEUED_RETRY_MS = 8_000;
+const QUEUED_TIMEOUT_MS = 20_000;
+const PROCESSOR_REQUEST_TIMEOUT_MS = 15_000;
+
+type JobSnapshot = {
+  status: string;
+  phase: string;
+  total_songs: number;
+  total_analyzed: number;
+  assigned_count: number;
+  worlds_count: number;
+  saved_worlds: number | null;
+  total_worlds: number | null;
+  status_message: string | null;
+  error_message: string | null;
+  created_at: string;
+  started_at: string | null;
+  updated_at: string;
+  force_retag?: boolean;
+};
+
+async function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error(message)), ms);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
+
 async function fetchAllFromTable(table: "liked_song_clusters" | "liked_song_cluster_tracks" | "liked_songs", userId: string, columns: string) {
   const all: any[] = [];
   let from = 0;
@@ -73,9 +109,10 @@ async function fetchAllFromTable(table: "liked_song_clusters" | "liked_song_clus
   return all;
 }
 
-function mapJobPhase(phase: string): AnalysisPhase {
+function mapJobPhase(phase: string, status?: string): AnalysisPhase {
+  if (status === "pending") return "queued";
   const mapping: Record<string, AnalysisPhase> = {
-    queued: "tagging",
+    queued: "queued",
     tagging: "tagging",
     defining_worlds: "defining_worlds",
     assigning: "assigning",
@@ -100,6 +137,9 @@ export function useLikedSongClusters() {
   const [progress, setProgress] = useState<AnalysisProgress>(INITIAL_PROGRESS);
   const jobIdRef = useRef<string | null>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const retryAttemptsRef = useRef<Record<string, number>>({});
+  const retryInFlightRef = useRef<string | null>(null);
+  const forceRetagRef = useRef(false);
 
   const loadClusters = useCallback(async () => {
     if (!user || !spotifyConnected) { setClusters([]); return; }
@@ -163,39 +203,165 @@ export function useLikedSongClusters() {
     }
   }, []);
 
-  const startPolling = useCallback((jobId: string) => {
+  const clearLocalJobState = useCallback(() => {
+    jobIdRef.current = null;
+    retryInFlightRef.current = null;
+    setAnalyzing(false);
+  }, []);
+
+  const markJobFailed = useCallback(async (jobId: string, message: string) => {
+    await supabase
+      .from("playlist_generation_jobs")
+      .update({
+        status: "failed",
+        phase: "failed",
+        status_message: "Generation failed to start.",
+        error_message: message,
+        completed_at: new Date().toISOString(),
+      } as never)
+      .eq("id", jobId);
+  }, []);
+
+  const triggerPipeline = useCallback(async (jobId: string, forceRetag: boolean, isRetry = false) => {
+    const body = { mode: "run_pipeline", job_id: jobId, force_retag: forceRetag, batch_size: 25 };
+    const { data: { session } } = await supabase.auth.getSession();
+
+    if (!session?.access_token) {
+      throw new Error("Your session expired. Please sign in again.");
+    }
+
+    try {
+      const result = await withTimeout(
+        supabase.functions.invoke("analyze-liked-songs", { body }),
+        PROCESSOR_REQUEST_TIMEOUT_MS,
+        "Timed out while contacting the playlist processor.",
+      );
+
+      if (result.error) {
+        throw new Error(result.error.message || "Failed to contact the playlist processor.");
+      }
+
+      if ((result.data as { error?: string } | null)?.error) {
+        throw new Error((result.data as { error?: string }).error || "Failed to start playlist generation.");
+      }
+
+      return;
+    } catch (invokeError) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), PROCESSOR_REQUEST_TIMEOUT_MS);
+
+      try {
+        const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-liked-songs`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.access_token}`,
+            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+          },
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        });
+
+        let payload: { error?: string } | null = null;
+        try {
+          payload = await response.json();
+        } catch {
+          payload = null;
+        }
+
+        if (!response.ok || payload?.error) {
+          throw new Error(payload?.error || `Processor returned ${response.status}`);
+        }
+      } catch (fetchError) {
+        const fallbackMessage = fetchError instanceof Error
+          ? (fetchError.name === "AbortError"
+            ? "Timed out while contacting the playlist processor."
+            : fetchError.message)
+          : (invokeError instanceof Error ? invokeError.message : "Failed to contact the playlist processor.");
+
+        throw new Error(isRetry ? `Retry failed: ${fallbackMessage}` : fallbackMessage);
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    }
+  }, []);
+
+  const syncProgressFromJob = useCallback((data: JobSnapshot) => {
+    setProgress({
+      totalAnalyzed: data.total_analyzed,
+      totalSongs: data.total_songs,
+      phase: mapJobPhase(data.phase, data.status),
+      worldsCount: data.worlds_count,
+      assignedCount: data.assigned_count,
+      savedWorlds: data.saved_worlds ?? 0,
+      totalWorlds: data.total_worlds ?? 0,
+      statusMessage: data.status_message || "Working…",
+    });
+  }, []);
+
+  const startPolling = useCallback((jobId: string, fallbackForceRetag = false) => {
     stopPolling();
 
     const poll = async () => {
       try {
-        const { data } = await supabase
+        const { data, error: pollError } = await supabase
           .from("playlist_generation_jobs")
-          .select("status, phase, total_songs, total_analyzed, assigned_count, worlds_count, saved_worlds, total_worlds, status_message, error_message")
+          .select("status, phase, total_songs, total_analyzed, assigned_count, worlds_count, saved_worlds, total_worlds, status_message, error_message, created_at, started_at, updated_at, force_retag")
           .eq("id", jobId)
           .single();
 
-        if (!data) return;
+        if (pollError || !data) {
+          throw new Error(pollError?.message || "Generation job not found.");
+        }
 
-        setProgress({
-          totalAnalyzed: data.total_analyzed,
-          totalSongs: data.total_songs,
-          phase: mapJobPhase(data.phase),
-          worldsCount: data.worlds_count,
-          assignedCount: data.assigned_count,
-          savedWorlds: data.saved_worlds ?? 0,
-          totalWorlds: data.total_worlds ?? 0,
-          statusMessage: data.status_message || "Working…",
-        });
+        const job = data as JobSnapshot;
+        forceRetagRef.current = job.force_retag ?? fallbackForceRetag;
+        syncProgressFromJob(job);
 
-        if (data.status === "completed") {
+        if (job.status === "pending") {
+          const queuedForMs = Date.now() - new Date(job.created_at).getTime();
+          const attempts = retryAttemptsRef.current[jobId] ?? 0;
+
+          if (!job.started_at && queuedForMs >= QUEUED_TIMEOUT_MS) {
+            const message = "The backend processor did not start within 20 seconds. Please retry generation.";
+            await markJobFailed(jobId, message);
+            stopPolling();
+            clearLocalJobState();
+            setError(message);
+            setProgress(INITIAL_PROGRESS);
+            return;
+          }
+
+          if (!job.started_at && queuedForMs >= QUEUED_RETRY_MS && attempts < 1 && retryInFlightRef.current !== jobId) {
+            retryInFlightRef.current = jobId;
+            retryAttemptsRef.current[jobId] = attempts + 1;
+
+            await supabase
+              .from("playlist_generation_jobs")
+              .update({ status_message: "Retrying backend processor…", error_message: null } as never)
+              .eq("id", jobId);
+
+            try {
+              await triggerPipeline(jobId, forceRetagRef.current, true);
+            } catch (retryError) {
+              console.error("Retry start error:", retryError);
+            } finally {
+              retryInFlightRef.current = null;
+            }
+          }
+
+          return;
+        }
+
+        if (job.status === "completed") {
           stopPolling();
-          setAnalyzing(false);
+          clearLocalJobState();
           setProgress(prev => ({ ...prev, phase: "done", statusMessage: "Playlists ready!" }));
           await loadClusters();
-        } else if (data.status === "failed") {
+        } else if (job.status === "failed" || job.status === "cancelled") {
           stopPolling();
-          setAnalyzing(false);
-          setError(data.error_message || "Pipeline failed");
+          clearLocalJobState();
+          setError(job.status === "cancelled" ? "Generation cancelled." : (job.error_message || "Pipeline failed"));
           setProgress(INITIAL_PROGRESS);
         }
       } catch (e) {
@@ -205,7 +371,62 @@ export function useLikedSongClusters() {
 
     poll();
     pollingRef.current = setInterval(poll, 2000);
-  }, [stopPolling, loadClusters]);
+  }, [clearLocalJobState, loadClusters, markJobFailed, stopPolling, syncProgressFromJob, triggerPipeline]);
+
+  const cancelAnalysis = useCallback(async () => {
+    if (!jobIdRef.current) return;
+
+    await supabase
+      .from("playlist_generation_jobs")
+      .update({
+        status: "cancelled",
+        phase: "failed",
+        status_message: "Generation cancelled.",
+        error_message: null,
+        completed_at: new Date().toISOString(),
+      } as never)
+      .eq("id", jobIdRef.current);
+
+    stopPolling();
+    clearLocalJobState();
+    setError(null);
+    setProgress(INITIAL_PROGRESS);
+  }, [clearLocalJobState, stopPolling]);
+
+  const resetStuckJob = useCallback(async () => {
+    if (!user) return;
+
+    await supabase
+      .from("playlist_generation_jobs")
+      .update({
+        status: "failed",
+        phase: "failed",
+        status_message: "Generation reset.",
+        error_message: "Generation reset manually.",
+        completed_at: new Date().toISOString(),
+      } as never)
+      .eq("user_id", user.id)
+      .in("status", ["pending", "running"]);
+
+    stopPolling();
+    clearLocalJobState();
+    setError(null);
+    setProgress(INITIAL_PROGRESS);
+  }, [clearLocalJobState, stopPolling, user]);
+
+  const retryGeneration = useCallback(async () => {
+    if (jobIdRef.current && analyzing) {
+      setError(null);
+      await supabase
+        .from("playlist_generation_jobs")
+        .update({ status_message: "Retrying backend processor…", error_message: null } as never)
+        .eq("id", jobIdRef.current);
+      await triggerPipeline(jobIdRef.current, forceRetagRef.current, true);
+      return;
+    }
+
+    await runAnalysis({ forceRetag: forceRetagRef.current });
+  }, [analyzing, triggerPipeline]);
 
   // Check for active job on mount
   useEffect(() => {
@@ -214,7 +435,7 @@ export function useLikedSongClusters() {
     const checkActiveJob = async () => {
       const { data } = await supabase
         .from("playlist_generation_jobs")
-        .select("id, status, phase, total_songs, total_analyzed, assigned_count, worlds_count, saved_worlds, total_worlds, status_message, error_message")
+        .select("id, status, phase, total_songs, total_analyzed, assigned_count, worlds_count, saved_worlds, total_worlds, status_message, error_message, created_at, started_at, updated_at, force_retag")
         .eq("user_id", user.id)
         .in("status", ["pending", "running"])
         .order("created_at", { ascending: false })
@@ -223,20 +444,12 @@ export function useLikedSongClusters() {
       if (cancelled) return;
 
       if (data?.length) {
-        const job = data[0];
+        const job = data[0] as JobSnapshot & { id: string };
         jobIdRef.current = job.id;
+        forceRetagRef.current = job.force_retag ?? false;
         setAnalyzing(true);
-        setProgress({
-          totalAnalyzed: job.total_analyzed,
-          totalSongs: job.total_songs,
-          phase: mapJobPhase(job.phase),
-          worldsCount: job.worlds_count,
-          assignedCount: job.assigned_count,
-          savedWorlds: job.saved_worlds ?? 0,
-          totalWorlds: job.total_worlds ?? 0,
-          statusMessage: job.status_message || "Resuming…",
-        });
-        startPolling(job.id);
+        syncProgressFromJob(job);
+        startPolling(job.id, job.force_retag ?? false);
       }
     };
     checkActiveJob();
@@ -244,17 +457,30 @@ export function useLikedSongClusters() {
       cancelled = true;
       stopPolling();
     };
-  }, [user, startPolling, stopPolling]);
+  }, [startPolling, stopPolling, syncProgressFromJob, user]);
 
   const runAnalysis = useCallback(async (options?: { forceRetag?: boolean }) => {
     if (!user) return;
     const forceRetag = options?.forceRetag ?? false;
+    forceRetagRef.current = forceRetag;
 
     setAnalyzing(true);
     setError(null);
-    setProgress({ ...INITIAL_PROGRESS, totalSongs: likedCount, phase: "tagging", statusMessage: "Starting deep analysis…" });
+    setProgress({ ...INITIAL_PROGRESS, totalSongs: likedCount, phase: "queued", statusMessage: "Queued…" });
 
     try {
+      await supabase
+        .from("playlist_generation_jobs")
+        .update({
+          status: "failed",
+          phase: "failed",
+          status_message: "Superseded by a new generation request.",
+          error_message: "Replaced by a newer generation request.",
+          completed_at: new Date().toISOString(),
+        } as never)
+        .eq("user_id", user.id)
+        .in("status", ["pending", "running"]);
+
       const { data: job, error: jobErr } = await supabase
         .from("playlist_generation_jobs")
         .insert({
@@ -273,25 +499,36 @@ export function useLikedSongClusters() {
       }
 
       jobIdRef.current = job.id;
+      retryAttemptsRef.current[job.id] = 0;
 
       // Start polling BEFORE invoking the function
-      startPolling(job.id);
+      startPolling(job.id, forceRetag);
 
-      // Invoke edge function — returns 202 immediately, work happens in background
-      const { error: fnErr } = await supabase.functions.invoke("analyze-liked-songs", {
-        body: { mode: "run_pipeline", job_id: job.id, force_retag: forceRetag, batch_size: 25 },
-      });
-
-      if (fnErr) {
-        console.error("Pipeline invoke error:", fnErr);
-      }
+      await triggerPipeline(job.id, forceRetag);
 
     } catch (e: any) {
+      if (jobIdRef.current) {
+        await markJobFailed(jobIdRef.current, e.message || "Analysis failed");
+      }
       setError(e.message || "Analysis failed");
-      setAnalyzing(false);
       stopPolling();
+      clearLocalJobState();
+      setProgress(INITIAL_PROGRESS);
     }
-  }, [user, likedCount, startPolling, stopPolling]);
+  }, [clearLocalJobState, likedCount, markJobFailed, startPolling, stopPolling, triggerPipeline, user]);
 
-  return { clusters, loading, analyzing, hasAnalyzed, error, likedCount, progress, runAnalysis, refresh: loadClusters };
+  return {
+    clusters,
+    loading,
+    analyzing,
+    hasAnalyzed,
+    error,
+    likedCount,
+    progress,
+    runAnalysis,
+    retryGeneration,
+    cancelAnalysis,
+    resetStuckJob,
+    refresh: loadClusters,
+  };
 }
