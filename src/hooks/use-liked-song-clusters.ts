@@ -63,7 +63,7 @@ const INITIAL_PROGRESS: AnalysisProgress = {
 
 const QUEUED_RETRY_MS = 10_000;
 const QUEUED_TIMEOUT_MS = 30_000;
-const PROCESSOR_REQUEST_TIMEOUT_MS = 20_000;
+const PROCESSOR_REQUEST_TIMEOUT_MS = 60_000;
 const RUNNING_STALE_MS = 30_000;
 const RUNNING_RESUME_MAX = 5;
 
@@ -225,7 +225,7 @@ export function useLikedSongClusters() {
   }, []);
 
   const triggerPipeline = useCallback(async (jobId: string, forceRetag: boolean, isRetry = false) => {
-    const body = { mode: "run_pipeline", job_id: jobId, force_retag: forceRetag, batch_size: 25 };
+    const body = { mode: "run_pipeline", job_id: jobId, force_retag: forceRetag, batch_size: 20 };
     const { data: { session } } = await supabase.auth.getSession();
 
     if (!session?.access_token) {
