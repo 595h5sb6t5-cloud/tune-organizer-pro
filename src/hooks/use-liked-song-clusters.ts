@@ -338,25 +338,25 @@ export function useLikedSongClusters() {
         }));
       }
 
-      // Uncategorized bucket
-      const unassigned = allAssignments.filter(a => a.world_id === "__unassigned__");
-      if (unassigned.length >= 3) {
+      // Handle needs_review songs — add to "Sonic Outliers" world
+      const needsReview = allAssignments.filter(a => a.world_id === "__unassigned__" || a.world_id === "needs_review");
+      if (needsReview.length >= 3) {
         const covers: { image_url: string; track_name: string }[] = [];
-        for (const a of unassigned.slice(0, 4)) {
+        for (const a of needsReview.slice(0, 4)) {
           const s = songMap.get(a.song_id);
           if (s?.image_url) covers.push({ image_url: s.image_url, track_name: s.track_name });
         }
         const { data: uc } = await supabase.from("liked_song_clusters")
           .insert({
-            user_id: user.id, name: "Uncategorized",
-            description: "Songs that didn't strongly match any sonic world.",
-            vibe_description: "Diverse tracks awaiting deeper classification",
+            user_id: user.id, name: "Sonic Outliers",
+            description: "Unique tracks that don't fit neatly into any sonic world. Review and reassign as needed.",
+            vibe_description: "Eclectic gems awaiting a home",
             mood_tags: ["eclectic"], color_hex: "#71717a", energy_level: "medium",
-            track_count: unassigned.length, cover_tracks: covers,
+            track_count: needsReview.length, cover_tracks: covers,
             analysis_model: "deep-sonic-worlds-v3", sort_order: sortOrder++,
           }).select("id").single();
         if (uc) {
-          const rows = unassigned.map(a => ({
+          const rows = needsReview.map(a => ({
             user_id: user.id, cluster_id: uc.id,
             liked_song_id: a.song_id, spotify_track_id: a.spotify_track_id,
             confidence_score: a.confidence,
