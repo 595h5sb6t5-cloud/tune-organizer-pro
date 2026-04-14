@@ -273,7 +273,7 @@ export function useLikedSongClusters() {
       // Group by world
       const worldMap = new Map<string, typeof allAssignments>();
       for (const a of allAssignments) {
-        if (a.world_id === "__unassigned__") continue;
+        if (a.world_id === "__unassigned__" || a.world_id === "needs_review") continue;
         if (!worldMap.has(a.world_id)) worldMap.set(a.world_id, []);
         worldMap.get(a.world_id)!.push(a);
       }
