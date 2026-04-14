@@ -22,7 +22,6 @@ export function useDiscoverRecommendations() {
     try {
       if (!user) { setLoading(false); return; }
 
-      // Fetch ALL relevant data in parallel for a rich taste model
       const [
         importedRes, likedRes, playlistsRes, playlistTracksRes,
         historyRes, clustersRes, vibeRes, tasteRes,
@@ -50,7 +49,7 @@ export function useDiscoverRecommendations() {
         return;
       }
 
-      // Build comprehensive known songs set (all sources)
+      // Build known songs set
       const knownSet = new Set<string>();
       for (const t of importedTracks) knownSet.add(`${t.track_name}|||${t.artist_name}`.toLowerCase());
       for (const t of likedSongs) knownSet.add(`${t.track_name}|||${t.artist_name}`.toLowerCase());
@@ -63,7 +62,7 @@ export function useDiscoverRecommendations() {
         return { title, artist };
       });
 
-      // Compute audio feature averages from liked songs
+      // Audio profile
       const audioSongs = likedSongs.filter(s => s.audio_tempo != null);
       const audioProfile = audioSongs.length > 0 ? {
         count: audioSongs.length,
@@ -84,13 +83,21 @@ export function useDiscoverRecommendations() {
         ],
       } : null;
 
-      // Aggregate mood/genre/atmosphere + deep tags from liked songs
+      // Aggregate taste signals
+      const countMap = (arr: string[]) => {
+        const m: Record<string, number> = {};
+        for (const v of arr) if (v) m[v] = (m[v] || 0) + 1;
+        return m;
+      };
+      const topN = (obj: Record<string, number>, n: number) =>
+        Object.entries(obj).sort((a, b) => b[1] - a[1]).slice(0, n).map(e => e[0]);
+
+      const artistCounts: Record<string, number> = {};
+      const genreTagCounts: Record<string, number> = {};
       const moodCounts: Record<string, number> = {};
       const atmosphereCounts: Record<string, number> = {};
       const prodStyleCounts: Record<string, number> = {};
       const eraCounts: Record<string, number> = {};
-      const genreTagCounts: Record<string, number> = {};
-      const artistCounts: Record<string, number> = {};
       const grooveFeelCounts: Record<string, number> = {};
       const vocalStyleCounts: Record<string, number> = {};
       const sonicBrightnessCounts: Record<string, number> = {};
@@ -105,7 +112,6 @@ export function useDiscoverRecommendations() {
         if (s.era) eraCounts[s.era] = (eraCounts[s.era] || 0) + 1;
         artistCounts[s.artist_name] = (artistCounts[s.artist_name] || 0) + 1;
         for (const g of s.genre_tags || []) genreTagCounts[g] = (genreTagCounts[g] || 0) + 1;
-        // Deep tags
         const sa = s as any;
         if (sa.groove_feel) grooveFeelCounts[sa.groove_feel] = (grooveFeelCounts[sa.groove_feel] || 0) + 1;
         if (sa.vocal_style) vocalStyleCounts[sa.vocal_style] = (vocalStyleCounts[sa.vocal_style] || 0) + 1;
@@ -114,30 +120,17 @@ export function useDiscoverRecommendations() {
         if (sa.rhythmic_identity) rhythmicIdentityCounts[sa.rhythmic_identity] = (rhythmicIdentityCounts[sa.rhythmic_identity] || 0) + 1;
         if (sa.sonic_texture) sonicTextureCounts[sa.sonic_texture] = (sonicTextureCounts[sa.sonic_texture] || 0) + 1;
       }
-      for (const t of importedTracks) {
-        artistCounts[t.artist_name] = (artistCounts[t.artist_name] || 0) + 1;
-      }
-
-      // Include saved album artists and genres in taste signals
+      for (const t of importedTracks) artistCounts[t.artist_name] = (artistCounts[t.artist_name] || 0) + 1;
       const savedAlbums = albumsRes.data ?? [];
       for (const a of savedAlbums) {
-        artistCounts[a.artist_name] = (artistCounts[a.artist_name] || 0) + 2; // albums = stronger signal
+        artistCounts[a.artist_name] = (artistCounts[a.artist_name] || 0) + 2;
         for (const g of a.genres || []) genreTagCounts[g] = (genreTagCounts[g] || 0) + 1;
-        if (a.release_date) {
-          const decade = a.release_date.slice(0, 3) + "0s";
-          eraCounts[decade] = (eraCounts[decade] || 0) + 1;
-        }
       }
 
-      const topN = (obj: Record<string, number>, n: number) =>
-        Object.entries(obj).sort((a, b) => b[1] - a[1]).slice(0, n).map(e => e[0]);
-
-      // Feedback history
       const history = historyRes.data ?? [];
       const acceptedHistory = history.filter(h => h.status === "accepted").map(h => ({ title: h.track_title, artist: h.track_artist }));
       const dismissedHistory = history.filter(h => h.status === "dismissed").map(h => ({ title: h.track_title, artist: h.track_artist }));
 
-      // Build the playlists summary
       const playlists = (playlistsRes.data ?? []).map(pl => ({
         id: pl.spotify_playlist_id,
         name: pl.name,
@@ -145,7 +138,6 @@ export function useDiscoverRecommendations() {
         trackCount: pl.track_count,
       }));
 
-      // Build saved albums summary for AI context
       const albumsSummary = savedAlbums.slice(0, 30).map(a => ({
         name: a.album_name,
         artist: a.artist_name,
@@ -196,9 +188,9 @@ export function useDiscoverRecommendations() {
             genreBlend: v.genre_blend,
           })),
           userTasteProfile: tasteRes.data || null,
-          acceptedHistory: acceptedHistory.slice(-15),
-          dismissedHistory: dismissedHistory.slice(-15),
-          sampleTracks: likedSongs.slice(0, 30).map(s => ({
+          acceptedHistory: acceptedHistory.slice(-20),
+          dismissedHistory: dismissedHistory.slice(-20),
+          sampleTracks: likedSongs.slice(0, 40).map(s => ({
             title: s.track_name,
             artist: s.artist_name,
             album: s.album_name,
@@ -226,7 +218,7 @@ export function useDiscoverRecommendations() {
 
       if (error) throw new Error(error.message || "Failed to get recommendations");
 
-      // Post-filter: remove any that match known songs
+      // Post-filter known songs
       const cats: DiscoverCategory[] = (data.categories || []).map((cat: any) => ({
         id: cat.id,
         title: cat.title,
@@ -259,7 +251,7 @@ export function useDiscoverRecommendations() {
             targetPlaylistName: r.targetPlaylistName || undefined,
             status: "pending" as const,
           })),
-      }));
+      })).filter((cat: DiscoverCategory) => cat.recommendations.length > 0);
 
       setCategories(cats);
       setHasLoaded(true);
@@ -292,7 +284,6 @@ export function useDiscoverRecommendations() {
         compatibility_breakdown: rec?.compatibilityBreakdown as any || null,
       }]);
 
-      // Update taste profile counters
       const isAccepted = status === "accepted";
       const { data: existing } = await supabase
         .from("user_taste_profile")
