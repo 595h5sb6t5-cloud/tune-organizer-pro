@@ -523,6 +523,7 @@ Deno.serve(async (req) => {
     let worldDefs: any[] = [];
     let offset = 0;
     let clusterIds: string[] = [];
+    let jobId: string | null = null;
 
     try {
       const b = await req.json();
@@ -532,7 +533,6 @@ Deno.serve(async (req) => {
       if (b?.world_definitions) worldDefs = b.world_definitions;
       if (typeof b?.offset === "number") offset = b.offset;
       if (b?.cluster_ids) clusterIds = b.cluster_ids;
-      let jobId: string | null = null;
       if (b?.job_id) jobId = b.job_id;
     } catch { /* no body */ }
 
