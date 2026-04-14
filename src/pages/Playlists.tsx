@@ -311,14 +311,28 @@ const PlaylistsPage = () => {
         </div>
 
         {error && (
-          <div className="rounded-xl bg-destructive/10 border border-destructive/30 p-4 mb-6">
+          <div className="rounded-xl bg-destructive/10 border border-destructive/30 p-4 mb-6 flex items-center justify-between">
             <p className="text-sm text-destructive">{error}</p>
+            <div className="flex gap-2 flex-shrink-0">
+              <Button variant="outline" size="sm" className="rounded-lg text-xs" onClick={() => retryGeneration()}>
+                <RefreshCw className="w-3.5 h-3.5 mr-1" /> Retry
+              </Button>
+              <Button variant="ghost" size="sm" className="rounded-lg text-xs" onClick={() => resetStuckJob()}>
+                Reset
+              </Button>
+            </div>
           </div>
         )}
 
-        {/* Loading / Analyzing with progress */}
-        {(loading || analyzing) && !hasAnalyzed && (
-          <AnalysisProgressDisplay progress={progress} analyzing={analyzing} />
+        {/* Loading / Analyzing with progress — show regardless of hasAnalyzed */}
+        {analyzing && (
+          <AnalysisProgressDisplay
+            progress={progress}
+            analyzing={analyzing}
+            onCancel={cancelAnalysis}
+            onRetry={retryGeneration}
+            onReset={resetStuckJob}
+          />
         )}
 
         {/* Not analyzed yet */}
