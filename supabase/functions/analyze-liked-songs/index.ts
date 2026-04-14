@@ -58,7 +58,7 @@ async function callAI(
     try {
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), 55_000);
-      const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      const res = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -372,8 +372,8 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!API_KEY) throw new Error("LOVABLE_API_KEY not configured");
+    const API_KEY = Deno.env.get("OPENAI_API_KEY");
+    if (!API_KEY) throw new Error("OPENAI_API_KEY not configured");
 
     const url = Deno.env.get("SUPABASE_URL")!;
     const anon = Deno.env.get("SUPABASE_ANON_KEY")!;
