@@ -550,11 +550,14 @@ Deno.serve(async (req) => {
         error_message: null,
       });
 
-      // Directly invoke the first step — don't use waitUntil which is unreliable
-      const success = await queueNextStep(functionUrl, anon, svc, jobId, userId, forceRetag);
-      if (!success) {
-        await failJob(adm, jobId, "Failed to start the processing pipeline. Please retry.");
-        return json({ error: "Failed to start pipeline" }, 500);
+      // Fire-and-forget: dispatch first step without blocking
+      // We can't await queueNextStep because fetch() blocks until process_step finishes
+      const dispatchPromise = queueNextStep(functionUrl, anon, svc, jobId, userId, forceRetag);
+      // @ts-ignore EdgeRuntime is a Deno Deploy global
+      if (typeof EdgeRuntime !== "undefined" && EdgeRuntime.waitUntil) {
+        EdgeRuntime.waitUntil(dispatchPromise);
+      } else {
+        dispatchPromise.catch(e => console.error("[pipeline] dispatch error:", e));
       }
 
       return json({ success: true, job_id: jobId, message: "Pipeline started" }, 202);
