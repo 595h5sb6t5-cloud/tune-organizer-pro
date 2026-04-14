@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { Brain, Heart, Loader2, Music, RefreshCw, Sparkles, Headphones, ChevronLeft, Play } from "lucide-react";
 import AppLayout from "@/components/app/AppLayout";
 import { Button } from "@/components/ui/button";
-import { Progress } from "@/components/ui/progress";
+import { AnalysisProgressDisplay } from "@/components/app/AnalysisProgressDisplay";
 import { useAuth } from "@/hooks/use-auth";
 import { useLikedSongClusters, type LikedSongCluster } from "@/hooks/use-liked-song-clusters";
 import { toast } from "sonner";
@@ -245,51 +245,8 @@ const LikedSongsIntelligence = () => {
           </div>
         )}
 
-        {/* Loading / Analyzing with progress */}
         {(loading || analyzing) && !hasAnalyzed && (
-          <div className="flex flex-col items-center justify-center py-20 gap-4">
-            <div className="relative">
-              <Loader2 className="w-10 h-10 animate-spin text-accent" />
-              <Sparkles className="w-5 h-5 text-accent absolute -top-1 -right-1 animate-pulse" />
-            </div>
-            <div className="text-center">
-              <p className="font-heading text-lg mb-1">
-                {analyzing ? (progress.statusMessage || "Working…") : "Loading playlists…"}
-              </p>
-              {analyzing && progress.totalSongs > 0 && progress.phase === "tagging" && (
-                <div className="max-w-xs mx-auto mt-3 space-y-2">
-                  <Progress
-                    value={progress.totalSongs > 0 ? (progress.totalAnalyzed / progress.totalSongs) * 100 : 0}
-                    className="h-2"
-                  />
-                  <p className="text-sm font-medium text-accent">
-                    {progress.totalAnalyzed} of {progress.totalSongs} songs analyzed
-                  </p>
-                </div>
-              )}
-              {analyzing && progress.phase === "assigning" && progress.totalSongs > 0 && (
-                <div className="max-w-xs mx-auto mt-3 space-y-2">
-                  <Progress
-                    value={(progress.assignedCount / progress.totalSongs) * 100}
-                    className="h-2"
-                  />
-                  <p className="text-sm font-medium text-accent">
-                    {progress.assignedCount} of {progress.totalSongs} songs assigned
-                  </p>
-                </div>
-              )}
-              {analyzing && progress.worldsCount > 0 && progress.phase !== "tagging" && (
-                <p className="text-xs text-muted-foreground mt-2">
-                  {progress.worldsCount} sonic worlds discovered
-                </p>
-              )}
-              <p className="text-sm text-muted-foreground max-w-md mt-2">
-                {analyzing
-                  ? "Tempo AI is building precise sonic worlds from your full Spotify ecosystem — playlists, albums, artists, and every song's deep musical identity."
-                  : "Loading your curated playlists."}
-              </p>
-            </div>
-          </div>
+          <AnalysisProgressDisplay progress={progress} analyzing={analyzing} />
         )}
 
         {/* Not analyzed yet */}
