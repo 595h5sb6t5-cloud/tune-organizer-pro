@@ -18,6 +18,8 @@ interface PlaylistTrack {
   artist_name: string;
   album_name: string | null;
   image_url: string | null;
+  duration_ms: number | null;
+  preview_url: string | null;
   position: number;
 }
 
@@ -496,7 +498,7 @@ const PlaylistDetail = () => {
           .single(),
         supabase
           .from("spotify_playlist_tracks")
-          .select("id, spotify_track_id, track_name, artist_name, album_name, image_url, position")
+          .select("id, spotify_track_id, track_name, artist_name, album_name, image_url, duration_ms, preview_url, position")
           .eq("playlist_id", id)
           .eq("user_id", user.id)
           .order("position"),
@@ -523,12 +525,13 @@ const PlaylistDetail = () => {
   }, [id, user]);
 
   const repairMissingTracks = useCallback(async (silent = false) => {
-    if (!id) return false;
+    if (!id || !playlist) return false;
 
     setRecoveringTracks(true);
     try {
+      // Targeted single-playlist sync — fast, avoids timeout
       const { data, error } = await supabase.functions.invoke("spotify-import-tracks", {
-        body: { scope: "playlists" },
+        body: { playlist_id: id },
       });
 
       if (error) throw new Error(error.message);
@@ -538,7 +541,7 @@ const PlaylistDetail = () => {
       const recoveredCount = refreshed?.tracks.length ?? 0;
 
       if (recoveredCount > 0) {
-        if (!silent) toast.success("Playlist tracks refreshed");
+        if (!silent) toast.success(`Loaded ${recoveredCount} tracks`);
         return true;
       }
 
@@ -553,7 +556,7 @@ const PlaylistDetail = () => {
     } finally {
       setRecoveringTracks(false);
     }
-  }, [id, loadPlaylistData]);
+  }, [id, playlist, loadPlaylistData]);
 
   useEffect(() => {
     if (!id || !user) return;

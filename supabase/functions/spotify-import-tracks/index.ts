@@ -496,7 +496,8 @@ type PlaylistMeta = {
  */
 async function syncPlaylists(
   adminClient: any, userId: string, token: string, spotifyUserId: string,
-  existingSnapshots: Map<string, string>
+  existingSnapshots: Map<string, string>,
+  targetPlaylistDbId?: string,
 ): Promise<{ total: number; changed: number; removed: number; tracksSynced: number; warning: string | null }> {
   const playlists: PlaylistMeta[] = [];
   let offset = 0;
@@ -550,13 +551,16 @@ async function syncPlaylists(
     }
   }
 
+  // IMPORTANT: Do NOT store Spotify's reported track_count here.
+  // track_count is only updated AFTER tracks are actually inserted into DB (see below).
+  // This prevents the UI from showing "X tracks" when 0 are actually stored.
   const playlistRows = playlists.map(pl => ({
     user_id: userId,
     spotify_playlist_id: pl.id,
     name: pl.name,
     description: pl.description,
     image_url: pl.image_url,
-    track_count: pl.track_count,
+    // track_count intentionally omitted — will be set after track import
     spotify_owner_id: pl.owner_id,
     owner_display_name: pl.owner_display_name,
     is_owned_by_user: pl.is_owned,
@@ -633,8 +637,20 @@ async function syncPlaylists(
       changedSet.add(pl.id);
     }
   }
-  const toSync = playlists.filter(pl => changedSet.has(pl.id));
-  console.log(`[spotify-import-tracks] playlists to sync tracks: ${toSync.length} (${changedPlaylistIds.length} changed + ${toSync.length - changedPlaylistIds.length} missing tracks)`);
+
+  let toSync: PlaylistMeta[];
+  if (targetPlaylistDbId) {
+    // Targeted single-playlist sync: find the spotify ID for this DB playlist
+    let targetSpotifyId: string | undefined;
+    for (const [spotId, dbId] of playlistIdMap.entries()) {
+      if (dbId === targetPlaylistDbId) { targetSpotifyId = spotId; break; }
+    }
+    toSync = targetSpotifyId ? playlists.filter(pl => pl.id === targetSpotifyId) : [];
+    console.log(`[spotify-import-tracks] targeted sync for playlist ${targetPlaylistDbId}: ${toSync.length > 0 ? toSync[0].name : "not found"}`);
+  } else {
+    toSync = playlists.filter(pl => changedSet.has(pl.id));
+  }
+  console.log(`[spotify-import-tracks] playlists to sync tracks: ${toSync.length}`);
   let totalTracks = 0;
   const failedPlaylists: string[] = [];
 
@@ -672,6 +688,8 @@ async function syncPlaylists(
             artist_name: artists,
             album_name: track.album?.name || null,
             image_url: track.album?.images?.[0]?.url || null,
+            duration_ms: track.duration_ms || null,
+            preview_url: track.preview_url || null,
             added_at: item.added_at || null,
             position: trackRows.length,
           });
@@ -825,11 +843,16 @@ Deno.serve(async (req) => {
 
     let forceFullSync = false;
     let syncScope: "all" | "liked" | "playlists" | "artists" | "albums" = "all";
+    let targetPlaylistId: string | undefined; // DB UUID of a single playlist to sync
     try {
       const body = await req.json();
       if (body?.force_full) forceFullSync = true;
       if (body?.scope && ["liked", "playlists", "artists", "albums"].includes(body.scope)) {
         syncScope = body.scope;
+      }
+      if (body?.playlist_id && typeof body.playlist_id === "string") {
+        targetPlaylistId = body.playlist_id;
+        syncScope = "playlists"; // force scope to playlists when targeting one
       }
     } catch { /* no body is fine */ }
 
@@ -930,7 +953,7 @@ Deno.serve(async (req) => {
     // Step 3: Playlists + playlist tracks
     if (syncScope === "all" || syncScope === "playlists") {
       step = "sync_playlists";
-      const plResult = await syncPlaylists(adminClient, user.id, accessToken, spotifyUserId, existingSnapshots);
+      const plResult = await syncPlaylists(adminClient, user.id, accessToken, spotifyUserId, existingSnapshots, targetPlaylistId);
       result.playlists_total = plResult.total;
       result.playlists_changed = plResult.changed;
       result.playlists_removed = plResult.removed;

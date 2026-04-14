@@ -705,10 +705,12 @@ export type Database = {
           album_name: string | null
           artist_name: string
           created_at: string
+          duration_ms: number | null
           id: string
           image_url: string | null
           playlist_id: string
           position: number
+          preview_url: string | null
           spotify_track_id: string
           track_name: string
           user_id: string
@@ -718,10 +720,12 @@ export type Database = {
           album_name?: string | null
           artist_name: string
           created_at?: string
+          duration_ms?: number | null
           id?: string
           image_url?: string | null
           playlist_id: string
           position?: number
+          preview_url?: string | null
           spotify_track_id: string
           track_name: string
           user_id: string
@@ -731,10 +735,12 @@ export type Database = {
           album_name?: string | null
           artist_name?: string
           created_at?: string
+          duration_ms?: number | null
           id?: string
           image_url?: string | null
           playlist_id?: string
           position?: number
+          preview_url?: string | null
           spotify_track_id?: string
           track_name?: string
           user_id?: string
