@@ -560,16 +560,13 @@ Deno.serve(async (req) => {
         error_message: null,
       });
 
-      // Fire-and-forget via EdgeRuntime.waitUntil — return 202 immediately
-      // @ts-ignore EdgeRuntime is a Deno Deploy global
-      if (typeof EdgeRuntime !== "undefined" && EdgeRuntime.waitUntil) {
-        EdgeRuntime.waitUntil(queueNextStep(functionUrl, anon, svc, jobId, userId, forceRetag));
-      } else {
-        // Fallback: fire without awaiting
-        queueNextStep(functionUrl, anon, svc, jobId, userId, forceRetag).catch(e =>
-          console.error("[pipeline] background queue error:", e)
-        );
+      // Directly invoke the first step — don't use waitUntil which is unreliable
+      const success = await queueNextStep(functionUrl, anon, svc, jobId, userId, forceRetag);
+      if (!success) {
+        await failJob(adm, jobId, "Failed to start the processing pipeline. Please retry.");
+        return json({ error: "Failed to start pipeline" }, 500);
       }
+
       return json({ success: true, job_id: jobId, message: "Pipeline started" }, 202);
     }
 
