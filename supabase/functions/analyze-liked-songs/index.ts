@@ -94,7 +94,7 @@ async function fetchAll(client: any, table: string, userId: string, columns: str
 
 async function callAI(
   apiKey: string, model: string, sys: string, usr: string,
-  tools?: any[], toolChoice?: any, temp = 0.3, retries = 2,
+  tools?: any[], toolChoice?: any, temp = 0.3, retries = 3,
 ): Promise<any> {
   const body: any = {
     model,
@@ -106,19 +106,24 @@ async function callAI(
 
   for (let a = 0; a <= retries; a++) {
     try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 45_000); // 45s timeout per AI call
       const r = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
         method: "POST",
         headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify(body),
+        signal: controller.signal,
       });
+      clearTimeout(timer);
       if (!r.ok) {
         const t = await r.text();
-        console.error(`AI err (${a}):`, r.status, t);
+        console.error(`AI err (${a}):`, r.status, t.substring(0, 200));
         if (r.status === 429) {
-          if (a < retries) { await new Promise(w => setTimeout(w, 5000 * (a + 1))); continue; }
+          if (a < retries) { await new Promise(w => setTimeout(w, 3000 * (a + 1))); continue; }
           throw new Error("RATE_LIMIT");
         }
         if (r.status === 402) throw new Error("CREDITS_EXHAUSTED");
+        if (a < retries) continue;
         throw new Error(`AI failed: ${r.status}`);
       }
       const d = await r.json();
@@ -131,11 +136,16 @@ async function callAI(
       if (!c) {
         console.warn(`Empty AI content (finish_reason: ${finish}, attempt ${a})`);
         if (a < retries) continue;
-        throw new Error("Empty AI response");
+        throw new Error("Empty AI response after retries");
       }
       return extractJson(c);
     } catch (e: any) {
       if (e.message === "RATE_LIMIT" || e.message === "CREDITS_EXHAUSTED") throw e;
+      if (e.name === "AbortError") {
+        console.warn(`AI call timed out (attempt ${a})`);
+        if (a < retries) continue;
+        throw new Error("AI call timed out");
+      }
       if (a < retries) { console.warn(`AI retry ${a + 1}:`, e.message); continue; }
       throw e;
     }
@@ -397,7 +407,7 @@ Deno.serve(async (req) => {
     if (ue || !user) return json({ error: "Invalid session" }, 401);
 
     let mode = "tag_only";
-    let batchSize = 200;
+    let batchSize = 50; // Reduced from 200 to avoid edge function timeouts
     let forceRetag = false;
     let worldDefs: any[] = [];
     let offset = 0;
@@ -405,11 +415,13 @@ Deno.serve(async (req) => {
     try {
       const b = await req.json();
       if (b?.mode) mode = b.mode;
-      if (typeof b?.batch_size === "number") batchSize = Math.min(b.batch_size, 200);
+      if (typeof b?.batch_size === "number") batchSize = Math.min(b.batch_size, 50);
       if (b?.force_retag) forceRetag = true;
       if (b?.world_definitions) worldDefs = b.world_definitions;
       if (typeof b?.offset === "number") offset = b.offset;
     } catch { /* no body */ }
+    
+    console.info(`[analyze] mode=${mode}, batch=${batchSize}, offset=${offset}, user=${user.id.substring(0,8)}`)
 
     const COLS = "id, spotify_track_id, track_name, artist_name, album_name, image_url, audio_tempo, audio_energy, audio_valence, audio_danceability, audio_acousticness, audio_instrumentalness, audio_speechiness, audio_loudness, audio_liveness, mood, energy, atmosphere, production_style, groove_feel, vocal_style, sonic_brightness, spatial_quality, rhythmic_identity, listening_context, sonic_texture, intimacy_scale, tension_level, genre_tags, era, tempo_estimate";
 
