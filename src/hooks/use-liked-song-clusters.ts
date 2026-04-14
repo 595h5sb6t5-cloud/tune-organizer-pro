@@ -372,7 +372,7 @@ export function useLikedSongClusters() {
 
       try {
         const refineRes = await supabase.functions.invoke("analyze-liked-songs", {
-          body: { mode: "refine" },
+          body: { mode: "validate" },
         });
         if (refineRes.data) {
           const { removals = 0, merges = 0, deletions = 0 } = refineRes.data;
