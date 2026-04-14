@@ -532,6 +532,8 @@ Deno.serve(async (req) => {
       if (b?.world_definitions) worldDefs = b.world_definitions;
       if (typeof b?.offset === "number") offset = b.offset;
       if (b?.cluster_ids) clusterIds = b.cluster_ids;
+      let jobId: string | null = null;
+      if (b?.job_id) jobId = b.job_id;
     } catch { /* no body */ }
 
     console.info(`[analyze] mode=${mode}, batch=${batchSize}, offset=${offset}, user=${user.id.substring(0, 8)}`);
