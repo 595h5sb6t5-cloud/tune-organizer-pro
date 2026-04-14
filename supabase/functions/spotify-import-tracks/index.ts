@@ -641,8 +641,10 @@ async function syncPlaylists(
   let toSync: PlaylistMeta[];
   if (targetPlaylistDbId) {
     // Targeted single-playlist sync: find the spotify ID for this DB playlist
-    const targetSpotifyId = playlistIdMap.entries().find(([, dbId]) => dbId === targetPlaylistDbId)?.[0]
-      ?? [...playlistIdMap.entries()].find(([, dbId]) => dbId === targetPlaylistDbId)?.[0];
+    let targetSpotifyId: string | undefined;
+    for (const [spotId, dbId] of playlistIdMap.entries()) {
+      if (dbId === targetPlaylistDbId) { targetSpotifyId = spotId; break; }
+    }
     toSync = targetSpotifyId ? playlists.filter(pl => pl.id === targetSpotifyId) : [];
     console.log(`[spotify-import-tracks] targeted sync for playlist ${targetPlaylistDbId}: ${toSync.length > 0 ? toSync[0].name : "not found"}`);
   } else {
