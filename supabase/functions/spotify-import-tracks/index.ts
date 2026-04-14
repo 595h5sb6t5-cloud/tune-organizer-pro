@@ -756,7 +756,9 @@ async function syncPlaylists(
     warning = warning ? `${warning} ${failureWarning}` : failureWarning;
   }
 
-  return { total: playlists.length, changed: changedPlaylistIds.length, removed: removedCount, tracksSynced: totalTracks, warning };
+  const totalChanged = playlists.filter(pl => changedSet.has(pl.id)).length;
+  const playlistsRemaining = Math.max(0, totalChanged - toSync.length);
+  return { total: playlists.length, changed: changedPlaylistIds.length, removed: removedCount, tracksSynced: totalTracks, playlistsRemaining, warning };
 }
 
 /**
