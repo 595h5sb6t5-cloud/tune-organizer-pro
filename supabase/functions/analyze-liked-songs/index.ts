@@ -347,9 +347,24 @@ For EACH song, evaluate against each world:
 9. ✓ Same listening context (gym songs don't go with dinner songs)
 10. ✓ Would sound natural in sequence with other songs in this world
 
-═══ CRITICAL RULES ═══
+═══ LANGUAGE RULE (CRITICAL — READ CAREFULLY) ═══
 
-- Language is NOT a compatibility criterion. A Spanish dream-pop song can go in an English dream-pop world if it sounds right.
+Language is NOT one of the 10 compatibility criteria above. It has ZERO weight in assignment.
+
+CORRECT assignments:
+- Spanish acoustic ballad → "Stripped Acoustic Intimacy" (with English/French ballads) ✅
+- Spanish reggaeton banger → "Peak Energy Dance Floor" (with English dance tracks) ✅  
+- Spanish indie rock → "Indie Guitar Drive" (with English indie rock) ✅
+- Spanish electronic track → "Midnight Electronic Haze" (with any language electronic) ✅
+
+WRONG assignments (language-based grouping):
+- Putting all 4 Spanish songs above in the same world ❌ (they share NO sonic qualities)
+- Creating a world where >80% of songs happen to be the same language AND they don't share groove/energy/production ❌
+
+If you notice you're assigning multiple songs to the same world primarily because they share a language, STOP and re-evaluate each song's sonic qualities independently.
+
+═══ OTHER RULES ═══
+
 - Genre alone is NOT enough — two "pop" songs can be completely incompatible.
 - Same artist does NOT mean same world — artists have diverse songs.
 - Be STRICT. A polluted playlist is worse than a smaller one.
