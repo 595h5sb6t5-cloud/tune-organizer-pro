@@ -412,25 +412,39 @@ const INTERNAL_HEADER = "x-tempo-internal";
 async function queueNextStep(
   functionUrl: string, anonKey: string, serviceKey: string,
   jobId: string, userId: string, forceRetag: boolean,
-) {
-  try {
-    const res = await fetch(functionUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${serviceKey}`,
-        apikey: anonKey,
-        [INTERNAL_HEADER]: "1",
-      },
-      body: JSON.stringify({ mode: "process_step", job_id: jobId, user_id: userId, force_retag: forceRetag }),
-    });
-    if (!res.ok) {
-      const text = await res.text();
-      console.error(`[pipeline] queue failed ${res.status}: ${text.substring(0, 200)}`);
+): Promise<boolean> {
+  for (let retry = 0; retry < 2; retry++) {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 55_000);
+      const res = await fetch(functionUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${serviceKey}`,
+          apikey: anonKey,
+          [INTERNAL_HEADER]: "1",
+        },
+        body: JSON.stringify({ mode: "process_step", job_id: jobId, user_id: userId, force_retag: forceRetag }),
+        signal: ctrl.signal,
+      });
+      clearTimeout(timer);
+      if (!res.ok) {
+        const text = await res.text();
+        console.error(`[pipeline] queue attempt ${retry + 1} failed ${res.status}: ${text.substring(0, 200)}`);
+        if (retry < 1) { await new Promise(r => setTimeout(r, 2000)); continue; }
+        return false;
+      }
+      // Consume body to prevent resource leak
+      await res.text();
+      return true;
+    } catch (e) {
+      console.error(`[pipeline] queue attempt ${retry + 1} error:`, e);
+      if (retry < 1) { await new Promise(r => setTimeout(r, 2000)); continue; }
+      return false;
     }
-  } catch (e) {
-    console.error("[pipeline] queue error:", e);
   }
+  return false;
 }
 
 /* ══════════════════════════════════════════════
