@@ -551,9 +551,15 @@ async function syncPlaylists(
     }
   }
 
+  // Determine source_type for each playlist
+  function getSourceType(pl: PlaylistMeta): string {
+    if (pl.is_collaborative) return "collaborative";
+    if (pl.is_owned) return "created";
+    return "saved";
+  }
+
   // IMPORTANT: Do NOT store Spotify's reported track_count here.
   // track_count is only updated AFTER tracks are actually inserted into DB (see below).
-  // This prevents the UI from showing "X tracks" when 0 are actually stored.
   const playlistRows = playlists.map(pl => ({
     user_id: userId,
     spotify_playlist_id: pl.id,
@@ -566,6 +572,7 @@ async function syncPlaylists(
     is_owned_by_user: pl.is_owned,
     is_collaborative: pl.is_collaborative,
     snapshot_id: pl.snapshot_id,
+    source_type: getSourceType(pl),
     last_synced_at: new Date().toISOString(),
   }));
 
