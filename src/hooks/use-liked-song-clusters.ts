@@ -41,7 +41,7 @@ export type AnalysisPhase =
   | "defining_worlds"
   | "assigning"
   | "saving"
-  | "refining"
+  | "validating"
   | "done";
 
 export interface AnalysisProgress {
