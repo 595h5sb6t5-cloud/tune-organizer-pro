@@ -446,7 +446,7 @@ Deno.serve(async (req) => {
     const functionUrl = `${url}/functions/v1/analyze-liked-songs`;
 
     let mode = "tag_batch";
-    let batchSize = 25;
+    let batchSize = 10;
     let forceRetag = false;
     let jobId: string | null = null;
     let internalUserId: string | null = null;
