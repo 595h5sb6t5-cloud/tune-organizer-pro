@@ -655,7 +655,9 @@ async function syncPlaylists(
     toSync = targetSpotifyId ? playlists.filter(pl => pl.id === targetSpotifyId) : [];
     console.log(`[spotify-import-tracks] targeted sync for playlist ${targetPlaylistDbId}: ${toSync.length > 0 ? toSync[0].name : "not found"}`);
   } else {
-    toSync = playlists.filter(pl => changedSet.has(pl.id));
+    // Limit to 10 playlists per call to avoid edge function timeout
+    const MAX_PLAYLISTS_PER_CALL = 10;
+    toSync = playlists.filter(pl => changedSet.has(pl.id)).slice(0, MAX_PLAYLISTS_PER_CALL);
   }
   console.log(`[spotify-import-tracks] playlists to sync tracks: ${toSync.length}`);
   let totalTracks = 0;
