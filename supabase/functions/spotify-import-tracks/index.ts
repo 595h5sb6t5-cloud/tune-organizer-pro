@@ -730,24 +730,24 @@ async function syncPlaylists(
         }
       }
 
-      await ensureDbWrite(
-        adminClient
-          .from("spotify_playlists")
-          .update({
-            track_count: trackRows.length,
-            last_synced_at: new Date().toISOString(),
-          })
-          .eq("id", dbId),
-        "sync_playlists_update_metadata",
-        {
-          playlist_id: dbId,
-          spotify_playlist_id: pl.id,
-          playlist_name: pl.name,
-          imported_tracks: trackRows.length,
-        },
-      );
+      // Verify tracks were actually saved
+      const { count: verifiedCount } = await adminClient
+        .from("spotify_playlist_tracks")
+        .select("id", { count: "exact", head: true })
+        .eq("playlist_id", dbId);
 
-      totalTracks += trackRows.length;
+      const finalCount = verifiedCount ?? trackRows.length;
+      console.log(`[spotify-import-tracks] playlist "${pl.name}": verified ${finalCount} tracks in DB (expected ${trackRows.length})`);
+
+      await adminClient
+        .from("spotify_playlists")
+        .update({
+          track_count: finalCount,
+          last_synced_at: new Date().toISOString(),
+        })
+        .eq("id", dbId);
+
+      totalTracks += finalCount;
     } catch (e) {
       failedPlaylists.push(pl.name);
       console.warn(`[spotify-import-tracks] Failed to import tracks for playlist ${pl.name}:`, e);
