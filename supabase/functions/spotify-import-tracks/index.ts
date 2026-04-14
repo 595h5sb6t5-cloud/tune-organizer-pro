@@ -839,11 +839,16 @@ Deno.serve(async (req) => {
 
     let forceFullSync = false;
     let syncScope: "all" | "liked" | "playlists" | "artists" | "albums" = "all";
+    let targetPlaylistId: string | undefined; // DB UUID of a single playlist to sync
     try {
       const body = await req.json();
       if (body?.force_full) forceFullSync = true;
       if (body?.scope && ["liked", "playlists", "artists", "albums"].includes(body.scope)) {
         syncScope = body.scope;
+      }
+      if (body?.playlist_id && typeof body.playlist_id === "string") {
+        targetPlaylistId = body.playlist_id;
+        syncScope = "playlists"; // force scope to playlists when targeting one
       }
     } catch { /* no body is fine */ }
 
