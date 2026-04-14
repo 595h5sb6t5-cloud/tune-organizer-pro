@@ -496,7 +496,7 @@ const PlaylistDetail = () => {
           .single(),
         supabase
           .from("spotify_playlist_tracks")
-          .select("id, spotify_track_id, track_name, artist_name, album_name, image_url, position")
+          .select("id, spotify_track_id, track_name, artist_name, album_name, image_url, duration_ms, preview_url, position")
           .eq("playlist_id", id)
           .eq("user_id", user.id)
           .order("position"),
