@@ -496,7 +496,8 @@ type PlaylistMeta = {
  */
 async function syncPlaylists(
   adminClient: any, userId: string, token: string, spotifyUserId: string,
-  existingSnapshots: Map<string, string>
+  existingSnapshots: Map<string, string>,
+  targetPlaylistDbId?: string,
 ): Promise<{ total: number; changed: number; removed: number; tracksSynced: number; warning: string | null }> {
   const playlists: PlaylistMeta[] = [];
   let offset = 0;
@@ -550,13 +551,16 @@ async function syncPlaylists(
     }
   }
 
+  // IMPORTANT: Do NOT store Spotify's reported track_count here.
+  // track_count is only updated AFTER tracks are actually inserted into DB (see below).
+  // This prevents the UI from showing "X tracks" when 0 are actually stored.
   const playlistRows = playlists.map(pl => ({
     user_id: userId,
     spotify_playlist_id: pl.id,
     name: pl.name,
     description: pl.description,
     image_url: pl.image_url,
-    track_count: pl.track_count,
+    // track_count intentionally omitted — will be set after track import
     spotify_owner_id: pl.owner_id,
     owner_display_name: pl.owner_display_name,
     is_owned_by_user: pl.is_owned,
