@@ -587,7 +587,12 @@ Deno.serve(async (req) => {
         return json({ success: true, terminal: true });
       }
 
-      const queue = () => queueNextStep(functionUrl, anon, svc, jobId!, userId, forceRetag);
+      const queue = async () => {
+        const ok = await queueNextStep(functionUrl, anon, svc, jobId!, userId, forceRetag);
+        if (!ok) {
+          console.error("[pipeline] Failed to queue next step — job will stall until frontend retries");
+        }
+      };
 
       try {
         /* ── PHASE: TAGGING ── */
