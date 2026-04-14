@@ -84,9 +84,21 @@ async function refreshTokenIfNeeded(supabase: any, userId: string): Promise<{ to
     body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: connection.refresh_token }),
   });
 
-  const refreshData = parseJsonText(await refreshRes.text());
+  const refreshText = await refreshRes.text();
+  const refreshData = parseJsonText(refreshText);
   if (!refreshRes.ok || !isRecord(refreshData) || typeof refreshData.access_token !== "string") {
-    throw new SpotifyImportError("refresh_token", "Token refresh failed.", refreshRes.status || 400);
+    console.error("[spotify-import] Token refresh failed:", refreshRes.status, refreshText.substring(0, 300));
+    // If Spotify says "invalid_grant", the refresh token is permanently dead — user must re-auth
+    const isInvalidGrant = isRecord(refreshData) && (refreshData.error === "invalid_grant" || refreshData.error === "invalid_client");
+    if (isInvalidGrant || refreshRes.status === 400) {
+      // Mark the connection as broken so the frontend knows to prompt re-auth
+      await supabase.from("spotify_connections").update({
+        sync_error: "Spotify authorization expired. Please reconnect your Spotify account.",
+        sync_status: "error",
+      }).eq("user_id", userId);
+      throw new SpotifyImportError("refresh_token", "Spotify authorization expired. Please disconnect and reconnect your Spotify account in Settings.", 401);
+    }
+    throw new SpotifyImportError("refresh_token", "Token refresh failed.", refreshRes.status || 500);
   }
 
   const expires_at = new Date(Date.now() + (refreshData.expires_in as number) * 1000).toISOString();
