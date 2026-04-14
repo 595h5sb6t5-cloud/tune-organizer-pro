@@ -13,6 +13,71 @@ function json(body: unknown, status = 200) {
   });
 }
 
+const INTERNAL_DISPATCH_HEADER = "x-tempo-internal";
+
+type DispatchJobPayload = {
+  job_id: string;
+  user_id: string;
+  force_retag: boolean;
+  batch_size: number;
+};
+
+async function updateJob(adm: any, jobId: string, patch: Record<string, unknown>) {
+  const { error } = await adm
+    .from("playlist_generation_jobs")
+    .update({ ...patch, updated_at: new Date().toISOString() })
+    .eq("id", jobId);
+
+  if (error) throw error;
+}
+
+async function failJob(adm: any, jobId: string, message: string) {
+  await updateJob(adm, jobId, {
+    status: "failed",
+    phase: "failed",
+    status_message: "Playlist generation failed.",
+    error_message: message,
+    completed_at: new Date().toISOString(),
+  });
+}
+
+async function dispatchPipelineStep(
+  functionUrl: string,
+  anonKey: string,
+  serviceRoleKey: string,
+  payload: DispatchJobPayload,
+) {
+  const response = await fetch(functionUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${serviceRoleKey}`,
+      apikey: anonKey,
+      [INTERNAL_DISPATCH_HEADER]: "1",
+    },
+    body: JSON.stringify({ mode: "process_pipeline_step", ...payload }),
+  });
+
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`Step dispatch failed (${response.status}): ${text.substring(0, 200)}`);
+  }
+}
+
+function queuePipelineStep(
+  functionUrl: string,
+  anonKey: string,
+  serviceRoleKey: string,
+  payload: DispatchJobPayload,
+) {
+  const dispatch = dispatchPipelineStep(functionUrl, anonKey, serviceRoleKey, payload)
+    .catch((error) => console.error("[pipeline] dispatch error:", error));
+
+  if (typeof (globalThis as any).EdgeRuntime?.waitUntil === "function") {
+    (globalThis as any).EdgeRuntime.waitUntil(dispatch);
+  }
+}
+
 function extractJson(raw: string): any {
   let cleaned = raw.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
   const start = cleaned.search(/[\{\[]/);
@@ -504,18 +569,9 @@ Deno.serve(async (req) => {
     const API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!API_KEY) throw new Error("LOVABLE_API_KEY not configured");
 
-    const auth = req.headers.get("Authorization");
-    if (!auth) return json({ error: "Not authenticated" }, 401);
-
     const url = Deno.env.get("SUPABASE_URL")!;
     const anon = Deno.env.get("SUPABASE_ANON_KEY")!;
     const svc = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-
-    const sb = createClient(url, anon, { global: { headers: { Authorization: auth } } });
-    const adm = createClient(url, svc);
-
-    const { data: { user }, error: ue } = await sb.auth.getUser();
-    if (ue || !user) return json({ error: "Invalid session" }, 401);
 
     let mode = "tag_only";
     let batchSize = 50;
@@ -524,17 +580,42 @@ Deno.serve(async (req) => {
     let offset = 0;
     let clusterIds: string[] = [];
     let jobId: string | null = null;
+    let internalUserId: string | null = null;
 
     try {
       const b = await req.json();
-      if (b?.mode) mode = b.mode;
+      if (b?.mode) mode = String(b.mode);
       if (typeof b?.batch_size === "number") batchSize = Math.min(b.batch_size, 50);
       if (b?.force_retag) forceRetag = true;
       if (b?.world_definitions) worldDefs = b.world_definitions;
       if (typeof b?.offset === "number") offset = b.offset;
       if (b?.cluster_ids) clusterIds = b.cluster_ids;
       if (b?.job_id) jobId = b.job_id;
+      if (typeof b?.user_id === "string") internalUserId = b.user_id;
     } catch { /* no body */ }
+
+    const functionUrl = `${url}/functions/v1/analyze-liked-songs`;
+    const internalRequest =
+      req.headers.get(INTERNAL_DISPATCH_HEADER) === "1" &&
+      req.headers.get("Authorization") === `Bearer ${svc}`;
+
+    const adm = createClient(url, svc);
+    let sb: any = adm;
+    let user: { id: string } | null = null;
+
+    if (internalRequest) {
+      if (!internalUserId) return json({ error: "user_id required" }, 400);
+      user = { id: internalUserId };
+    } else {
+      const auth = req.headers.get("Authorization");
+      if (!auth) return json({ error: "Not authenticated" }, 401);
+
+      sb = createClient(url, anon, { global: { headers: { Authorization: auth } } });
+
+      const { data: { user: authUser }, error: ue } = await sb.auth.getUser();
+      if (ue || !authUser) return json({ error: "Invalid session" }, 401);
+      user = authUser;
+    }
 
     console.info(`[analyze] mode=${mode}, batch=${batchSize}, offset=${offset}, user=${user.id.substring(0, 8)}`);
 
@@ -881,34 +962,77 @@ Use define_sonic_worlds.`,
       }
     }
 
-    /* ═══ RUN FULL PIPELINE (background) ═══ */
-    if (mode === "run_pipeline") {
+    /* ═══ PROCESS ONE PIPELINE STEP (internal) ═══ */
+    if (mode === "process_pipeline_step") {
+      if (!internalRequest) return json({ error: "Forbidden" }, 403);
       if (!jobId) return json({ error: "job_id required" }, 400);
 
-      // Update job to running immediately
-      await adm.from("playlist_generation_jobs").update({
-        status: "running", phase: "tagging", started_at: new Date().toISOString(),
-        status_message: "Starting deep analysis…",
-      }).eq("id", jobId);
+      const { data: jobData, error: jobErr } = await adm
+        .from("playlist_generation_jobs")
+        .select("id, user_id, status, phase, total_songs, total_analyzed, assigned_count, worlds_count, saved_worlds, total_worlds, world_definitions, force_retag, started_at, updated_at")
+        .eq("id", jobId)
+        .single();
 
-      // Return 202 immediately, do work in background
-      const bgWork = async () => {
-        try {
-          // ── Count songs ──
-          const { count: totalCount } = await sb.from("liked_songs").select("id", { count: "exact", head: true }).eq("user_id", user.id);
-          const totalSongs = totalCount ?? 0;
-          if (totalSongs === 0) {
-            await adm.from("playlist_generation_jobs").update({
-              status: "failed", phase: "failed",
-              error_message: "No liked songs. Import library first.",
-            }).eq("id", jobId);
-            return;
+      if (jobErr) throw jobErr;
+      const job: any = jobData;
+      if (!job) return json({ error: "Job not found" }, 404);
+      if (job.user_id !== user.id) return json({ error: "Forbidden" }, 403);
+      if (["completed", "failed", "cancelled"].includes(job.status)) {
+        return json({ success: true, terminal: true, job_id: jobId });
+      }
+
+      const { data: claimedRows, error: claimError } = await adm
+        .from("playlist_generation_jobs")
+        .update({ updated_at: new Date().toISOString() })
+        .eq("id", jobId)
+        .eq("updated_at", job.updated_at)
+        .select("id");
+
+      if (claimError) throw claimError;
+      if (!claimedRows?.length) {
+        return json({ success: true, skipped: true, job_id: jobId, message: "Another worker already claimed this job." }, 202);
+      }
+
+      forceRetag = forceRetag || !!job.force_retag;
+
+      const queueNext = () => {
+        queuePipelineStep(functionUrl, anon, svc, {
+          job_id: jobId,
+          user_id: user.id,
+          force_retag: forceRetag,
+          batch_size: batchSize,
+        });
+      };
+
+      try {
+        if (!job.started_at || job.status === "pending" || job.phase === "queued") {
+          const startedAt = job.started_at || new Date().toISOString();
+          await updateJob(adm, jobId, {
+            status: "running",
+            phase: "tagging",
+            started_at: startedAt,
+            status_message: "Starting deep analysis…",
+            error_message: null,
+          });
+          job.status = "running";
+          job.phase = "tagging";
+          job.started_at = startedAt;
+        }
+
+        if (job.phase === "tagging") {
+          let totalSongs = job.total_songs ?? 0;
+          if (!totalSongs) {
+            const { count: totalCount } = await sb.from("liked_songs").select("id", { count: "exact", head: true }).eq("user_id", user.id);
+            totalSongs = totalCount ?? 0;
+            await updateJob(adm, jobId, { total_songs: totalSongs });
           }
 
-          await adm.from("playlist_generation_jobs").update({ total_songs: totalSongs }).eq("id", jobId);
+          if (totalSongs === 0) {
+            await failJob(adm, jobId, "No liked songs. Import library first.");
+            return json({ error: "No liked songs. Import library first." }, 400);
+          }
 
-          // ── PHASE 1: Tag songs ──
-          if (forceRetag) {
+          if (forceRetag && (job.total_analyzed ?? 0) === 0 && (job.assigned_count ?? 0) === 0 && (job.worlds_count ?? 0) === 0) {
             await adm.from("liked_songs").update({
               analyzed_at: null, groove_feel: null, vocal_style: null,
               sonic_brightness: null, spatial_quality: null, rhythmic_identity: null,
@@ -917,106 +1041,111 @@ Use define_sonic_worlds.`,
               production_style: null, era: null, tempo_estimate: null, genre_tags: [], language: null,
             }).eq("user_id", user.id);
 
-            const { data: ec } = await adm.from("liked_song_clusters").select("id").eq("user_id", user.id);
-            if (ec?.length) {
-              await adm.from("liked_song_cluster_tracks").delete().in("cluster_id", ec.map((c: any) => c.id));
+            const existingClusters = await fetchAll(adm, "liked_song_clusters", user.id, "id");
+            if (existingClusters.length) {
+              const ids = existingClusters.map((c: any) => c.id);
+              for (let i = 0; i < ids.length; i += 50) {
+                await adm.from("liked_song_cluster_tracks").delete().in("cluster_id", ids.slice(i, i + 50));
+              }
               await adm.from("liked_song_clusters").delete().eq("user_id", user.id);
             }
           }
 
-          let tagDone = false;
-          let tagBatch = 0;
-          let consecutiveErrors = 0;
+          const { data: unan, error: unanErr } = await sb.from("liked_songs")
+            .select("id, spotify_track_id, track_name, artist_name, album_name, image_url, audio_tempo, audio_energy, audio_valence, audio_danceability, audio_acousticness, audio_instrumentalness, audio_speechiness, audio_loudness, audio_liveness")
+            .eq("user_id", user.id)
+            .is("groove_feel", null)
+            .order("added_at", { ascending: false })
+            .limit(batchSize);
 
-          while (!tagDone && tagBatch < 200) {
-            tagBatch++;
-            try {
-              const { data: unan } = await sb.from("liked_songs")
-                .select("id, spotify_track_id, track_name, artist_name, album_name, image_url, audio_tempo, audio_energy, audio_valence, audio_danceability, audio_acousticness, audio_instrumentalness, audio_speechiness, audio_loudness, audio_liveness")
-                .eq("user_id", user.id).is("groove_feel", null)
-                .order("added_at", { ascending: false }).limit(batchSize);
+          if (unanErr) throw unanErr;
+          const songs = unan || [];
 
-              const songs = unan || [];
-              if (songs.length === 0) { tagDone = true; break; }
-
-              const list = songs.map((s: any, i: number) =>
-                `${i + 1}. "${s.track_name}" – ${s.artist_name}${s.album_name ? ` (${s.album_name})` : ""}${fmtAudio(s)}`
-              ).join("\n");
-
-              const p = await callAI(API_KEY, "google/gemini-2.5-flash", TAG_SYS,
-                `Analyze these ${songs.length} songs across all 17 dimensions. Be SPECIFIC — no generic tags.\n\n${list}\n\nUse tag_songs.`,
-                [TAG_TOOL], { type: "function", function: { name: "tag_songs" } });
-
-              const ts = p.songs || [];
-              const now = new Date().toISOString();
-              const updates = ts.map((tg: any) => {
-                const idx = (tg.index || 0) - 1;
-                if (idx < 0 || idx >= songs.length) return null;
-                return { id: songs[idx].id, tg };
-              }).filter(Boolean);
-
-              for (let i = 0; i < updates.length; i += 10) {
-                const batch = updates.slice(i, i + 10);
-                await Promise.all(batch.map((u: any) =>
-                  adm.from("liked_songs").update({
-                    genre_tags: u.tg.genre_tags || [], mood: u.tg.mood, energy: u.tg.energy,
-                    tempo_estimate: u.tg.tempo_estimate, era: u.tg.era, atmosphere: u.tg.atmosphere,
-                    production_style: u.tg.production_style, groove_feel: u.tg.groove_feel,
-                    vocal_style: u.tg.vocal_style, sonic_brightness: u.tg.sonic_brightness,
-                    spatial_quality: u.tg.spatial_quality, rhythmic_identity: u.tg.rhythmic_identity,
-                    listening_context: u.tg.listening_context, sonic_texture: u.tg.sonic_texture,
-                    intimacy_scale: u.tg.intimacy_scale, tension_level: u.tg.tension_level,
-                    language: u.tg.language || null, analyzed_at: now,
-                  }).eq("id", u.id)
-                ));
-              }
-
-              consecutiveErrors = 0;
-
-              // Update job progress
-              const { count: analyzedNow } = await sb.from("liked_songs").select("id", { count: "exact", head: true })
-                .eq("user_id", user.id).not("groove_feel", "is", null);
-              const analyzed = analyzedNow ?? 0;
-
-              await adm.from("playlist_generation_jobs").update({
-                total_analyzed: analyzed,
-                status_message: `${analyzed} of ${totalSongs} songs analyzed…`,
-              }).eq("id", jobId);
-
-              if (analyzed >= totalSongs) tagDone = true;
-            } catch (e: any) {
-              consecutiveErrors++;
-              console.warn(`[pipeline] tag batch ${tagBatch} error (${consecutiveErrors}):`, e.message);
-              if (consecutiveErrors >= 3) {
-                await adm.from("playlist_generation_jobs").update({
-                  status: "failed", phase: "failed",
-                  error_message: `Tagging failed after retries: ${e.message}`,
-                }).eq("id", jobId);
-                return;
-              }
-              await new Promise(r => setTimeout(r, 2000 * consecutiveErrors));
-            }
+          if (songs.length === 0) {
+            await updateJob(adm, jobId, {
+              total_analyzed: totalSongs,
+              phase: "defining_worlds",
+              status: "running",
+              status_message: "Studying your full Spotify ecosystem — playlists, albums, artists…",
+            });
+            queueNext();
+            return json({ success: true, job_id: jobId, phase: "defining_worlds", total_analyzed: totalSongs }, 202);
           }
 
-          // ── PHASE 2: Define worlds ──
-          await adm.from("playlist_generation_jobs").update({
-            phase: "defining_worlds",
-            status_message: "Studying your full Spotify ecosystem — playlists, albums, artists…",
-            total_analyzed: totalSongs,
-          }).eq("id", jobId);
+          const list = songs.map((s: any, i: number) =>
+            `${i + 1}. "${s.track_name}" – ${s.artist_name}${s.album_name ? ` (${s.album_name})` : ""}${fmtAudio(s)}`
+          ).join("\n");
 
+          const p = await callAI(
+            API_KEY,
+            "google/gemini-2.5-flash",
+            TAG_SYS,
+            `Analyze these ${songs.length} songs across all 17 dimensions. Be SPECIFIC — no generic tags.\n\n${list}\n\nUse tag_songs.`,
+            [TAG_TOOL],
+            { type: "function", function: { name: "tag_songs" } },
+          );
+
+          const ts = p.songs || [];
+          const now = new Date().toISOString();
+          const updates = ts.map((tg: any) => {
+            const idx = (tg.index || 0) - 1;
+            if (idx < 0 || idx >= songs.length) return null;
+            return { id: songs[idx].id, tg };
+          }).filter(Boolean);
+
+          for (let i = 0; i < updates.length; i += 10) {
+            const batch = updates.slice(i, i + 10);
+            await Promise.all(batch.map((u: any) =>
+              adm.from("liked_songs").update({
+                genre_tags: u.tg.genre_tags || [], mood: u.tg.mood, energy: u.tg.energy,
+                tempo_estimate: u.tg.tempo_estimate, era: u.tg.era, atmosphere: u.tg.atmosphere,
+                production_style: u.tg.production_style, groove_feel: u.tg.groove_feel,
+                vocal_style: u.tg.vocal_style, sonic_brightness: u.tg.sonic_brightness,
+                spatial_quality: u.tg.spatial_quality, rhythmic_identity: u.tg.rhythmic_identity,
+                listening_context: u.tg.listening_context, sonic_texture: u.tg.sonic_texture,
+                intimacy_scale: u.tg.intimacy_scale, tension_level: u.tg.tension_level,
+                language: u.tg.language || null,
+                analyzed_at: now,
+              }).eq("id", u.id)
+            ));
+          }
+
+          const { count: analyzedNow } = await sb.from("liked_songs")
+            .select("id", { count: "exact", head: true })
+            .eq("user_id", user.id)
+            .not("groove_feel", "is", null);
+
+          const analyzed = analyzedNow ?? 0;
+          const finishedTagging = analyzed >= totalSongs;
+
+          await updateJob(adm, jobId, {
+            total_analyzed: analyzed,
+            phase: finishedTagging ? "defining_worlds" : "tagging",
+            status: "running",
+            status_message: finishedTagging
+              ? "Studying your full Spotify ecosystem — playlists, albums, artists…"
+              : `${analyzed} of ${totalSongs} songs analyzed…`,
+          });
+
+          queueNext();
+          return json({
+            success: true,
+            job_id: jobId,
+            phase: finishedTagging ? "defining_worlds" : "tagging",
+            total_analyzed: analyzed,
+            total_songs: totalSongs,
+          }, 202);
+        }
+
+        if (job.phase === "defining_worlds") {
           const allSongs = await fetchAll(sb, "liked_songs", user.id, COLS);
           const tagged = allSongs.filter((s: any) => s.groove_feel != null);
 
           if (tagged.length < 10) {
-            await adm.from("playlist_generation_jobs").update({
-              status: "failed", phase: "failed",
-              error_message: `Need more tagged songs (${tagged.length}). Run tagging first.`,
-            }).eq("id", jobId);
-            return;
+            await failJob(adm, jobId, `Need more tagged songs (${tagged.length}). Run tagging first.`);
+            return json({ error: `Need more tagged songs (${tagged.length}). Run tagging first.` }, 400);
           }
 
-          // Fetch context for world definition
           const pls = await fetchAll(sb, "spotify_playlists", user.id, "id, name, description, track_count, is_owned_by_user, is_collaborative");
           const allPlTracks = await fetchAll(sb, "spotify_playlist_tracks", user.id, "playlist_id, track_name, artist_name, position");
           const plTrackMap = new Map<string, any[]>();
@@ -1034,8 +1163,8 @@ Use define_sonic_worlds.`,
             const shown = tks.slice(0, 30);
             if (shown.length > 0) {
               const tl = shown.map((t: any) => `  - "${t.track_name}" – ${t.artist_name}`).join("\n");
-              const f = [pl.is_owned_by_user ? "user-created" : "followed", `${pl.track_count}tk`].filter(Boolean).join(", ");
-              const block = `📋 "${pl.name}" (${f})\n${tl}${tks.length > 30 ? `\n  +${tks.length - 30} more` : ""}`;
+              const flags = [pl.is_owned_by_user ? "user-created" : "followed", `${pl.track_count}tk`].filter(Boolean).join(", ");
+              const block = `📋 "${pl.name}" (${flags})\n${tl}${tks.length > 30 ? `\n  +${tks.length - 30} more` : ""}`;
               plBlocks.push(block);
               plTokenBudget += block.length;
             }
@@ -1055,78 +1184,22 @@ Use define_sonic_worlds.`,
 
           const ctx = `═══ LIBRARY: ${allSongs.length} liked songs (${tagged.length} analyzed) ═══\n\n═══ PLAYLISTS (${pls.length}) ═══\n${plBlocks.length > 0 ? plBlocks.join("\n\n") : "None"}\n\n═══ FOLLOWED ARTISTS (${arts.length}) ═══\n${artL || "None"}\n\n═══ SAVED ALBUMS (${albs.length}) ═══\n${albL || "None"}\n\n═══ TAGGED SONG SAMPLE (${sample.length} of ${tagged.length}) ═══\n${sampleL}`;
 
-          const worldResult = await callAI(API_KEY, "google/gemini-2.5-flash", WORLDS_SYS,
+          const worldResult = await callAI(
+            API_KEY,
+            "google/gemini-2.5-flash",
+            WORLDS_SYS,
             `Study this library and define ALL sonic worlds needed.\nREMEMBER: NEVER group by language. Group by SOUND.\nUse playlists as reference for user taste, not as templates.\nAim for ${suggest}+ worlds for ${allSongs.length} songs.\nEach world must have a CLEAR sonic identity.\n\n${ctx}\n\nUse define_sonic_worlds.`,
-            [WORLDS_TOOL], { type: "function", function: { name: "define_sonic_worlds" } }, 0.4);
+            [WORLDS_TOOL],
+            { type: "function", function: { name: "define_sonic_worlds" } },
+            0.4,
+          );
 
           const worlds = worldResult.worlds || [];
-
-          await adm.from("playlist_generation_jobs").update({
-            worlds_count: worlds.length,
-            world_definitions: worlds,
-            status_message: `Discovered ${worlds.length} sonic worlds in your library`,
-          }).eq("id", jobId);
-
-          // ── PHASE 3: Assign songs ──
-          await adm.from("playlist_generation_jobs").update({
-            phase: "assigning",
-            status_message: "Assigning songs to sonic worlds…",
-          }).eq("id", jobId);
-
-          let assignOffset = 0;
-          let assignDone = false;
-          const allAssignments: { song_id: string; spotify_track_id: string; world_id: string; confidence: number }[] = [];
-
-          while (!assignDone) {
-            try {
-              const { data: batch } = await sb.from("liked_songs")
-                .select(COLS).eq("user_id", user.id)
-                .order("added_at", { ascending: true })
-                .range(assignOffset, assignOffset + batchSize - 1);
-
-              const songs = batch || [];
-              if (songs.length === 0) { assignDone = true; break; }
-
-              const ws = worlds.map((w: any) =>
-                `[${w.world_id}] "${w.name}"\n  Vibe: ${w.vibe_description || "?"}\n  Groove: ${w.groove_identity || "?"} | Bright: ${w.sonic_brightness || "?"} | Energy: ${w.energy_level || "?"}\n  Context: ${w.listening_context || "?"} | Production: ${w.production_identity || "?"}\n  ✅ ${w.what_belongs || "N/A"}\n  ❌ ${w.what_breaks_it || "N/A"}`
-              ).join("\n\n");
-
-              const sl = songs.map((s: any, i: number) => fmtSong(s, i)).join("\n");
-
-              const p = await callAI(API_KEY, "google/gemini-2.5-flash", ASSIGN_SYS,
-                `WORLDS (${worlds.length}):\n${ws}\n\nSONGS (${songs.length}):\n${sl}\n\nRun the 10-point checklist for each song. Assign to best world or "needs_review". Use assign_songs.`,
-                [ASSIGN_TOOL], { type: "function", function: { name: "assign_songs" } });
-
-              const asgn = (p.assignments || []).map((a: any) => {
-                const i = (a.index || 0) - 1;
-                if (i < 0 || i >= songs.length) return null;
-                return { song_id: songs[i].id, spotify_track_id: songs[i].spotify_track_id, world_id: a.world_id, confidence: a.confidence ?? 0.8 };
-              }).filter(Boolean);
-
-              allAssignments.push(...asgn);
-              assignOffset += batchSize;
-
-              if (songs.length < batchSize) assignDone = true;
-
-              await adm.from("playlist_generation_jobs").update({
-                assigned_count: allAssignments.length,
-                status_message: `${allAssignments.length} of ${totalSongs} songs assigned to worlds…`,
-              }).eq("id", jobId);
-            } catch (e: any) {
-              console.error("[pipeline] assign batch error:", e.message);
-              // Skip this batch and continue
-              assignOffset += batchSize;
-              if (assignOffset >= totalSongs) assignDone = true;
-            }
+          if (!worlds.length) {
+            await failJob(adm, jobId, "No sonic worlds were generated.");
+            return json({ error: "No sonic worlds were generated." }, 500);
           }
 
-          // ── PHASE 4: Save clusters ──
-          await adm.from("playlist_generation_jobs").update({
-            phase: "saving",
-            status_message: "Building playlists from sonic worlds…",
-          }).eq("id", jobId);
-
-          // Clear old clusters
           const existingClusters = await fetchAll(sb, "liked_song_clusters", user.id, "id");
           if (existingClusters.length) {
             const ids = existingClusters.map((c: any) => c.id);
@@ -1136,205 +1209,426 @@ Use define_sonic_worlds.`,
             await adm.from("liked_song_clusters").delete().eq("user_id", user.id);
           }
 
-          // Group by world
-          const worldMap = new Map<string, typeof allAssignments>();
-          for (const a of allAssignments) {
-            if (a.world_id === "__unassigned__" || a.world_id === "needs_review") continue;
-            if (!worldMap.has(a.world_id)) worldMap.set(a.world_id, []);
-            worldMap.get(a.world_id)!.push(a);
-          }
-
-          // Song metadata for covers
-          const songIds = allAssignments.map(a => a.song_id);
-          const songMap = new Map<string, any>();
-          for (let i = 0; i < songIds.length; i += 500) {
-            const { data: songs } = await sb.from("liked_songs")
-              .select("id, track_name, image_url").in("id", songIds.slice(i, i + 500));
-            for (const s of songs || []) songMap.set(s.id, s);
-          }
-
+          const persistedWorlds: any[] = [];
           let sortOrder = 0;
-          let savedCount = 0;
-          const eligibleWorlds = worlds.filter((w: any) => (worldMap.get(w.world_id)?.length ?? 0) >= 2);
-          const totalWorldsCount = eligibleWorlds.length;
-
-          await adm.from("playlist_generation_jobs").update({ total_worlds: totalWorldsCount }).eq("id", jobId);
 
           for (const world of worlds) {
-            const assignments = worldMap.get(world.world_id);
-            if (!assignments || assignments.length < 2) continue;
-
-            const coverTracks: { image_url: string; track_name: string }[] = [];
-            for (const a of assignments) {
-              if (coverTracks.length >= 4) break;
-              const song = songMap.get(a.song_id);
-              if (song?.image_url) coverTracks.push({ image_url: song.image_url, track_name: song.track_name });
-            }
-
             const { data: inserted, error: insertErr } = await adm
               .from("liked_song_clusters")
               .insert({
-                user_id: user.id, name: world.name,
+                user_id: user.id,
+                name: world.name,
                 description: world.ai_explanation || null,
                 vibe_description: world.vibe_description || null,
                 ai_explanation: world.ai_explanation || null,
                 mood_tags: world.mood_tags || [],
                 color_hex: world.color_hex || "#6366f1",
                 energy_level: world.energy_level || "medium",
-                tempo_range: "Mixed", era_range: "Mixed",
-                track_count: assignments.length,
-                cover_tracks: coverTracks,
+                tempo_range: "Mixed",
+                era_range: "Mixed",
+                track_count: 0,
+                cover_tracks: [],
                 analysis_model: "deep-sonic-worlds-v3",
-                sort_order: sortOrder++,
+                sort_order: sortOrder,
               })
-              .select("id").single();
+              .select("id")
+              .single();
 
-            if (insertErr || !inserted) { console.error("Insert err:", insertErr); continue; }
+            if (insertErr || !inserted) throw insertErr || new Error(`Failed to create shell for ${world.name}`);
 
-            const rows = assignments.map(a => ({
-              user_id: user.id, cluster_id: inserted.id,
-              liked_song_id: a.song_id, spotify_track_id: a.spotify_track_id,
-              confidence_score: a.confidence,
-            }));
-            for (let i = 0; i < rows.length; i += 100) {
-              await adm.from("liked_song_cluster_tracks").insert(rows.slice(i, i + 100));
+            persistedWorlds.push({ ...world, cluster_id: inserted.id, sort_order: sortOrder });
+            sortOrder++;
+          }
+
+          const { data: outlierCluster, error: outlierErr } = await adm
+            .from("liked_song_clusters")
+            .insert({
+              user_id: user.id,
+              name: "Sonic Outliers",
+              description: "Unique tracks that do not fit neatly into any sonic world.",
+              vibe_description: "Eclectic edges and one-offs",
+              ai_explanation: "Tracks that were too singular or structurally unusual for the main worlds.",
+              mood_tags: ["eclectic"],
+              color_hex: "#71717a",
+              energy_level: "medium",
+              tempo_range: "Mixed",
+              era_range: "Mixed",
+              track_count: 0,
+              cover_tracks: [],
+              analysis_model: "deep-sonic-worlds-v3",
+              sort_order: sortOrder,
+            })
+            .select("id")
+            .single();
+
+          if (outlierErr || !outlierCluster) throw outlierErr || new Error("Failed to create outlier shell");
+
+          persistedWorlds.push({
+            world_id: "__outliers__",
+            name: "Sonic Outliers",
+            cluster_id: outlierCluster.id,
+            is_outlier: true,
+            sort_order: sortOrder,
+          });
+
+          await updateJob(adm, jobId, {
+            worlds_count: worlds.length,
+            world_definitions: persistedWorlds,
+            phase: "assigning",
+            status: "running",
+            assigned_count: 0,
+            saved_worlds: 0,
+            total_worlds: worlds.length + 1,
+            status_message: "Assigning songs to sonic worlds…",
+          });
+
+          queueNext();
+          return json({ success: true, job_id: jobId, phase: "assigning", worlds_count: worlds.length }, 202);
+        }
+
+        if (job.phase === "assigning") {
+          const storedWorlds = Array.isArray(job.world_definitions) ? job.world_definitions : [];
+          const assignableWorlds = storedWorlds.filter((world: any) => !world.is_outlier && world.cluster_id);
+          const outlierClusterId = storedWorlds.find((world: any) => world.is_outlier)?.cluster_id;
+
+          if (!assignableWorlds.length || !outlierClusterId) {
+            await failJob(adm, jobId, "Missing stored sonic worlds for assignment.");
+            return json({ error: "Missing stored sonic worlds for assignment." }, 500);
+          }
+
+          const { count: processedCount } = await sb
+            .from("liked_song_cluster_tracks")
+            .select("id", { count: "exact", head: true })
+            .eq("user_id", user.id);
+
+          const processed = processedCount ?? 0;
+          const totalSongs = job.total_songs ?? 0;
+
+          const { data: batch, error: batchErr } = await sb.from("liked_songs")
+            .select(COLS)
+            .eq("user_id", user.id)
+            .order("added_at", { ascending: true })
+            .range(processed, processed + batchSize - 1);
+
+          if (batchErr) throw batchErr;
+          const songs = batch || [];
+
+          if (songs.length === 0) {
+            await updateJob(adm, jobId, {
+              assigned_count: processed,
+              phase: "saving",
+              status: "running",
+              status_message: "Building playlists from sonic worlds…",
+            });
+            queueNext();
+            return json({ success: true, job_id: jobId, phase: "saving", assigned_count: processed }, 202);
+          }
+
+          const worldIdToCluster = new Map<string, string>();
+          for (const world of assignableWorlds) {
+            worldIdToCluster.set(world.world_id, world.cluster_id);
+          }
+
+          let rows: any[] = [];
+          try {
+            const ws = assignableWorlds.map((world: any) =>
+              `[${world.world_id}] "${world.name}"\n  Vibe: ${world.vibe_description || "?"}\n  Groove: ${world.groove_identity || "?"} | Bright: ${world.sonic_brightness || "?"} | Energy: ${world.energy_level || "?"}\n  Context: ${world.listening_context || "?"} | Production: ${world.production_identity || "?"}\n  ✅ ${world.what_belongs || "N/A"}\n  ❌ ${world.what_breaks_it || "N/A"}`
+            ).join("\n\n");
+
+            const sl = songs.map((song: any, i: number) => fmtSong(song, i)).join("\n");
+            const p = await callAI(
+              API_KEY,
+              "google/gemini-2.5-flash",
+              ASSIGN_SYS,
+              `WORLDS (${assignableWorlds.length}):\n${ws}\n\nSONGS (${songs.length}):\n${sl}\n\nRun the 10-point checklist for each song. Assign to best world or "needs_review". Use assign_songs.`,
+              [ASSIGN_TOOL],
+              { type: "function", function: { name: "assign_songs" } },
+            );
+
+            const assignmentByIndex = new Map<number, { world_id: string; confidence: number }>();
+            for (const assignment of (p.assignments || [])) {
+              const idx = (assignment.index || 0) - 1;
+              if (idx < 0 || idx >= songs.length) continue;
+              assignmentByIndex.set(idx, {
+                world_id: assignment.world_id,
+                confidence: assignment.confidence ?? 0.8,
+              });
             }
+
+            rows = songs.map((song: any, idx: number) => {
+              const assignment = assignmentByIndex.get(idx);
+              const requestedWorldId = assignment?.world_id;
+              const clusterId = requestedWorldId && worldIdToCluster.has(requestedWorldId)
+                ? worldIdToCluster.get(requestedWorldId)!
+                : outlierClusterId;
+
+              return {
+                user_id: user.id,
+                cluster_id: clusterId,
+                liked_song_id: song.id,
+                spotify_track_id: song.spotify_track_id,
+                confidence_score: assignment?.confidence ?? 0.4,
+                position: 0,
+              };
+            });
+          } catch (assignError: any) {
+            console.warn("[pipeline] assign fallback to Sonic Outliers:", assignError.message);
+            rows = songs.map((song: any) => ({
+              user_id: user.id,
+              cluster_id: outlierClusterId,
+              liked_song_id: song.id,
+              spotify_track_id: song.spotify_track_id,
+              confidence_score: 0.2,
+              position: 0,
+            }));
+          }
+
+          for (let i = 0; i < rows.length; i += 100) {
+            const { error: insertErr } = await adm.from("liked_song_cluster_tracks").insert(rows.slice(i, i + 100));
+            if (insertErr) throw insertErr;
+          }
+
+          const newAssignedTotal = processed + rows.length;
+          const finishedAssigning = newAssignedTotal >= totalSongs;
+
+          await updateJob(adm, jobId, {
+            assigned_count: newAssignedTotal,
+            phase: finishedAssigning ? "saving" : "assigning",
+            status: "running",
+            status_message: finishedAssigning
+              ? "Building playlists from sonic worlds…"
+              : `${newAssignedTotal} of ${totalSongs} songs assigned to worlds…`,
+          });
+
+          queueNext();
+          return json({
+            success: true,
+            job_id: jobId,
+            phase: finishedAssigning ? "saving" : "assigning",
+            assigned_count: newAssignedTotal,
+            total_songs: totalSongs,
+          }, 202);
+        }
+
+        if (job.phase === "saving") {
+          const currentClusters = await fetchAll(sb, "liked_song_clusters", user.id, "id, name, sort_order");
+          const allClusterTracks = await fetchAll(sb, "liked_song_cluster_tracks", user.id, "id, cluster_id, liked_song_id");
+
+          if (!allClusterTracks.length) {
+            await failJob(adm, jobId, "No song assignments were saved for this job.");
+            return json({ error: "No song assignments were saved for this job." }, 500);
+          }
+
+          const tracksByCluster = new Map<string, { id: string; liked_song_id: string }[]>();
+          for (const track of allClusterTracks) {
+            if (!tracksByCluster.has(track.cluster_id)) tracksByCluster.set(track.cluster_id, []);
+            tracksByCluster.get(track.cluster_id)!.push(track);
+          }
+
+          const songIds = [...new Set(allClusterTracks.map((track: any) => track.liked_song_id))];
+          const songMap = new Map<string, any>();
+          for (let i = 0; i < songIds.length; i += 500) {
+            const { data: songs, error: songErr } = await sb.from("liked_songs")
+              .select("id, track_name, image_url")
+              .in("id", songIds.slice(i, i + 500));
+            if (songErr) throw songErr;
+            for (const song of songs || []) songMap.set(song.id, song);
+          }
+
+          const sortedClusters = [...currentClusters].sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0));
+          const nonEmptyClusters = sortedClusters.filter((cluster: any) => (tracksByCluster.get(cluster.id)?.length ?? 0) > 0);
+          const emptyClusterIds = sortedClusters
+            .filter((cluster: any) => (tracksByCluster.get(cluster.id)?.length ?? 0) === 0)
+            .map((cluster: any) => cluster.id);
+
+          if (emptyClusterIds.length) {
+            await adm.from("liked_song_clusters").delete().in("id", emptyClusterIds);
+          }
+
+          let savedCount = 0;
+          for (const cluster of nonEmptyClusters) {
+            const clusterTracks = tracksByCluster.get(cluster.id) || [];
+            const coverTracks: { image_url: string; track_name: string }[] = [];
+            for (const track of clusterTracks) {
+              if (coverTracks.length >= 4) break;
+              const song = songMap.get(track.liked_song_id);
+              if (song?.image_url) coverTracks.push({ image_url: song.image_url, track_name: song.track_name });
+            }
+
+            await adm.from("liked_song_clusters").update({
+              track_count: clusterTracks.length,
+              cover_tracks: coverTracks,
+            }).eq("id", cluster.id);
 
             savedCount++;
-            await adm.from("playlist_generation_jobs").update({
+            await updateJob(adm, jobId, {
+              total_worlds: nonEmptyClusters.length,
               saved_worlds: savedCount,
-              status_message: `Saved ${savedCount} of ${totalWorldsCount} playlists…`,
-            }).eq("id", jobId);
+              status: "running",
+              phase: "saving",
+              status_message: `Saved ${savedCount} of ${nonEmptyClusters.length} playlists…`,
+            });
           }
 
-          // Handle needs_review → Sonic Outliers
-          const needsReview = allAssignments.filter(a => a.world_id === "__unassigned__" || a.world_id === "needs_review");
-          if (needsReview.length >= 3) {
-            const covers: { image_url: string; track_name: string }[] = [];
-            for (const a of needsReview.slice(0, 4)) {
-              const s = songMap.get(a.song_id);
-              if (s?.image_url) covers.push({ image_url: s.image_url, track_name: s.track_name });
-            }
-            const { data: uc } = await adm.from("liked_song_clusters")
-              .insert({
-                user_id: user.id, name: "Sonic Outliers",
-                description: "Unique tracks that don't fit neatly into any sonic world.",
-                vibe_description: "Eclectic gems awaiting a home",
-                mood_tags: ["eclectic"], color_hex: "#71717a", energy_level: "medium",
-                track_count: needsReview.length, cover_tracks: covers,
-                analysis_model: "deep-sonic-worlds-v3", sort_order: sortOrder++,
-              }).select("id").single();
-            if (uc) {
-              const rows = needsReview.map(a => ({
-                user_id: user.id, cluster_id: uc.id,
-                liked_song_id: a.song_id, spotify_track_id: a.spotify_track_id,
-                confidence_score: a.confidence,
-              }));
-              for (let i = 0; i < rows.length; i += 100) {
-                await adm.from("liked_song_cluster_tracks").insert(rows.slice(i, i + 100));
-              }
-            }
-          }
-
-          // ── PHASE 5: Validate ──
-          await adm.from("playlist_generation_jobs").update({
+          await updateJob(adm, jobId, {
+            total_worlds: nonEmptyClusters.length,
+            saved_worlds: savedCount,
             phase: "validating",
+            status: "running",
             status_message: "Running final coherence check…",
-          }).eq("id", jobId);
+          });
 
+          queueNext();
+          return json({ success: true, job_id: jobId, phase: "validating", saved_worlds: savedCount }, 202);
+        }
+
+        if (job.phase === "validating") {
           try {
-            const { data: cls } = await sb.from("liked_song_clusters")
+            const { data: cls, error: clusterErr } = await sb.from("liked_song_clusters")
               .select("id, name, vibe_description, ai_explanation, track_count")
-              .eq("user_id", user.id).order("sort_order");
+              .eq("user_id", user.id)
+              .order("sort_order");
+
+            if (clusterErr) throw clusterErr;
 
             if (cls?.length) {
-              const allS = await fetchAll(sb, "liked_songs", user.id, COLS);
-              const sm = new Map<string, any>();
-              for (const s of allS) sm.set(s.id, s);
+              const allSongs = await fetchAll(sb, "liked_songs", user.id, COLS);
+              const songMap = new Map<string, any>();
+              for (const song of allSongs) songMap.set(song.id, song);
 
               const allClusterTracks = await fetchAll(sb, "liked_song_cluster_tracks", user.id, "id, liked_song_id, cluster_id");
-              const ctk: Record<string, { id: string; liked_song_id: string }[]> = {};
-              for (const t of allClusterTracks) {
-                if (!ctk[t.cluster_id]) ctk[t.cluster_id] = [];
-                ctk[t.cluster_id].push(t);
+              const clusterTrackMap: Record<string, { id: string; liked_song_id: string }[]> = {};
+              for (const track of allClusterTracks) {
+                if (!clusterTrackMap[track.cluster_id]) clusterTrackMap[track.cluster_id] = [];
+                clusterTrackMap[track.cluster_id].push(track);
               }
 
-              const wcm: Record<string, string> = {};
-              const sums: string[] = [];
-              for (const c of cls) {
-                const tks = ctk[c.id] || [];
-                const wid = c.name.toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "").substring(0, 30);
-                wcm[wid] = c.id;
-                const tl = tks.slice(0, 40).map((t: any, i: number) => {
-                  const s = sm.get(t.liked_song_id);
-                  return s ? fmtSong(s, i) : `${i + 1}. [?]`;
+              const worldClusterMap: Record<string, string> = {};
+              const playlistSummaries: string[] = [];
+              for (const cluster of cls) {
+                const clusterTracks = clusterTrackMap[cluster.id] || [];
+                const worldId = cluster.name.toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "").substring(0, 30);
+                worldClusterMap[worldId] = cluster.id;
+                const trackList = clusterTracks.slice(0, 40).map((track: any, i: number) => {
+                  const song = songMap.get(track.liked_song_id);
+                  return song ? fmtSong(song, i) : `${i + 1}. [?]`;
                 }).join("\n");
-                sums.push(`📋 [${wid}] "${c.name}" (${tks.length} songs)\nVibe: ${c.vibe_description || "N/A"}\n${tl}${tks.length > 40 ? `\n+${tks.length - 40} more songs` : ""}`);
+                playlistSummaries.push(`📋 [${worldId}] "${cluster.name}" (${clusterTracks.length} songs)\nVibe: ${cluster.vibe_description || "N/A"}\n${trackList}${clusterTracks.length > 40 ? `\n+${clusterTracks.length - 40} more songs` : ""}`);
               }
 
-              const vp = await callAI(API_KEY, "google/gemini-2.5-flash", VALIDATE_SYS,
-                `Review these ${cls.length} playlists for quality.\n\n${sums.join("\n\n")}\n\nUse validate_playlists.`,
-                [VALIDATE_TOOL], { type: "function", function: { name: "validate_playlists" } });
+              const validation = await callAI(
+                API_KEY,
+                "google/gemini-2.5-flash",
+                VALIDATE_SYS,
+                `Review these ${cls.length} playlists for quality.\n\n${playlistSummaries.join("\n\n")}\n\nUse validate_playlists.`,
+                [VALIDATE_TOOL],
+                { type: "function", function: { name: "validate_playlists" } },
+              );
 
-              for (const act of (vp.actions || [])) {
-                const cid = wcm[act.world_id];
-                if (!cid && act.action !== "keep") continue;
-                if (act.action === "remove_songs" && act.song_indices_to_remove?.length && cid) {
-                  const tl = ctk[cid] || [];
-                  for (const idx of act.song_indices_to_remove) {
-                    const ri = idx - 1;
-                    if (ri >= 0 && ri < tl.length) await adm.from("liked_song_cluster_tracks").delete().eq("id", tl[ri].id);
+              for (const action of (validation.actions || [])) {
+                const clusterId = worldClusterMap[action.world_id];
+                if (!clusterId && action.action !== "keep") continue;
+
+                if (action.action === "remove_songs" && action.song_indices_to_remove?.length && clusterId) {
+                  const trackList = clusterTrackMap[clusterId] || [];
+                  for (const idx of action.song_indices_to_remove) {
+                    const removeIndex = idx - 1;
+                    if (removeIndex >= 0 && removeIndex < trackList.length) {
+                      await adm.from("liked_song_cluster_tracks").delete().eq("id", trackList[removeIndex].id);
+                    }
                   }
-                  const { count } = await sb.from("liked_song_cluster_tracks").select("id", { count: "exact", head: true }).eq("cluster_id", cid).eq("user_id", user.id);
-                  await adm.from("liked_song_clusters").update({ track_count: count ?? 0 }).eq("id", cid);
+                  const { count } = await sb.from("liked_song_cluster_tracks").select("id", { count: "exact", head: true }).eq("cluster_id", clusterId).eq("user_id", user.id);
+                  await adm.from("liked_song_clusters").update({ track_count: count ?? 0 }).eq("id", clusterId);
                 }
-                if (act.action === "delete" && cid) {
-                  await adm.from("liked_song_cluster_tracks").delete().eq("cluster_id", cid);
-                  await adm.from("liked_song_clusters").delete().eq("id", cid);
+
+                if (action.action === "delete" && clusterId) {
+                  await adm.from("liked_song_cluster_tracks").delete().eq("cluster_id", clusterId);
+                  await adm.from("liked_song_clusters").delete().eq("id", clusterId);
                 }
-                if (act.action === "merge" && act.target_world_id && cid) {
-                  const tid = wcm[act.target_world_id];
-                  if (tid) {
-                    await adm.from("liked_song_cluster_tracks").update({ cluster_id: tid }).eq("cluster_id", cid).eq("user_id", user.id);
-                    const { count } = await sb.from("liked_song_cluster_tracks").select("id", { count: "exact", head: true }).eq("cluster_id", tid).eq("user_id", user.id);
-                    await adm.from("liked_song_clusters").update({ track_count: count ?? 0 }).eq("id", tid);
-                    await adm.from("liked_song_clusters").delete().eq("id", cid);
+
+                if (action.action === "merge" && action.target_world_id && clusterId) {
+                  const targetClusterId = worldClusterMap[action.target_world_id];
+                  if (targetClusterId) {
+                    await adm.from("liked_song_cluster_tracks").update({ cluster_id: targetClusterId }).eq("cluster_id", clusterId).eq("user_id", user.id);
+                    const { count } = await sb.from("liked_song_cluster_tracks").select("id", { count: "exact", head: true }).eq("cluster_id", targetClusterId).eq("user_id", user.id);
+                    await adm.from("liked_song_clusters").update({ track_count: count ?? 0 }).eq("id", targetClusterId);
+                    await adm.from("liked_song_clusters").delete().eq("id", clusterId);
                   }
                 }
-                if (act.action === "rename" && act.new_name && cid) {
-                  await adm.from("liked_song_clusters").update({ name: act.new_name }).eq("id", cid);
+
+                if (action.action === "rename" && action.new_name && clusterId) {
+                  await adm.from("liked_song_clusters").update({ name: action.new_name }).eq("id", clusterId);
                 }
               }
             }
-          } catch (e: any) {
-            console.warn("[pipeline] validate phase skipped:", e.message);
+          } catch (validationError: any) {
+            console.warn("[pipeline] validate phase skipped:", validationError.message);
           }
 
-          // ── DONE ──
-          await adm.from("playlist_generation_jobs").update({
-            status: "completed", phase: "done",
+          const { count: finalWorldCount } = await sb.from("liked_song_clusters")
+            .select("id", { count: "exact", head: true })
+            .eq("user_id", user.id);
+
+          await updateJob(adm, jobId, {
+            status: "completed",
+            phase: "done",
             status_message: "Playlists ready!",
             completed_at: new Date().toISOString(),
-          }).eq("id", jobId);
+            total_worlds: finalWorldCount ?? 0,
+            saved_worlds: finalWorldCount ?? 0,
+          });
 
-        } catch (e: any) {
-          console.error("[pipeline] fatal error:", e);
-          await adm.from("playlist_generation_jobs").update({
-            status: "failed", phase: "failed",
-            error_message: e instanceof Error ? e.message : "Pipeline failed",
-          }).eq("id", jobId).catch(() => {});
+          return json({ success: true, job_id: jobId, phase: "done" }, 200);
         }
-      };
 
-      // Use EdgeRuntime.waitUntil if available, otherwise run inline
-      if (typeof (globalThis as any).EdgeRuntime?.waitUntil === "function") {
-        (globalThis as any).EdgeRuntime.waitUntil(bgWork());
-      } else {
-        // Fallback: run in background with no await (Deno will keep alive for active promises)
-        bgWork().catch(e => console.error("[pipeline] unhandled:", e));
+        await failJob(adm, jobId, `Unknown job phase: ${job.phase}`);
+        return json({ error: `Unknown job phase: ${job.phase}` }, 400);
+      } catch (e: any) {
+        console.error("[pipeline] step fatal error:", e);
+        const message = e instanceof Error ? e.message : "Pipeline failed";
+        await failJob(adm, jobId, message).catch(() => {});
+        return json({ error: message }, 500);
+      }
+    }
+
+    /* ═══ RUN FULL PIPELINE (dispatcher) ═══ */
+    if (mode === "run_pipeline") {
+      if (!jobId) return json({ error: "job_id required" }, 400);
+
+      const { data: jobData, error: jobErr } = await adm
+        .from("playlist_generation_jobs")
+        .select("id, user_id, status, phase, force_retag, started_at")
+        .eq("id", jobId)
+        .single();
+
+      if (jobErr) throw jobErr;
+      const job: any = jobData;
+      if (!job) return json({ error: "Job not found" }, 404);
+      if (job.user_id !== user.id) return json({ error: "Forbidden" }, 403);
+      if (job.status === "completed") return json({ success: true, job_id: jobId, message: "Pipeline already completed." });
+      if (job.status === "failed" || job.status === "cancelled") {
+        return json({ error: "This job can no longer be resumed. Start a new generation." }, 409);
       }
 
-      return json({ success: true, job_id: jobId, message: "Pipeline started" }, 202);
+      forceRetag = forceRetag || !!job.force_retag;
+      const startedAt = job.started_at || new Date().toISOString();
+
+      await updateJob(adm, jobId, {
+        status: "running",
+        phase: job.phase === "queued" ? "tagging" : job.phase,
+        started_at: startedAt,
+        status_message: job.phase === "queued" ? "Starting deep analysis…" : (job.status_message || "Resuming backend processor…"),
+        error_message: null,
+      });
+
+      queuePipelineStep(functionUrl, anon, svc, {
+        job_id: jobId,
+        user_id: user.id,
+        force_retag: forceRetag,
+        batch_size: batchSize,
+      });
+
+      return json({ success: true, job_id: jobId, message: "Pipeline dispatched" }, 202);
     }
 
     return json({ error: `Unknown mode: ${mode}` }, 400);
