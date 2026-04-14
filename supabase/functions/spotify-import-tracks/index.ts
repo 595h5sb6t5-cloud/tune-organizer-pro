@@ -472,12 +472,17 @@ async function syncPlaylists(
       const items = data.items || [];
       for (const pl of items) {
         if (!pl || !pl.id) continue;
+        const playlistTrackTotal = typeof pl.tracks?.total === "number"
+          ? pl.tracks.total
+          : typeof pl.items?.total === "number"
+            ? pl.items.total
+            : 0;
         playlists.push({
           id: pl.id,
           name: pl.name || "Untitled",
           description: pl.description || null,
           image_url: pl.images?.[0]?.url || null,
-          track_count: pl.tracks?.total || 0,
+          track_count: playlistTrackTotal,
           owner_id: pl.owner?.id || "",
           owner_display_name: pl.owner?.display_name || null,
           is_owned: pl.owner?.id === spotifyUserId,
@@ -565,9 +570,9 @@ async function syncPlaylists(
   }
 
   const changedSet = new Set(changedPlaylistIds);
-  // Include playlists with 0 tracks even if snapshot hasn't changed
+  // Also re-sync any playlist whose stored track rows do not match Spotify's reported total.
   for (const pl of playlists) {
-    if ((trackCountByPlaylist.get(pl.id) ?? 0) === 0 && pl.track_count > 0) {
+    if ((trackCountByPlaylist.get(pl.id) ?? 0) !== pl.track_count) {
       changedSet.add(pl.id);
     }
   }
@@ -583,14 +588,15 @@ async function syncPlaylists(
       await adminClient.from("spotify_playlist_tracks").delete().eq("playlist_id", dbId);
 
       const trackRows: any[] = [];
-      let plOffset = 0;
+      let nextUrl: string | null = `https://api.spotify.com/v1/playlists/${pl.id}/items?limit=100&offset=0&fields=items(added_at,track(id,name,uri,preview_url,duration_ms,artists(name),album(name,images))),next,total`;
+      let expectedTotal = pl.track_count;
 
-      while (true) {
-        const data = await spotifyGet(
-          `https://api.spotify.com/v1/playlists/${pl.id}/tracks?limit=50&offset=${plOffset}&fields=items(added_at,track(id,name,artists(name),album(name,images)))`,
-          token
-        );
+      while (nextUrl) {
+        const data = await spotifyGet(nextUrl, token);
         const items = data.items || [];
+        if (typeof data.total === "number") {
+          expectedTotal = data.total;
+        }
         for (let idx = 0; idx < items.length; idx++) {
           const item = items[idx];
           const track = item?.track;
@@ -605,12 +611,12 @@ async function syncPlaylists(
             album_name: track.album?.name || null,
             image_url: track.album?.images?.[0]?.url || null,
             added_at: item.added_at || null,
-            position: plOffset + idx,
+            position: trackRows.length,
           });
         }
-        console.log(`[spotify-import-tracks] playlist ${pl.name}: ${plOffset + items.length}/${pl.track_count}`);
+        console.log(`[spotify-import-tracks] playlist ${pl.name}: ${trackRows.length}/${expectedTotal}`);
+        nextUrl = typeof data.next === "string" && data.next.length > 0 ? data.next : null;
         if (items.length === 0) break;
-        plOffset += 50;
       }
 
       for (let i = 0; i < trackRows.length; i += 100) {
@@ -619,6 +625,15 @@ async function syncPlaylists(
           { onConflict: "playlist_id,spotify_track_id", ignoreDuplicates: true }
         );
       }
+
+      await adminClient
+        .from("spotify_playlists")
+        .update({
+          track_count: trackRows.length,
+          last_synced_at: new Date().toISOString(),
+        })
+        .eq("id", dbId);
+
       totalTracks += trackRows.length;
     } catch (e) {
       console.warn(`[spotify-import-tracks] Failed to import tracks for playlist ${pl.name}:`, e);
