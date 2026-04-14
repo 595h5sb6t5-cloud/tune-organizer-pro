@@ -368,7 +368,7 @@ export function useLikedSongClusters() {
       }
 
       // ═══ PHASE 5: Refine — remove outliers, merge small clusters ═══
-      setProgress(prev => ({ ...prev, phase: "refining", statusMessage: "Running final coherence check…" }));
+      setProgress(prev => ({ ...prev, phase: "validating", statusMessage: "Running final coherence check…" }));
 
       try {
         const refineRes = await supabase.functions.invoke("analyze-liked-songs", {
