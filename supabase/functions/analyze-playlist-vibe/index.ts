@@ -268,7 +268,7 @@ Return your analysis as a single JSON object with these exact fields:
         track_highlights: analysis.track_highlights || [],
         genre_blend: analysis.genre_blend || {},
         energy_curve: analysis.emotional_arc || [],
-        analysis_model: "google/gemini-2.5-flash",
+        analysis_model: "gpt-4o-mini",
         updated_at: new Date().toISOString(),
       }, { onConflict: "user_id,playlist_id" });
 
