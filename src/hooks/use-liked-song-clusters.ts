@@ -399,36 +399,53 @@ export function useLikedSongClusters() {
 
     let tagDone = false;
     let batchNum = 0;
+    let consecutiveErrors = 0;
 
-    while (!tagDone && batchNum < 80 && !abortRef.current) {
+    while (!tagDone && batchNum < 200 && !abortRef.current) {
       batchNum++;
-      const tagRes = await supabase.functions.invoke("analyze-liked-songs", {
-        body: {
-          mode: "tag_only",
-          batch_size: 200,
-          ...(batchNum === 1 && forceRetag ? { force_retag: true } : {}),
-        },
-      });
+      try {
+        const tagRes = await supabase.functions.invoke("analyze-liked-songs", {
+          body: {
+            mode: "tag_only",
+            batch_size: 50,
+            ...(batchNum === 1 && forceRetag ? { force_retag: true } : {}),
+          },
+        });
 
-      if (tagRes.error) {
-        console.error("Tag error:", tagRes.error);
-        throw new Error(tagRes.error.message || "Tagging failed");
+        if (tagRes.error) {
+          const msg = tagRes.error.message || "Tagging failed";
+          console.error("Tag error:", msg, tagRes.error);
+          consecutiveErrors++;
+          if (consecutiveErrors >= 3) {
+            throw new Error(`Tagging failed after ${consecutiveErrors} retries: ${msg}`);
+          }
+          // Wait and retry on transient errors
+          await new Promise(r => setTimeout(r, 2000 * consecutiveErrors));
+          continue;
+        }
+
+        if (tagRes.data?.error) {
+          console.error("Tag data error:", tagRes.data.error);
+          throw new Error(tagRes.data.error);
+        }
+
+        consecutiveErrors = 0; // Reset on success
+        tagDone = tagRes.data?.done ?? true;
+        setProgress(prev => ({
+          ...prev,
+          totalAnalyzed: tagRes.data?.total_analyzed ?? prev.totalAnalyzed,
+          totalSongs: tagRes.data?.total_liked_songs ?? prev.totalSongs,
+          statusMessage: tagDone
+            ? "All songs analyzed!"
+            : `${tagRes.data?.total_analyzed ?? 0} of ${tagRes.data?.total_liked_songs ?? 0} songs analyzed…`,
+        }));
+      } catch (e: any) {
+        if (e.message?.includes("retries")) throw e;
+        consecutiveErrors++;
+        console.warn(`Tag batch ${batchNum} error (attempt ${consecutiveErrors}):`, e.message);
+        if (consecutiveErrors >= 3) throw new Error(`Song analysis failed: ${e.message}`);
+        await new Promise(r => setTimeout(r, 2000 * consecutiveErrors));
       }
-
-      if (tagRes.data?.error) {
-        console.error("Tag data error:", tagRes.data.error);
-        throw new Error(tagRes.data.error);
-      }
-
-      tagDone = tagRes.data?.done ?? true;
-      setProgress(prev => ({
-        ...prev,
-        totalAnalyzed: tagRes.data?.total_analyzed ?? prev.totalAnalyzed,
-        totalSongs: tagRes.data?.total_liked_songs ?? prev.totalSongs,
-        statusMessage: tagDone
-          ? "All songs analyzed!"
-          : `${tagRes.data?.total_analyzed ?? 0} of ${tagRes.data?.total_liked_songs ?? 0} songs analyzed…`,
-      }));
     }
 
     if (!abortRef.current && !tagDone) {
