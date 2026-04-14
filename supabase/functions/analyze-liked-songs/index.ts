@@ -580,10 +580,13 @@ Deno.serve(async (req) => {
         return json({ success: true, terminal: true });
       }
 
-      const queue = async () => {
-        const ok = await queueNextStep(functionUrl, anon, svc, jobId!, userId, forceRetag);
-        if (!ok) {
-          console.error("[pipeline] Failed to queue next step — job will stall until frontend retries");
+      const queue = () => {
+        const p = queueNextStep(functionUrl, anon, svc, jobId!, userId, forceRetag);
+        // @ts-ignore EdgeRuntime is a Deno Deploy global
+        if (typeof EdgeRuntime !== "undefined" && EdgeRuntime.waitUntil) {
+          EdgeRuntime.waitUntil(p);
+        } else {
+          p.catch(e => console.error("[pipeline] queue error:", e));
         }
       };
 
