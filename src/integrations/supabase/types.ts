@@ -776,6 +776,7 @@ export type Database = {
           preview_url: string | null
           spotify_track_id: string
           track_name: string
+          track_uri: string | null
           user_id: string
         }
         Insert: {
@@ -791,6 +792,7 @@ export type Database = {
           preview_url?: string | null
           spotify_track_id: string
           track_name: string
+          track_uri?: string | null
           user_id: string
         }
         Update: {
@@ -806,6 +808,7 @@ export type Database = {
           preview_url?: string | null
           spotify_track_id?: string
           track_name?: string
+          track_uri?: string | null
           user_id?: string
         }
         Relationships: [
@@ -830,6 +833,7 @@ export type Database = {
           name: string
           owner_display_name: string | null
           snapshot_id: string | null
+          source_type: string | null
           spotify_owner_id: string | null
           spotify_playlist_id: string
           track_count: number
@@ -847,6 +851,7 @@ export type Database = {
           name: string
           owner_display_name?: string | null
           snapshot_id?: string | null
+          source_type?: string | null
           spotify_owner_id?: string | null
           spotify_playlist_id: string
           track_count?: number
@@ -864,6 +869,7 @@ export type Database = {
           name?: string
           owner_display_name?: string | null
           snapshot_id?: string | null
+          source_type?: string | null
           spotify_owner_id?: string | null
           spotify_playlist_id?: string
           track_count?: number
