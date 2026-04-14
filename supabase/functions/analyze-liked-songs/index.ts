@@ -450,7 +450,7 @@ Deno.serve(async (req) => {
     const functionUrl = `${url}/functions/v1/analyze-liked-songs`;
 
     let mode = "tag_batch";
-    let batchSize = 50;
+    let batchSize = 25;
     let forceRetag = false;
     let jobId: string | null = null;
     let internalUserId: string | null = null;
@@ -458,7 +458,7 @@ Deno.serve(async (req) => {
     try {
       const b = await req.json();
       if (b?.mode) mode = String(b.mode);
-      if (typeof b?.batch_size === "number") batchSize = Math.min(b.batch_size, 50);
+      if (typeof b?.batch_size === "number") batchSize = Math.min(b.batch_size, 30);
       if (b?.force_retag) forceRetag = true;
       if (b?.job_id) jobId = b.job_id;
       if (typeof b?.user_id === "string") internalUserId = b.user_id;
