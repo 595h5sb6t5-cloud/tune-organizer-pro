@@ -209,7 +209,8 @@ export function useLikedSongClusters() {
 
   // Check for active job on mount
   useEffect(() => {
-    if (!user) return;
+    if (!user) return undefined;
+    let cancelled = false;
     const checkActiveJob = async () => {
       const { data } = await supabase
         .from("playlist_generation_jobs")
@@ -218,6 +219,8 @@ export function useLikedSongClusters() {
         .in("status", ["pending", "running"])
         .order("created_at", { ascending: false })
         .limit(1);
+
+      if (cancelled) return;
 
       if (data?.length) {
         const job = data[0];
@@ -237,12 +240,11 @@ export function useLikedSongClusters() {
       }
     };
     checkActiveJob();
-  }, [user, startPolling]);
-
-  // Cleanup
-  useEffect(() => {
-    return () => stopPolling();
-  }, [stopPolling]);
+    return () => {
+      cancelled = true;
+      stopPolling();
+    };
+  }, [user, startPolling, stopPolling]);
 
   const runAnalysis = useCallback(async (options?: { forceRetag?: boolean }) => {
     if (!user) return;
