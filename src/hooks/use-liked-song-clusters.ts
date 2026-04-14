@@ -237,7 +237,7 @@ export function useLikedSongClusters() {
 
       while (!assignDone && !abortRef.current) {
         const assignRes = await supabase.functions.invoke("analyze-liked-songs", {
-          body: { mode: "assign_batch", world_definitions: worlds, offset, batch_size: 200 },
+          body: { mode: "assign_batch", world_definitions: worlds, offset, batch_size: 50 },
         });
 
         if (assignRes.error || assignRes.data?.error) {
@@ -247,7 +247,7 @@ export function useLikedSongClusters() {
 
         allAssignments.push(...(assignRes.data?.assignments || []));
         assignDone = assignRes.data?.done ?? true;
-        offset += 200;
+        offset += 50;
 
         setProgress(prev => ({
           ...prev, assignedCount: allAssignments.length,
