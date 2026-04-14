@@ -537,12 +537,20 @@ Deno.serve(async (req) => {
         status: "running",
         phase: "tagging",
         started_at: new Date().toISOString(),
-        status_message: "Starting deep analysis…",
+        status_message: "Preparing library…",
         error_message: null,
       });
 
-      // Process first step inline (don't fire-and-forget)
-      await queueNextStep(functionUrl, anon, svc, jobId, userId, forceRetag);
+      // Fire-and-forget via EdgeRuntime.waitUntil — return 202 immediately
+      // @ts-ignore EdgeRuntime is a Deno Deploy global
+      if (typeof EdgeRuntime !== "undefined" && EdgeRuntime.waitUntil) {
+        EdgeRuntime.waitUntil(queueNextStep(functionUrl, anon, svc, jobId, userId, forceRetag));
+      } else {
+        // Fallback: fire without awaiting
+        queueNextStep(functionUrl, anon, svc, jobId, userId, forceRetag).catch(e =>
+          console.error("[pipeline] background queue error:", e)
+        );
+      }
       return json({ success: true, job_id: jobId, message: "Pipeline started" }, 202);
     }
 

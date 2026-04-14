@@ -23,6 +23,9 @@ const PlaylistsPage = () => {
     likedCount,
     progress,
     runAnalysis,
+    retryGeneration,
+    cancelAnalysis,
+    resetStuckJob,
     refresh,
   } = useLikedSongClusters();
 
