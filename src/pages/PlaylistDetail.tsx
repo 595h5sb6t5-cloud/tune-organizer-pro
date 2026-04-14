@@ -490,31 +490,41 @@ const PlaylistDetail = () => {
 
     setLoadingPlaylist(true);
     try {
-      const [plRes, trRes] = await Promise.all([
-        supabase
-          .from("spotify_playlists")
-          .select("id, spotify_playlist_id, name, description, image_url, track_count, is_owned_by_user, is_collaborative, owner_display_name, spotify_owner_id")
-          .eq("id", id)
-          .single(),
-        supabase
+      // Load playlist metadata
+      const plRes = await supabase
+        .from("spotify_playlists")
+        .select("id, spotify_playlist_id, name, description, image_url, track_count, is_owned_by_user, is_collaborative, owner_display_name, spotify_owner_id")
+        .eq("id", id)
+        .single();
+
+      if (plRes.error) throw plRes.error;
+
+      const playlistData = (plRes.data as SpotifyPlaylistInfo | null) ?? null;
+
+      // Load ALL tracks with pagination (bypassing 1000-row limit)
+      const PAGE = 1000;
+      let offset = 0;
+      const allTracks: PlaylistTrack[] = [];
+      while (true) {
+        const { data, error } = await supabase
           .from("spotify_playlist_tracks")
           .select("id, spotify_track_id, track_name, artist_name, album_name, image_url, duration_ms, preview_url, position")
           .eq("playlist_id", id)
           .eq("user_id", user.id)
-          .order("position"),
-      ]);
-
-      if (plRes.error) throw plRes.error;
-      if (trRes.error) throw trRes.error;
-
-      const playlistData = (plRes.data as SpotifyPlaylistInfo | null) ?? null;
-      const trackData = (trRes.data as PlaylistTrack[] | null) ?? [];
+          .order("position")
+          .range(offset, offset + PAGE - 1);
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        allTracks.push(...(data as PlaylistTrack[]));
+        if (data.length < PAGE) break;
+        offset += PAGE;
+      }
 
       setPlaylist(playlistData);
       setEditedName(playlistData?.name ?? "");
-      setTracks(trackData);
+      setTracks(allTracks);
 
-      return { playlist: playlistData, tracks: trackData };
+      return { playlist: playlistData, tracks: allTracks };
     } catch (error) {
       console.error("[PlaylistDetail] Failed to load playlist details", error);
       toast.error("Failed to load playlist details");

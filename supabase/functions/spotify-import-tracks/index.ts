@@ -551,9 +551,15 @@ async function syncPlaylists(
     }
   }
 
+  // Determine source_type for each playlist
+  function getSourceType(pl: PlaylistMeta): string {
+    if (pl.is_collaborative) return "collaborative";
+    if (pl.is_owned) return "created";
+    return "saved";
+  }
+
   // IMPORTANT: Do NOT store Spotify's reported track_count here.
   // track_count is only updated AFTER tracks are actually inserted into DB (see below).
-  // This prevents the UI from showing "X tracks" when 0 are actually stored.
   const playlistRows = playlists.map(pl => ({
     user_id: userId,
     spotify_playlist_id: pl.id,
@@ -566,6 +572,7 @@ async function syncPlaylists(
     is_owned_by_user: pl.is_owned,
     is_collaborative: pl.is_collaborative,
     snapshot_id: pl.snapshot_id,
+    source_type: getSourceType(pl),
     last_synced_at: new Date().toISOString(),
   }));
 
@@ -648,7 +655,9 @@ async function syncPlaylists(
     toSync = targetSpotifyId ? playlists.filter(pl => pl.id === targetSpotifyId) : [];
     console.log(`[spotify-import-tracks] targeted sync for playlist ${targetPlaylistDbId}: ${toSync.length > 0 ? toSync[0].name : "not found"}`);
   } else {
-    toSync = playlists.filter(pl => changedSet.has(pl.id));
+    // Limit to 10 playlists per call to avoid edge function timeout
+    const MAX_PLAYLISTS_PER_CALL = 10;
+    toSync = playlists.filter(pl => changedSet.has(pl.id)).slice(0, MAX_PLAYLISTS_PER_CALL);
   }
   console.log(`[spotify-import-tracks] playlists to sync tracks: ${toSync.length}`);
   let totalTracks = 0;
@@ -684,6 +693,7 @@ async function syncPlaylists(
             user_id: userId,
             playlist_id: dbId,
             spotify_track_id: track.id,
+            track_uri: track.uri || `spotify:track:${track.id}`,
             track_name: track.name || "Untitled",
             artist_name: artists,
             album_name: track.album?.name || null,
@@ -746,7 +756,9 @@ async function syncPlaylists(
     warning = warning ? `${warning} ${failureWarning}` : failureWarning;
   }
 
-  return { total: playlists.length, changed: changedPlaylistIds.length, removed: removedCount, tracksSynced: totalTracks, warning };
+  const totalChanged = playlists.filter(pl => changedSet.has(pl.id)).length;
+  const playlistsRemaining = Math.max(0, totalChanged - toSync.length);
+  return { total: playlists.length, changed: changedPlaylistIds.length, removed: removedCount, tracksSynced: totalTracks, playlistsRemaining, warning };
 }
 
 /**

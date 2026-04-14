@@ -276,9 +276,20 @@ export function useSpotifyLibrary() {
       if (abortRef.current) return;
 
       setStage("playlists", "active");
-      const plRes = await invokeSync("playlists", forceFullSync);
-      Object.assign(combinedResult, plRes);
-      setStage("playlists", "done", `${plRes.playlists_changed ?? 0} updated`);
+      let playlistsRemaining = Infinity;
+      let totalPlaylistTracksSynced = 0;
+      let plBatchNum = 0;
+      // Loop until all playlist tracks are imported (edge function processes max 10 per call)
+      while (playlistsRemaining > 0) {
+        plBatchNum++;
+        const plRes = await invokeSync("playlists", forceFullSync);
+        Object.assign(combinedResult, plRes);
+        totalPlaylistTracksSynced += plRes.playlist_tracks_synced ?? 0;
+        playlistsRemaining = plRes.playlists_remaining ?? 0;
+        setStage("playlists", "active", `batch ${plBatchNum}: ${plRes.playlist_tracks_synced ?? 0} tracks, ${playlistsRemaining} playlists remaining`);
+        if (plBatchNum > 50) break; // safety limit
+      }
+      setStage("playlists", "done", `${totalPlaylistTracksSynced} tracks synced`);
       await refreshPlaylists();
       if (abortRef.current) return;
 
