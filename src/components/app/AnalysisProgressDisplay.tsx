@@ -4,6 +4,7 @@ import type { AnalysisProgress, AnalysisPhase } from "@/hooks/use-liked-song-clu
 
 const PHASE_CONFIG: Record<AnalysisPhase, { icon: React.ElementType; label: string; description: string }> = {
   idle: { icon: Sparkles, label: "Preparing…", description: "Getting ready to analyze your library." },
+  queued: { icon: Loader2, label: "Queued…", description: "Waiting for the backend processor to start…" },
   tagging: { icon: Music, label: "Analyzing Songs", description: "Studying each song across 17 musical dimensions — mood, groove, texture, energy…" },
   defining_worlds: { icon: Globe, label: "Discovering Worlds", description: "Finding sonic patterns across your playlists, albums, and artists…" },
   assigning: { icon: ListMusic, label: "Building Playlists", description: "Assigning every song to its best sonic world using deep compatibility checks…" },
