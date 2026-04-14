@@ -50,15 +50,15 @@ export interface AnalysisProgress {
   phase: AnalysisPhase;
   worldsCount: number;
   assignedCount: number;
+  savedWorlds: number;
+  totalWorlds: number;
   statusMessage: string;
 }
 
 const INITIAL_PROGRESS: AnalysisProgress = {
   totalAnalyzed: 0, totalSongs: 0, phase: "idle",
-  worldsCount: 0, assignedCount: 0, statusMessage: "",
+  worldsCount: 0, assignedCount: 0, savedWorlds: 0, totalWorlds: 0, statusMessage: "",
 };
-
-const MIN_TAGGED_SONGS = 10;
 
 async function fetchAllFromTable(table: "liked_song_clusters" | "liked_song_cluster_tracks" | "liked_songs", userId: string, columns: string) {
   const all: any[] = [];
@@ -73,6 +73,20 @@ async function fetchAllFromTable(table: "liked_song_clusters" | "liked_song_clus
   return all;
 }
 
+function mapJobPhase(phase: string): AnalysisPhase {
+  const mapping: Record<string, AnalysisPhase> = {
+    queued: "tagging",
+    tagging: "tagging",
+    defining_worlds: "defining_worlds",
+    assigning: "assigning",
+    saving: "saving",
+    validating: "validating",
+    done: "done",
+    failed: "idle",
+  };
+  return mapping[phase] || "idle";
+}
+
 export function useLikedSongClusters() {
   const { user, profile } = useAuth();
   const spotifyConnected = profile?.spotify_connected ?? false;
@@ -84,29 +98,15 @@ export function useLikedSongClusters() {
   const [error, setError] = useState<string | null>(null);
   const [likedCount, setLikedCount] = useState(0);
   const [progress, setProgress] = useState<AnalysisProgress>(INITIAL_PROGRESS);
-  const abortRef = useRef(false);
-
-  const getDeepTagCounts = useCallback(async () => {
-    if (!user) return { total: 0, tagged: 0 };
-
-    const [totalRes, taggedRes] = await Promise.all([
-      supabase.from("liked_songs").select("id", { count: "exact", head: true }).eq("user_id", user.id),
-      supabase.from("liked_songs").select("id", { count: "exact", head: true }).eq("user_id", user.id).not("groove_feel", "is", null),
-    ]);
-
-    return {
-      total: totalRes.count ?? 0,
-      tagged: taggedRes.count ?? 0,
-    };
-  }, [user]);
+  const jobIdRef = useRef<string | null>(null);
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadClusters = useCallback(async () => {
     if (!user || !spotifyConnected) { setClusters([]); return; }
     setLoading(true);
 
-    const { total: totalSongs, tagged: totalAnalyzed } = await getDeepTagCounts();
-    setLikedCount(totalSongs);
-    setProgress(prev => ({ ...prev, totalAnalyzed, totalSongs }));
+    const { count: totalSongs } = await supabase.from("liked_songs").select("id", { count: "exact", head: true }).eq("user_id", user.id);
+    setLikedCount(totalSongs ?? 0);
 
     const clusterData = await fetchAllFromTable("liked_song_clusters", user.id,
       "id, name, description, vibe_description, ai_explanation, mood_tags, color_hex, energy_level, tempo_range, era_range, track_count, sort_order, cover_tracks, spotify_playlist_id, spotify_exported_at, spotify_playlist_url");
@@ -115,7 +115,6 @@ export function useLikedSongClusters() {
       setClusters([]); setHasAnalyzed(false); setLoading(false); return;
     }
 
-    // Fetch ALL cluster tracks in one go (not per-cluster)
     const allTrackData = await fetchAllFromTable("liked_song_cluster_tracks", user.id, "id, cluster_id, liked_song_id, spotify_track_id");
 
     const likedSongIds = [...new Set(allTrackData.map(t => t.liked_song_id))];
@@ -153,305 +152,144 @@ export function useLikedSongClusters() {
     });
 
     setClusters(enriched); setHasAnalyzed(true); setLoading(false);
-  }, [user, spotifyConnected, getDeepTagCounts]);
+  }, [user, spotifyConnected]);
 
   useEffect(() => { void loadClusters(); }, [loadClusters]);
+
+  const stopPolling = useCallback(() => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
+    }
+  }, []);
+
+  const startPolling = useCallback((jobId: string) => {
+    stopPolling();
+
+    const poll = async () => {
+      try {
+        const { data } = await supabase
+          .from("playlist_generation_jobs")
+          .select("status, phase, total_songs, total_analyzed, assigned_count, worlds_count, saved_worlds, total_worlds, status_message, error_message")
+          .eq("id", jobId)
+          .single();
+
+        if (!data) return;
+
+        setProgress({
+          totalAnalyzed: data.total_analyzed,
+          totalSongs: data.total_songs,
+          phase: mapJobPhase(data.phase),
+          worldsCount: data.worlds_count,
+          assignedCount: data.assigned_count,
+          savedWorlds: data.saved_worlds ?? 0,
+          totalWorlds: data.total_worlds ?? 0,
+          statusMessage: data.status_message || "Working…",
+        });
+
+        if (data.status === "completed") {
+          stopPolling();
+          setAnalyzing(false);
+          setProgress(prev => ({ ...prev, phase: "done", statusMessage: "Playlists ready!" }));
+          await loadClusters();
+        } else if (data.status === "failed") {
+          stopPolling();
+          setAnalyzing(false);
+          setError(data.error_message || "Pipeline failed");
+          setProgress(INITIAL_PROGRESS);
+        }
+      } catch (e) {
+        console.warn("Poll error:", e);
+      }
+    };
+
+    poll();
+    pollingRef.current = setInterval(poll, 2000);
+  }, [stopPolling, loadClusters]);
+
+  // Check for active job on mount
+  useEffect(() => {
+    if (!user) return;
+    const checkActiveJob = async () => {
+      const { data } = await supabase
+        .from("playlist_generation_jobs")
+        .select("id, status, phase, total_songs, total_analyzed, assigned_count, worlds_count, saved_worlds, total_worlds, status_message, error_message")
+        .eq("user_id", user.id)
+        .in("status", ["pending", "running"])
+        .order("created_at", { ascending: false })
+        .limit(1);
+
+      if (data?.length) {
+        const job = data[0];
+        jobIdRef.current = job.id;
+        setAnalyzing(true);
+        setProgress({
+          totalAnalyzed: job.total_analyzed,
+          totalSongs: job.total_songs,
+          phase: mapJobPhase(job.phase),
+          worldsCount: job.worlds_count,
+          assignedCount: job.assigned_count,
+          savedWorlds: job.saved_worlds ?? 0,
+          totalWorlds: job.total_worlds ?? 0,
+          statusMessage: job.status_message || "Resuming…",
+        });
+        startPolling(job.id);
+      }
+    };
+    checkActiveJob();
+  }, [user, startPolling]);
+
+  // Cleanup
+  useEffect(() => {
+    return () => stopPolling();
+  }, [stopPolling]);
 
   const runAnalysis = useCallback(async (options?: { forceRetag?: boolean }) => {
     if (!user) return;
     const forceRetag = options?.forceRetag ?? false;
-    abortRef.current = false;
 
     setAnalyzing(true);
     setError(null);
     setProgress({ ...INITIAL_PROGRESS, totalSongs: likedCount, phase: "tagging", statusMessage: "Starting deep analysis…" });
 
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      if (!sessionData.session?.access_token) throw new Error("Session expired. Please sign in again.");
+      const { data: job, error: jobErr } = await supabase
+        .from("playlist_generation_jobs")
+        .insert({
+          user_id: user.id,
+          force_retag: forceRetag,
+          total_songs: likedCount,
+          status: "pending",
+          phase: "queued",
+          status_message: "Queued…",
+        })
+        .select("id")
+        .single();
 
-      // ═══ PHASE 1: Tag songs (skip if already fully tagged and not forcing) ═══
-      if (!forceRetag) {
-        // Quick check: are all songs already tagged?
-        const { total, tagged } = await getDeepTagCounts();
-
-        if (tagged >= total && total > 0) {
-          console.log(`[rebuild] All ${total} songs already tagged — skipping Phase 1`);
-          setProgress(prev => ({
-            ...prev, totalAnalyzed: tagged, totalSongs: total,
-            statusMessage: `All ${total} songs already fully tagged — using cached data`,
-          }));
-          // Skip straight to Phase 2
-        } else {
-          // Tag only untagged songs
-          await tagSongs(forceRetag);
-        }
-      } else {
-        await tagSongs(forceRetag);
+      if (jobErr || !job) {
+        throw new Error(jobErr?.message || "Failed to create job");
       }
 
-      if (abortRef.current) return;
+      jobIdRef.current = job.id;
 
-      const { total: totalSongsReady, tagged: taggedSongsReady } = await getDeepTagCounts();
-      setProgress(prev => ({
-        ...prev,
-        totalAnalyzed: taggedSongsReady,
-        totalSongs: totalSongsReady,
-      }));
+      // Start polling BEFORE invoking the function
+      startPolling(job.id);
 
-      if (taggedSongsReady < MIN_TAGGED_SONGS) {
-        throw new Error(`Need more tagged songs. Run tagging first. (${taggedSongsReady}/${totalSongsReady} ready)`);
-      }
-
-      // ═══ PHASE 2: Define sonic worlds from full ecosystem ═══
-      setProgress(prev => ({
-        ...prev, phase: "defining_worlds",
-        statusMessage: "Studying your full Spotify ecosystem — playlists, albums, artists…",
-      }));
-
-      const worldRes = await supabase.functions.invoke("analyze-liked-songs", {
-        body: { mode: "define_worlds" },
+      // Invoke edge function — returns 202 immediately, work happens in background
+      const { error: fnErr } = await supabase.functions.invoke("analyze-liked-songs", {
+        body: { mode: "run_pipeline", job_id: job.id, force_retag: forceRetag, batch_size: 25 },
       });
 
-      if (worldRes.error || worldRes.data?.error) {
-        throw new Error(worldRes.data?.error || worldRes.error?.message || "Failed to define sonic worlds");
+      if (fnErr) {
+        console.error("Pipeline invoke error:", fnErr);
       }
-
-      const worlds = worldRes.data?.worlds || [];
-      console.log(`[rebuild] Defined ${worlds.length} sonic worlds from ${worldRes.data?.playlists_analyzed ?? 0} playlists`);
-
-      setProgress(prev => ({
-        ...prev, worldsCount: worlds.length,
-        statusMessage: `Discovered ${worlds.length} sonic worlds in your library`,
-      }));
-
-      if (abortRef.current) return;
-
-      // ═══ PHASE 3: Assign all songs to worlds (larger batches) ═══
-      setProgress(prev => ({ ...prev, phase: "assigning", statusMessage: "Assigning songs to sonic worlds…" }));
-
-      const totalSongs = worldRes.data?.total_songs || likedCount;
-      let offset = 0;
-      let assignDone = false;
-      const allAssignments: { song_id: string; spotify_track_id: string; world_id: string; confidence: number }[] = [];
-
-      while (!assignDone && !abortRef.current) {
-        const assignRes = await supabase.functions.invoke("analyze-liked-songs", {
-          body: { mode: "assign_batch", world_definitions: worlds, offset, batch_size: 50 },
-        });
-
-        if (assignRes.error || assignRes.data?.error) {
-          console.error("Assign error:", assignRes.data?.error || assignRes.error);
-          break;
-        }
-
-        allAssignments.push(...(assignRes.data?.assignments || []));
-        assignDone = assignRes.data?.done ?? true;
-        offset += 50;
-
-        setProgress(prev => ({
-          ...prev, assignedCount: allAssignments.length,
-          statusMessage: `${allAssignments.length} of ${totalSongs} songs assigned to worlds…`,
-        }));
-      }
-
-      if (abortRef.current) return;
-
-      // ═══ PHASE 4: Save clusters progressively ═══
-      setProgress(prev => ({ ...prev, phase: "saving", statusMessage: "Building playlists from sonic worlds…" }));
-
-      // Clear old clusters
-      const existingClusters = await fetchAllFromTable("liked_song_clusters", user.id, "id");
-      if (existingClusters.length) {
-        const ids = existingClusters.map(c => c.id);
-        for (let i = 0; i < ids.length; i += 50) {
-          await supabase.from("liked_song_cluster_tracks").delete().in("cluster_id", ids.slice(i, i + 50));
-        }
-        await supabase.from("liked_song_clusters").delete().eq("user_id", user.id);
-      }
-
-      // Group by world
-      const worldMap = new Map<string, typeof allAssignments>();
-      for (const a of allAssignments) {
-        if (a.world_id === "__unassigned__" || a.world_id === "needs_review") continue;
-        if (!worldMap.has(a.world_id)) worldMap.set(a.world_id, []);
-        worldMap.get(a.world_id)!.push(a);
-      }
-
-      // Fetch song metadata for covers
-      const songIds = allAssignments.map(a => a.song_id);
-      const songMap = new Map<string, any>();
-      for (let i = 0; i < songIds.length; i += 500) {
-        const { data: songs } = await supabase.from("liked_songs")
-          .select("id, track_name, image_url").in("id", songIds.slice(i, i + 500));
-        for (const s of songs || []) songMap.set(s.id, s);
-      }
-
-      let sortOrder = 0;
-      let savedCount = 0;
-      const totalWorlds = worlds.filter((w: any) => (worldMap.get(w.world_id)?.length ?? 0) >= 2).length;
-
-      for (const world of worlds) {
-        const assignments = worldMap.get(world.world_id);
-        if (!assignments || assignments.length < 2) continue;
-
-        const coverTracks: { image_url: string; track_name: string }[] = [];
-        for (const a of assignments) {
-          if (coverTracks.length >= 4) break;
-          const song = songMap.get(a.song_id);
-          if (song?.image_url) coverTracks.push({ image_url: song.image_url, track_name: song.track_name });
-        }
-
-        const { data: inserted, error: insertErr } = await supabase
-          .from("liked_song_clusters")
-          .insert({
-            user_id: user.id, name: world.name,
-            description: world.ai_explanation || null,
-            vibe_description: world.vibe_description || null,
-            ai_explanation: world.ai_explanation || null,
-            mood_tags: world.mood_tags || [],
-            color_hex: world.color_hex || "#6366f1",
-            energy_level: world.energy_level || "medium",
-            tempo_range: "Mixed", era_range: "Mixed",
-            track_count: assignments.length,
-            cover_tracks: coverTracks,
-            analysis_model: "deep-sonic-worlds-v3",
-            sort_order: sortOrder++,
-          })
-          .select("id").single();
-
-        if (insertErr || !inserted) { console.error("Insert err:", insertErr); continue; }
-
-        const rows = assignments.map(a => ({
-          user_id: user.id, cluster_id: inserted.id,
-          liked_song_id: a.song_id, spotify_track_id: a.spotify_track_id,
-          confidence_score: a.confidence,
-        }));
-        for (let i = 0; i < rows.length; i += 100) {
-          await supabase.from("liked_song_cluster_tracks").insert(rows.slice(i, i + 100));
-        }
-
-        savedCount++;
-        setProgress(prev => ({
-          ...prev,
-          statusMessage: `Saved ${savedCount} of ${totalWorlds} playlists…`,
-        }));
-      }
-
-      // Handle needs_review songs — add to "Sonic Outliers" world
-      const needsReview = allAssignments.filter(a => a.world_id === "__unassigned__" || a.world_id === "needs_review");
-      if (needsReview.length >= 3) {
-        const covers: { image_url: string; track_name: string }[] = [];
-        for (const a of needsReview.slice(0, 4)) {
-          const s = songMap.get(a.song_id);
-          if (s?.image_url) covers.push({ image_url: s.image_url, track_name: s.track_name });
-        }
-        const { data: uc } = await supabase.from("liked_song_clusters")
-          .insert({
-            user_id: user.id, name: "Sonic Outliers",
-            description: "Unique tracks that don't fit neatly into any sonic world. Review and reassign as needed.",
-            vibe_description: "Eclectic gems awaiting a home",
-            mood_tags: ["eclectic"], color_hex: "#71717a", energy_level: "medium",
-            track_count: needsReview.length, cover_tracks: covers,
-            analysis_model: "deep-sonic-worlds-v3", sort_order: sortOrder++,
-          }).select("id").single();
-        if (uc) {
-          const rows = needsReview.map(a => ({
-            user_id: user.id, cluster_id: uc.id,
-            liked_song_id: a.song_id, spotify_track_id: a.spotify_track_id,
-            confidence_score: a.confidence,
-          }));
-          for (let i = 0; i < rows.length; i += 100) {
-            await supabase.from("liked_song_cluster_tracks").insert(rows.slice(i, i + 100));
-          }
-        }
-      }
-
-      // ═══ PHASE 5: Refine — remove outliers, merge small clusters ═══
-      setProgress(prev => ({ ...prev, phase: "validating", statusMessage: "Running final coherence check…" }));
-
-      try {
-        const refineRes = await supabase.functions.invoke("analyze-liked-songs", {
-          body: { mode: "validate" },
-        });
-        if (refineRes.data) {
-          const { removals = 0, merges = 0, deletions = 0 } = refineRes.data;
-          console.log(`[rebuild] Refined: ${removals} removals, ${merges} merges, ${deletions} deletions`);
-        }
-      } catch (e) {
-        console.warn("Refine phase skipped:", e);
-      }
-
-      // ═══ DONE ═══
-      setProgress(prev => ({ ...prev, phase: "done", statusMessage: "Playlists ready!" }));
-      await loadClusters();
 
     } catch (e: any) {
       setError(e.message || "Analysis failed");
-    } finally {
       setAnalyzing(false);
+      stopPolling();
     }
-  }, [user, loadClusters, likedCount, getDeepTagCounts]);
-
-  // Helper for tagging phase
-  async function tagSongs(forceRetag: boolean) {
-    setProgress(prev => ({ ...prev, phase: "tagging", statusMessage: "Analyzing each song across 17 musical dimensions…" }));
-
-    let tagDone = false;
-    let batchNum = 0;
-    let consecutiveErrors = 0;
-
-    while (!tagDone && batchNum < 200 && !abortRef.current) {
-      batchNum++;
-      try {
-        const tagRes = await supabase.functions.invoke("analyze-liked-songs", {
-          body: {
-            mode: "tag_only",
-            batch_size: 50,
-            ...(batchNum === 1 && forceRetag ? { force_retag: true } : {}),
-          },
-        });
-
-        if (tagRes.error) {
-          const msg = tagRes.error.message || "Tagging failed";
-          console.error("Tag error:", msg, tagRes.error);
-          consecutiveErrors++;
-          if (consecutiveErrors >= 3) {
-            throw new Error(`Tagging failed after ${consecutiveErrors} retries: ${msg}`);
-          }
-          // Wait and retry on transient errors
-          await new Promise(r => setTimeout(r, 2000 * consecutiveErrors));
-          continue;
-        }
-
-        if (tagRes.data?.error) {
-          console.error("Tag data error:", tagRes.data.error);
-          throw new Error(tagRes.data.error);
-        }
-
-        consecutiveErrors = 0; // Reset on success
-        tagDone = tagRes.data?.done ?? true;
-        setProgress(prev => ({
-          ...prev,
-          totalAnalyzed: tagRes.data?.total_analyzed ?? prev.totalAnalyzed,
-          totalSongs: tagRes.data?.total_liked_songs ?? prev.totalSongs,
-          statusMessage: tagDone
-            ? "All songs analyzed!"
-            : `${tagRes.data?.total_analyzed ?? 0} of ${tagRes.data?.total_liked_songs ?? 0} songs analyzed…`,
-        }));
-      } catch (e: any) {
-        if (e.message?.includes("retries")) throw e;
-        consecutiveErrors++;
-        console.warn(`Tag batch ${batchNum} error (attempt ${consecutiveErrors}):`, e.message);
-        if (consecutiveErrors >= 3) throw new Error(`Song analysis failed: ${e.message}`);
-        await new Promise(r => setTimeout(r, 2000 * consecutiveErrors));
-      }
-    }
-
-    if (!abortRef.current && !tagDone) {
-      throw new Error("Song tagging did not finish. Please retry.");
-    }
-  }
+  }, [user, likedCount, startPolling, stopPolling]);
 
   return { clusters, loading, analyzing, hasAnalyzed, error, likedCount, progress, runAnalysis, refresh: loadClusters };
 }
