@@ -64,6 +64,8 @@ const INITIAL_PROGRESS: AnalysisProgress = {
 const QUEUED_RETRY_MS = 8_000;
 const QUEUED_TIMEOUT_MS = 20_000;
 const PROCESSOR_REQUEST_TIMEOUT_MS = 15_000;
+const RUNNING_STALE_MS = 20_000;
+const RUNNING_RESUME_MAX = 3;
 
 type JobSnapshot = {
   status: string;
@@ -353,6 +355,30 @@ export function useLikedSongClusters() {
           return;
         }
 
+        if (job.status === "running") {
+          const resumeKey = `${jobId}:running`;
+          const staleForMs = Date.now() - new Date(job.updated_at).getTime();
+          const resumeAttempts = retryAttemptsRef.current[resumeKey] ?? 0;
+
+          if (staleForMs >= RUNNING_STALE_MS && resumeAttempts < RUNNING_RESUME_MAX && retryInFlightRef.current !== jobId) {
+            retryInFlightRef.current = jobId;
+            retryAttemptsRef.current[resumeKey] = resumeAttempts + 1;
+
+            await supabase
+              .from("playlist_generation_jobs")
+              .update({ status_message: "Resuming backend processor…", error_message: null } as never)
+              .eq("id", jobId);
+
+            try {
+              await triggerPipeline(jobId, forceRetagRef.current, true);
+            } catch (resumeError) {
+              console.error("Resume start error:", resumeError);
+            } finally {
+              retryInFlightRef.current = null;
+            }
+          }
+        }
+
         if (job.status === "completed") {
           stopPolling();
           clearLocalJobState();
@@ -500,6 +526,7 @@ export function useLikedSongClusters() {
 
       jobIdRef.current = job.id;
       retryAttemptsRef.current[job.id] = 0;
+      retryAttemptsRef.current[`${job.id}:running`] = 0;
 
       // Start polling BEFORE invoking the function
       startPolling(job.id, forceRetag);
