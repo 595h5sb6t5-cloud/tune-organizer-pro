@@ -58,7 +58,7 @@ async function callAI(
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 55_000);
+      const timer = setTimeout(() => ctrl.abort(), 50_000);
       const res = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
@@ -69,9 +69,10 @@ async function callAI(
 
       if (!res.ok) {
         const text = await res.text();
+        console.error(`[callAI] attempt ${attempt + 1} failed: ${res.status} ${text.substring(0, 200)}`);
         if (res.status === 429) { await new Promise(r => setTimeout(r, 3000 * (attempt + 1))); continue; }
         if (res.status === 402) throw new Error("CREDITS_EXHAUSTED");
-        if (attempt < 2) continue;
+        if (attempt < 2) { await new Promise(r => setTimeout(r, 2000)); continue; }
         throw new Error(`AI error ${res.status}: ${text.substring(0, 200)}`);
       }
 
@@ -84,9 +85,13 @@ async function callAI(
       if (!content) { if (attempt < 2) continue; throw new Error("Empty AI response"); }
       return extractJson(content);
     } catch (e: any) {
+      console.error(`[callAI] attempt ${attempt + 1} error:`, e.message);
       if (e.message === "CREDITS_EXHAUSTED") throw e;
-      if (e.name === "AbortError" && attempt < 2) continue;
-      if (attempt < 2) continue;
+      if (e.name === "AbortError") {
+        console.warn(`[callAI] timeout on attempt ${attempt + 1}, will ${attempt < 2 ? "retry" : "fail"}`);
+        if (attempt < 2) { await new Promise(r => setTimeout(r, 1000)); continue; }
+      }
+      if (attempt < 2) { await new Promise(r => setTimeout(r, 1000)); continue; }
       throw e;
     }
   }
@@ -407,25 +412,39 @@ const INTERNAL_HEADER = "x-tempo-internal";
 async function queueNextStep(
   functionUrl: string, anonKey: string, serviceKey: string,
   jobId: string, userId: string, forceRetag: boolean,
-) {
-  try {
-    const res = await fetch(functionUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${serviceKey}`,
-        apikey: anonKey,
-        [INTERNAL_HEADER]: "1",
-      },
-      body: JSON.stringify({ mode: "process_step", job_id: jobId, user_id: userId, force_retag: forceRetag }),
-    });
-    if (!res.ok) {
-      const text = await res.text();
-      console.error(`[pipeline] queue failed ${res.status}: ${text.substring(0, 200)}`);
+): Promise<boolean> {
+  for (let retry = 0; retry < 2; retry++) {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 55_000);
+      const res = await fetch(functionUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${serviceKey}`,
+          apikey: anonKey,
+          [INTERNAL_HEADER]: "1",
+        },
+        body: JSON.stringify({ mode: "process_step", job_id: jobId, user_id: userId, force_retag: forceRetag }),
+        signal: ctrl.signal,
+      });
+      clearTimeout(timer);
+      if (!res.ok) {
+        const text = await res.text();
+        console.error(`[pipeline] queue attempt ${retry + 1} failed ${res.status}: ${text.substring(0, 200)}`);
+        if (retry < 1) { await new Promise(r => setTimeout(r, 2000)); continue; }
+        return false;
+      }
+      // Consume body to prevent resource leak
+      await res.text();
+      return true;
+    } catch (e) {
+      console.error(`[pipeline] queue attempt ${retry + 1} error:`, e);
+      if (retry < 1) { await new Promise(r => setTimeout(r, 2000)); continue; }
+      return false;
     }
-  } catch (e) {
-    console.error("[pipeline] queue error:", e);
   }
+  return false;
 }
 
 /* ══════════════════════════════════════════════
@@ -445,7 +464,7 @@ Deno.serve(async (req) => {
     const functionUrl = `${url}/functions/v1/analyze-liked-songs`;
 
     let mode = "tag_batch";
-    let batchSize = 50;
+    let batchSize = 25;
     let forceRetag = false;
     let jobId: string | null = null;
     let internalUserId: string | null = null;
@@ -453,7 +472,7 @@ Deno.serve(async (req) => {
     try {
       const b = await req.json();
       if (b?.mode) mode = String(b.mode);
-      if (typeof b?.batch_size === "number") batchSize = Math.min(b.batch_size, 50);
+      if (typeof b?.batch_size === "number") batchSize = Math.min(b.batch_size, 30);
       if (b?.force_retag) forceRetag = true;
       if (b?.job_id) jobId = b.job_id;
       if (typeof b?.user_id === "string") internalUserId = b.user_id;
@@ -541,16 +560,13 @@ Deno.serve(async (req) => {
         error_message: null,
       });
 
-      // Fire-and-forget via EdgeRuntime.waitUntil — return 202 immediately
-      // @ts-ignore EdgeRuntime is a Deno Deploy global
-      if (typeof EdgeRuntime !== "undefined" && EdgeRuntime.waitUntil) {
-        EdgeRuntime.waitUntil(queueNextStep(functionUrl, anon, svc, jobId, userId, forceRetag));
-      } else {
-        // Fallback: fire without awaiting
-        queueNextStep(functionUrl, anon, svc, jobId, userId, forceRetag).catch(e =>
-          console.error("[pipeline] background queue error:", e)
-        );
+      // Directly invoke the first step — don't use waitUntil which is unreliable
+      const success = await queueNextStep(functionUrl, anon, svc, jobId, userId, forceRetag);
+      if (!success) {
+        await failJob(adm, jobId, "Failed to start the processing pipeline. Please retry.");
+        return json({ error: "Failed to start pipeline" }, 500);
       }
+
       return json({ success: true, job_id: jobId, message: "Pipeline started" }, 202);
     }
 
@@ -571,7 +587,12 @@ Deno.serve(async (req) => {
         return json({ success: true, terminal: true });
       }
 
-      const queue = () => queueNextStep(functionUrl, anon, svc, jobId!, userId, forceRetag);
+      const queue = async () => {
+        const ok = await queueNextStep(functionUrl, anon, svc, jobId!, userId, forceRetag);
+        if (!ok) {
+          console.error("[pipeline] Failed to queue next step — job will stall until frontend retries");
+        }
+      };
 
       try {
         /* ── PHASE: TAGGING ── */
