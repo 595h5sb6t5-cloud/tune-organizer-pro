@@ -18,6 +18,8 @@ interface PlaylistTrack {
   artist_name: string;
   album_name: string | null;
   image_url: string | null;
+  duration_ms: number | null;
+  preview_url: string | null;
   position: number;
 }
 
