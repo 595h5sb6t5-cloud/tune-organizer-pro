@@ -58,7 +58,7 @@ async function callAI(
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 55_000);
+      const timer = setTimeout(() => ctrl.abort(), 50_000);
       const res = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
@@ -69,9 +69,10 @@ async function callAI(
 
       if (!res.ok) {
         const text = await res.text();
+        console.error(`[callAI] attempt ${attempt + 1} failed: ${res.status} ${text.substring(0, 200)}`);
         if (res.status === 429) { await new Promise(r => setTimeout(r, 3000 * (attempt + 1))); continue; }
         if (res.status === 402) throw new Error("CREDITS_EXHAUSTED");
-        if (attempt < 2) continue;
+        if (attempt < 2) { await new Promise(r => setTimeout(r, 2000)); continue; }
         throw new Error(`AI error ${res.status}: ${text.substring(0, 200)}`);
       }
 
@@ -84,9 +85,13 @@ async function callAI(
       if (!content) { if (attempt < 2) continue; throw new Error("Empty AI response"); }
       return extractJson(content);
     } catch (e: any) {
+      console.error(`[callAI] attempt ${attempt + 1} error:`, e.message);
       if (e.message === "CREDITS_EXHAUSTED") throw e;
-      if (e.name === "AbortError" && attempt < 2) continue;
-      if (attempt < 2) continue;
+      if (e.name === "AbortError") {
+        console.warn(`[callAI] timeout on attempt ${attempt + 1}, will ${attempt < 2 ? "retry" : "fail"}`);
+        if (attempt < 2) { await new Promise(r => setTimeout(r, 1000)); continue; }
+      }
+      if (attempt < 2) { await new Promise(r => setTimeout(r, 1000)); continue; }
       throw e;
     }
   }
