@@ -296,6 +296,69 @@ export type Database = {
         }
         Relationships: []
       }
+      playlist_generation_jobs: {
+        Row: {
+          assigned_count: number
+          completed_at: string | null
+          created_at: string
+          error_message: string | null
+          force_retag: boolean
+          id: string
+          phase: string
+          saved_worlds: number
+          started_at: string | null
+          status: string
+          status_message: string | null
+          total_analyzed: number
+          total_songs: number
+          total_worlds: number
+          updated_at: string
+          user_id: string
+          world_definitions: Json
+          worlds_count: number
+        }
+        Insert: {
+          assigned_count?: number
+          completed_at?: string | null
+          created_at?: string
+          error_message?: string | null
+          force_retag?: boolean
+          id?: string
+          phase?: string
+          saved_worlds?: number
+          started_at?: string | null
+          status?: string
+          status_message?: string | null
+          total_analyzed?: number
+          total_songs?: number
+          total_worlds?: number
+          updated_at?: string
+          user_id: string
+          world_definitions?: Json
+          worlds_count?: number
+        }
+        Update: {
+          assigned_count?: number
+          completed_at?: string | null
+          created_at?: string
+          error_message?: string | null
+          force_retag?: boolean
+          id?: string
+          phase?: string
+          saved_worlds?: number
+          started_at?: string | null
+          status?: string
+          status_message?: string | null
+          total_analyzed?: number
+          total_songs?: number
+          total_worlds?: number
+          updated_at?: string
+          user_id?: string
+          world_definitions?: Json
+          worlds_count?: number
+        }
+        Relationships: []
+      }
       playlist_vibe_analysis: {
         Row: {
           ai_explanation: string | null
