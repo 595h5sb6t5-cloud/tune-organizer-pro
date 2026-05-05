@@ -65,6 +65,41 @@ Deno.serve(async (req) => {
 
     await markStatus({ status: "exporting", last_export_error: null, last_export_step: step });
 
+    // Plan gating: count export only if this is a NEW export (not a resync)
+    {
+      const { data: sub } = await supabase
+        .from("user_subscription")
+        .select("plan, export_limit")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      const exportLimit = sub?.export_limit ?? 3;
+      if (exportLimit !== -1 && generated_playlist_id) {
+        const { data: gp } = await supabase
+          .from("generated_playlists")
+          .select("is_exported_to_spotify")
+          .eq("id", generated_playlist_id)
+          .eq("user_id", user.id)
+          .maybeSingle();
+        if (!gp?.is_exported_to_spotify) {
+          const { count: exportsCount } = await supabase
+            .from("generated_playlists")
+            .select("id", { head: true, count: "exact" })
+            .eq("user_id", user.id)
+            .eq("is_exported_to_spotify", true);
+          if ((exportsCount ?? 0) >= exportLimit) {
+            await markStatus({ status: "draft", last_export_error: `Plan limit reached (${exportLimit} exports). Upgrade to Premium.`, last_export_step: "plan_gate" });
+            return jsonResponse({
+              error: `Free plan allows ${exportLimit} exports. Upgrade to Premium for unlimited.`,
+              step: "plan_gate",
+              plan_limited: true,
+              plan: sub?.plan ?? "free",
+              limit: exportLimit,
+            }, 402);
+          }
+        }
+      }
+    }
+
     step = "check_connection";
     const { data: conn } = await supabase
       .from("spotify_connections")
