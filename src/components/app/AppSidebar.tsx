@@ -1,16 +1,12 @@
-import { Music2, LayoutDashboard, Library, ListMusic, Settings, Upload, LogOut, Sparkles, History } from "lucide-react";
+import { Music2, Library, ListMusic, Settings, LogOut, Heart } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
-import { supabase } from "@/integrations/supabase/client";
 
 const navItems = [
-  { icon: LayoutDashboard, label: "Dashboard", path: "/dashboard" },
   { icon: Library, label: "Library", path: "/library" },
+  { icon: Heart, label: "Liked Songs", path: "/liked-songs" },
   { icon: ListMusic, label: "Playlists", path: "/playlists" },
-  { icon: Sparkles, label: "Discover", path: "/discover" },
-  { icon: History, label: "History", path: "/history" },
-  { icon: Upload, label: "Sync", path: "/sync" },
   { icon: Settings, label: "Settings", path: "/settings" },
 ];
 
@@ -33,7 +29,7 @@ const AppSidebar = () => {
   return (
     <aside className="fixed left-0 top-0 bottom-0 w-60 bg-surface-elevated border-r border-border flex flex-col z-40">
       <div className="p-5 border-b border-border">
-        <Link to="/dashboard" className="flex items-center gap-2">
+        <Link to="/library" className="flex items-center gap-2">
           <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
             <Music2 className="w-4 h-4 text-primary-foreground" />
           </div>
