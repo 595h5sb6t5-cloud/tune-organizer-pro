@@ -58,6 +58,32 @@ Deno.serve(async (req) => {
     const { generated_playlist_id, count = 12 } = await req.json().catch(() => ({} as any));
     if (!generated_playlist_id) return json({ error: "generated_playlist_id required" }, 400);
 
+    // Plan gating: monthly recommendation cap
+    const { data: sub } = await supabase
+      .from("user_subscription")
+      .select("plan, recommendations_limit, current_period_started_at")
+      .eq("user_id", user.id)
+      .maybeSingle();
+    const recLimit = sub?.recommendations_limit ?? 20;
+    let effectiveCount = Math.max(1, Math.min(count, 20));
+    if (recLimit !== -1) {
+      const periodStart = sub?.current_period_started_at ?? new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
+      const { count: usedThisMonth } = await supabase
+        .from("recommendations")
+        .select("id", { head: true, count: "exact" })
+        .eq("user_id", user.id)
+        .gte("created_at", periodStart);
+      const remaining = Math.max(0, recLimit - (usedThisMonth ?? 0));
+      if (remaining === 0) {
+        return json({
+          error: `Monthly recommendation limit reached on Free plan (${recLimit}). Upgrade to Premium.`,
+          plan_limited: true,
+          plan: sub?.plan ?? "free",
+          limit: recLimit,
+        }, 402);
+      }
+      effectiveCount = Math.min(effectiveCount, remaining);
+    }
     // Load playlist + tracks
     const { data: pl } = await supabase
       .from("generated_playlists")
@@ -195,7 +221,7 @@ Return STRICT JSON: {"candidates":[{"title":"","artist":"","reason":"","fit_scor
       followed_artists: (topArtists ?? []).slice(0, 20).map((a) => a.artist_name),
       rejected_examples: rejectedHints.slice(0, 20),
       avoid_titles_artists: "Avoid duplicates; we will deduplicate against the user library on our side.",
-      requested_count: Math.min(count, 20),
+      requested_count: effectiveCount,
     });
 
     const aiRes = await fetch("https://api.openai.com/v1/chat/completions", {

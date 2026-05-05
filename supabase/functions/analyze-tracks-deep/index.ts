@@ -86,12 +86,41 @@ Deno.serve(async (req) => {
     const batchSize = Math.min(Math.max(body.batch_size ?? 10, 1), 20);
     const force = body.force === true;
 
+    // Plan gating: cap total analyzed for Free users.
+    const { data: sub } = await adm
+      .from("user_subscription")
+      .select("plan, song_analysis_limit")
+      .eq("user_id", user.id)
+      .maybeSingle();
+    const planLimit: number = sub?.song_analysis_limit ?? 100;
+    const isUnlimited = planLimit === -1;
+
+    if (!isUnlimited) {
+      const { count: alreadyCount } = await adm
+        .from("ai_track_analysis")
+        .select("id", { head: true, count: "exact" })
+        .eq("user_id", user.id);
+      if ((alreadyCount ?? 0) >= planLimit) {
+        return json({
+          done: true,
+          analyzed: 0,
+          remaining: 0,
+          total: 0,
+          plan_limited: true,
+          plan: sub?.plan ?? "free",
+          limit: planLimit,
+          message: `Plan ${sub?.plan ?? "free"} cap reached (${planLimit}). Upgrade to analyze more.`,
+        });
+      }
+    }
+
+    const fetchLimit = isUnlimited ? 2000 : Math.min(planLimit + 100, 2000);
     const { data: liked } = await adm
       .from("liked_songs")
       .select("id, spotify_track_id, track_name, artist_name, album_name, image_url, audio_tempo, audio_energy, audio_valence, audio_danceability, audio_acousticness, audio_instrumentalness, audio_speechiness")
       .eq("user_id", user.id)
       .order("added_at", { ascending: false })
-      .limit(500);
+      .limit(fetchLimit);
 
     if (!liked || liked.length === 0) {
       return json({ done: true, analyzed: 0, remaining: 0, total: 0, message: "No liked songs" });
@@ -119,7 +148,19 @@ Deno.serve(async (req) => {
       return json({ done: true, analyzed: 0, remaining: 0, total: totalCount ?? 0, message: "All analyzed" });
     }
 
-    const batch = pending.slice(0, batchSize);
+    let effectiveBatch = batchSize;
+    if (!isUnlimited) {
+      const { count: alreadyCount2 } = await adm
+        .from("ai_track_analysis")
+        .select("id", { head: true, count: "exact" })
+        .eq("user_id", user.id);
+      const remainingQuota = Math.max(0, planLimit - (alreadyCount2 ?? 0));
+      effectiveBatch = Math.min(batchSize, remainingQuota);
+      if (effectiveBatch === 0) {
+        return json({ done: true, analyzed: 0, remaining: 0, total: totalCount ?? 0, plan_limited: true, plan: sub?.plan ?? "free", limit: planLimit });
+      }
+    }
+    const batch = pending.slice(0, effectiveBatch);
     const spotifyIds = batch.map((b: any) => b.spotify_track_id);
 
     const [{ data: ptracks }, { data: followed }] = await Promise.all([
