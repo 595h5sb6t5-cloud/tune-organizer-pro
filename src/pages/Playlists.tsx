@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/use-auth";
 import { useGeneratedPlaylists, useGeneratedPlaylistDetail } from "@/hooks/use-generated-playlists";
 import { supabase } from "@/integrations/supabase/client";
+import { useJobs } from "@/hooks/use-jobs";
 import { toast } from "sonner";
 
 const SUGGESTED_CONCEPTS = [
