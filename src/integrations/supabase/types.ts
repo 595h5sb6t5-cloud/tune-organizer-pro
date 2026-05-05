@@ -284,6 +284,7 @@ export type Database = {
           description: string | null
           exported_at: string | null
           id: string
+          intent_profile: Json | null
           is_exported_to_spotify: boolean
           is_public: boolean
           last_export_error: string | null
@@ -306,6 +307,7 @@ export type Database = {
           description?: string | null
           exported_at?: string | null
           id?: string
+          intent_profile?: Json | null
           is_exported_to_spotify?: boolean
           is_public?: boolean
           last_export_error?: string | null
@@ -328,6 +330,7 @@ export type Database = {
           description?: string | null
           exported_at?: string | null
           id?: string
+          intent_profile?: Json | null
           is_exported_to_spotify?: boolean
           is_public?: boolean
           last_export_error?: string | null
@@ -1010,9 +1013,14 @@ export type Database = {
           artist_name: string | null
           based_on_playlist_id: string | null
           created_at: string
+          final_decision: string | null
           fit_score: number | null
           id: string
           image_url: string | null
+          matched_audio_features: string[] | null
+          matched_contexts: string[] | null
+          matched_moods: string[] | null
+          possible_issue: string | null
           preview_url: string | null
           recommendation_reason: string | null
           spotify_track_id: string | null
@@ -1027,9 +1035,14 @@ export type Database = {
           artist_name?: string | null
           based_on_playlist_id?: string | null
           created_at?: string
+          final_decision?: string | null
           fit_score?: number | null
           id?: string
           image_url?: string | null
+          matched_audio_features?: string[] | null
+          matched_contexts?: string[] | null
+          matched_moods?: string[] | null
+          possible_issue?: string | null
           preview_url?: string | null
           recommendation_reason?: string | null
           spotify_track_id?: string | null
@@ -1044,9 +1057,14 @@ export type Database = {
           artist_name?: string | null
           based_on_playlist_id?: string | null
           created_at?: string
+          final_decision?: string | null
           fit_score?: number | null
           id?: string
           image_url?: string | null
+          matched_audio_features?: string[] | null
+          matched_contexts?: string[] | null
+          matched_moods?: string[] | null
+          possible_issue?: string | null
           preview_url?: string | null
           recommendation_reason?: string | null
           spotify_track_id?: string | null
