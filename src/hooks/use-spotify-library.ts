@@ -264,75 +264,131 @@ export function useSpotifyLibrary() {
 
     const combinedResult: Record<string, any> = { success: true };
 
-    try {
-      setStage("profile", "active");
+    // Per-stage job helper
+    const runStage = async <T,>(
+      type: JobType,
+      label: string,
+      stage: SyncStage,
+      fn: (update: (msg: string, processed?: number, total?: number) => void) => Promise<T>,
+      opts: { silentFail?: boolean } = {},
+    ): Promise<T | null> => {
+      const jobId = jobsApi.startJob({
+        type,
+        label,
+        message: `Iniciando ${label.toLowerCase()}…`,
+        retry: () => { void resync(forceFullSync); },
+      });
+      setStage(stage, "active");
       try {
+        const result = await fn((msg, processed, total) => {
+          setStage(stage, "active", msg);
+          jobsApi.updateJob(jobId, {
+            message: msg,
+            ...(processed != null ? { itemsProcessed: processed } : {}),
+            ...(total != null ? { totalItems: total } : {}),
+          });
+        });
+        jobsApi.completeJob(jobId, `${label} · listo`);
+        return result;
+      } catch (e: any) {
+        const msg = e?.message ?? "Error desconocido";
+        if (opts.silentFail) {
+          setStage(stage, "skipped", msg);
+          jobsApi.completeJob(jobId, `${label} · omitido`);
+          return null;
+        }
+        setStage(stage, "error", msg);
+        jobsApi.failJob(jobId, msg, { step: stage, technical: e?.stack });
+        throw e;
+      }
+    };
+
+    try {
+      await runStage("spotify_import", "Leyendo perfil de Spotify", "profile", async (update) => {
+        update("Leyendo tu perfil…");
         const ext = await supabase.functions.invoke("spotify-sync-extras", { body: {} });
         if (ext.error || ext.data?.error) throw new Error(ext.error?.message || ext.data?.error);
         setStage("profile", "done", "ready");
-      } catch (e: any) {
-        setStage("profile", "skipped", e.message);
-      }
+      }, { silentFail: true });
       if (abortRef.current) return;
 
-      setStage("liked_songs", "active");
-      const likedRes = await invokeSync("liked", forceFullSync);
-      Object.assign(combinedResult, likedRes);
-      setStage("liked_songs", "done", `${likedRes.liked_songs_added ?? 0} new`);
-      await refreshLiked();
+      await runStage("sync_liked", "Sincronizando liked songs", "liked_songs", async (update) => {
+        update("Importando liked songs…");
+        const likedRes = await invokeSync("liked", forceFullSync);
+        Object.assign(combinedResult, likedRes);
+        const added = likedRes.liked_songs_added ?? 0;
+        update(`Importadas ${added} canciones nuevas`, added, likedRes.total_liked ?? added);
+        setStage("liked_songs", "done", `${added} new`);
+        await refreshLiked();
+      });
       if (abortRef.current) return;
 
-      setStage("albums", "active");
-      const albumRes = await invokeSync("albums", forceFullSync);
-      Object.assign(combinedResult, albumRes);
-      setStage("albums", "done", `+${albumRes.albums_added ?? 0}`);
-      await refreshAlbums();
+      await runStage("sync_albums", "Sincronizando álbumes guardados", "albums", async (update) => {
+        update("Importando álbumes…");
+        const albumRes = await invokeSync("albums", forceFullSync);
+        Object.assign(combinedResult, albumRes);
+        const added = albumRes.albums_added ?? 0;
+        update(`+${added} álbumes`, added);
+        setStage("albums", "done", `+${added}`);
+        await refreshAlbums();
+      });
       if (abortRef.current) return;
 
-      setStage("playlists", "active");
-      let playlistsRemaining = Infinity;
-      let totalPlaylistTracksSynced = 0;
-      let plBatchNum = 0;
-      // Loop until all playlist tracks are imported (edge function processes max 10 per call)
-      while (playlistsRemaining > 0) {
-        plBatchNum++;
-        const plRes = await invokeSync("playlists", forceFullSync);
-        Object.assign(combinedResult, plRes);
-        totalPlaylistTracksSynced += plRes.playlist_tracks_synced ?? 0;
-        playlistsRemaining = plRes.playlists_remaining ?? 0;
-        setStage("playlists", "active", `batch ${plBatchNum}: ${plRes.playlist_tracks_synced ?? 0} tracks, ${playlistsRemaining} playlists remaining`);
-        if (plBatchNum > 50) break; // safety limit
-      }
-      setStage("playlists", "done", `${totalPlaylistTracksSynced} tracks synced`);
-      await refreshPlaylists();
+      await runStage("sync_playlists", "Sincronizando playlists", "playlists", async (update) => {
+        let playlistsRemaining = Infinity;
+        let totalPlaylistTracksSynced = 0;
+        let plBatchNum = 0;
+        while (playlistsRemaining > 0) {
+          plBatchNum++;
+          update(`Procesando lote ${plBatchNum}…`);
+          const plRes = await invokeSync("playlists", forceFullSync);
+          Object.assign(combinedResult, plRes);
+          totalPlaylistTracksSynced += plRes.playlist_tracks_synced ?? 0;
+          playlistsRemaining = plRes.playlists_remaining ?? 0;
+          const totalPL = (plRes.total_playlists ?? 0);
+          const processedPL = totalPL - playlistsRemaining;
+          update(
+            `Lote ${plBatchNum}: ${plRes.playlist_tracks_synced ?? 0} canciones · ${playlistsRemaining} playlists restantes`,
+            processedPL > 0 ? processedPL : totalPlaylistTracksSynced,
+            totalPL > 0 ? totalPL : undefined,
+          );
+          setStage("playlists", "active", `batch ${plBatchNum}: ${plRes.playlist_tracks_synced ?? 0} tracks, ${playlistsRemaining} playlists remaining`);
+          if (plBatchNum > 50) break;
+        }
+        update(`${totalPlaylistTracksSynced} canciones sincronizadas`, totalPlaylistTracksSynced, totalPlaylistTracksSynced);
+        setStage("playlists", "done", `${totalPlaylistTracksSynced} tracks synced`);
+        await refreshPlaylists();
+      });
       if (abortRef.current) return;
 
-      setStage("artists", "active");
-      const artRes = await invokeSync("artists", forceFullSync);
-      Object.assign(combinedResult, artRes);
-      setStage("artists", "done", `+${artRes.artists_added ?? 0}`);
-      await refreshArtists();
+      await runStage("sync_artists", "Sincronizando artistas seguidos", "artists", async (update) => {
+        update("Importando artistas…");
+        const artRes = await invokeSync("artists", forceFullSync);
+        Object.assign(combinedResult, artRes);
+        const added = artRes.artists_added ?? 0;
+        update(`+${added} artistas`, added);
+        setStage("artists", "done", `+${added}`);
+        await refreshArtists();
+      });
       if (abortRef.current) return;
 
-      setStage("tops", "active");
-      try {
+      await runStage("spotify_import", "Top tracks y reproducciones recientes", "tops", async (update) => {
+        update("Cargando tops…");
         const tops = await supabase.functions.invoke("spotify-sync-extras", { body: {} });
         const t = tops.data ?? {};
+        update(`${t.top_tracks ?? 0} tops · ${t.recent_plays ?? 0} recientes`);
         setStage("tops", "done", `${t.top_tracks ?? 0} tops · ${t.recent_plays ?? 0} recent`);
-      } catch {
-        setStage("tops", "skipped");
-      }
+      }, { silentFail: true });
 
-      setStage("analysis", "active");
-      try {
+      await runStage("ai_analysis", "Análisis de audio Spotify", "analysis", async (update) => {
+        update("Analizando audio…");
         const analysisRes = await supabase.functions.invoke("spotify-import-tracks", {
           body: { scope: "all", skip_core: false, ...(forceFullSync ? { force_full: true } : {}) },
         });
         const featureCount = analysisRes.data?.audio_features ?? 0;
+        update(featureCount > 0 ? `${featureCount} tracks analizados` : "Al día");
         setStage("analysis", "done", featureCount > 0 ? `${featureCount} tracks` : "up to date");
-      } catch {
-        setStage("analysis", "skipped", "will retry later");
-      }
+      }, { silentFail: true });
 
       combinedResult.sync_mode = forceFullSync ? "full" : "incremental";
       setLastSyncResult(combinedResult);
