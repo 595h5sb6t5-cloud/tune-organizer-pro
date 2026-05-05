@@ -9,10 +9,13 @@ import { FloatingPlayer } from "./components/app/FloatingPlayer";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import Index from "./pages/Index.tsx";
 import Auth from "./pages/Auth.tsx";
+import Dashboard from "./pages/Dashboard.tsx";
 import Library from "./pages/Library.tsx";
 import Playlists from "./pages/Playlists.tsx";
 import PlaylistDetail from "./pages/PlaylistDetail.tsx";
 import LikedSongs from "./pages/LikedSongs.tsx";
+import MusicDNA from "./pages/MusicDNA.tsx";
+import Discover from "./pages/Discover.tsx";
 import Settings from "./pages/Settings.tsx";
 import SpotifyCallback from "./pages/SpotifyCallback.tsx";
 import NotFound from "./pages/NotFound.tsx";
@@ -31,17 +34,18 @@ const App = () => (
               <Routes>
                 <Route path="/" element={<Index />} />
                 <Route path="/auth" element={<Auth />} />
+                <Route path="/dashboard" element={<Dashboard />} />
                 <Route path="/library" element={<Library />} />
-                <Route path="/playlists" element={<Playlists />} />
-                <Route path="/playlists/:id" element={<PlaylistDetail />} />
                 <Route path="/liked-songs" element={<LikedSongs />} />
+                <Route path="/music-dna" element={<MusicDNA />} />
+                <Route path="/ai-playlists" element={<Playlists />} />
+                <Route path="/playlists" element={<Navigate to="/ai-playlists" replace />} />
+                <Route path="/playlists/:id" element={<PlaylistDetail />} />
+                <Route path="/discover" element={<Discover />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="/spotify-callback" element={<SpotifyCallback />} />
-                {/* Removed routes redirect to library */}
-                <Route path="/dashboard" element={<Navigate to="/library" replace />} />
-                <Route path="/discover" element={<Navigate to="/library" replace />} />
-                <Route path="/sync" element={<Navigate to="/settings" replace />} />
-                <Route path="/history" element={<Navigate to="/library" replace />} />
+                <Route path="/sync" element={<Navigate to="/dashboard" replace />} />
+                <Route path="/history" element={<Navigate to="/discover" replace />} />
                 <Route path="/liked-intelligence" element={<Navigate to="/liked-songs" replace />} />
                 <Route path="/albums/:id" element={<Navigate to="/library" replace />} />
                 <Route path="*" element={<NotFound />} />
