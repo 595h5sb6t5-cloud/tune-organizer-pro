@@ -114,20 +114,30 @@ function Generator({ onCreated }: { onCreated: (id: string) => void }) {
   const [concept, setConcept] = useState("");
   const [size, setSize] = useState(25);
   const [running, setRunning] = useState(false);
+  const jobsApi = useJobs();
 
   const generate = async (conceptOverride?: string) => {
     const c = (conceptOverride ?? concept).trim();
     setRunning(true);
+    const jobId = jobsApi.startJob({
+      type: "playlist_generation",
+      label: c ? `Generando "${c}"` : "Generando playlist con IA",
+      message: "Analizando tu biblioteca…",
+      retry: () => { void generate(c); },
+    });
     try {
+      jobsApi.updateJob(jobId, { message: "Pidiendo curaduría a la IA…" });
       const { data, error } = await supabase.functions.invoke("generate-ai-playlist", {
         body: { concept: c || undefined, target_size: size },
       });
       if (error) throw new Error(error.message);
       if (data?.error) throw new Error(data.error);
+      jobsApi.completeJob(jobId, `${data.name} · ${data.track_count} canciones`);
       toast.success("Playlist generada", { description: `${data.name} · ${data.track_count} canciones` });
       onCreated(data.playlist_id);
       setConcept("");
     } catch (e: any) {
+      jobsApi.failJob(jobId, e.message, { step: "generate", technical: e?.stack });
       toast.error("No se pudo generar", { description: e.message });
     } finally {
       setRunning(false);
