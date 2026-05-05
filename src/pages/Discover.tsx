@@ -57,20 +57,31 @@ const Discover = () => {
 
   useEffect(() => { if (selectedId) void loadRecs(selectedId); }, [selectedId, loadRecs]);
 
+  const jobsApi = useJobs();
+
   const generate = async () => {
     if (!selectedId) return;
     setGenerating(true);
     setError(null);
+    const jobId = jobsApi.startJob({
+      type: "recommendations",
+      label: "Buscando recomendaciones",
+      message: "Analizando tu playlist…",
+      retry: () => { void generate(); },
+    });
     try {
+      jobsApi.updateJob(jobId, { message: "Pidiendo sugerencias a la IA…" });
       const { data, error } = await supabase.functions.invoke("recommend-for-playlist", {
         body: { generated_playlist_id: selectedId, count: 12 },
       });
       if (error) throw new Error(error.message);
       if (data?.error) throw new Error(data.error);
+      jobsApi.completeJob(jobId, `${data.count} recomendaciones nuevas`);
       toast.success(`Encontramos ${data.count} recomendaciones`);
       await loadRecs(selectedId);
     } catch (e: any) {
       setError(e.message);
+      jobsApi.failJob(jobId, e.message, { step: "recommend", technical: e?.stack });
       toast.error("No se pudo generar recomendaciones", { description: e.message });
     } finally {
       setGenerating(false);
