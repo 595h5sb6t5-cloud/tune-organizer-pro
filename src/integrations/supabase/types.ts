@@ -1006,35 +1006,53 @@ export type Database = {
       }
       recommendations: {
         Row: {
+          album_name: string | null
+          artist_name: string | null
           based_on_playlist_id: string | null
           created_at: string
           fit_score: number | null
           id: string
+          image_url: string | null
+          preview_url: string | null
           recommendation_reason: string | null
+          spotify_track_id: string | null
           status: string
-          track_id: string
+          track_id: string | null
+          track_name: string | null
           updated_at: string
           user_id: string
         }
         Insert: {
+          album_name?: string | null
+          artist_name?: string | null
           based_on_playlist_id?: string | null
           created_at?: string
           fit_score?: number | null
           id?: string
+          image_url?: string | null
+          preview_url?: string | null
           recommendation_reason?: string | null
+          spotify_track_id?: string | null
           status?: string
-          track_id: string
+          track_id?: string | null
+          track_name?: string | null
           updated_at?: string
           user_id: string
         }
         Update: {
+          album_name?: string | null
+          artist_name?: string | null
           based_on_playlist_id?: string | null
           created_at?: string
           fit_score?: number | null
           id?: string
+          image_url?: string | null
+          preview_url?: string | null
           recommendation_reason?: string | null
+          spotify_track_id?: string | null
           status?: string
-          track_id?: string
+          track_id?: string | null
+          track_name?: string | null
           updated_at?: string
           user_id?: string
         }
