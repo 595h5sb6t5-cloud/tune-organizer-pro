@@ -1667,6 +1667,8 @@ export type Database = {
       user_subscription: {
         Row: {
           created_at: string
+          current_period_started_at: string
+          export_limit: number
           id: string
           is_active: boolean
           plan: string
@@ -1678,6 +1680,8 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          current_period_started_at?: string
+          export_limit?: number
           id?: string
           is_active?: boolean
           plan?: string
@@ -1689,6 +1693,8 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          current_period_started_at?: string
+          export_limit?: number
           id?: string
           is_active?: boolean
           plan?: string
