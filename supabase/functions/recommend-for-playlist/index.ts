@@ -221,7 +221,7 @@ Return STRICT JSON: {"candidates":[{"title":"","artist":"","reason":"","fit_scor
       followed_artists: (topArtists ?? []).slice(0, 20).map((a) => a.artist_name),
       rejected_examples: rejectedHints.slice(0, 20),
       avoid_titles_artists: "Avoid duplicates; we will deduplicate against the user library on our side.",
-      requested_count: Math.min(count, 20),
+      requested_count: effectiveCount,
     });
 
     const aiRes = await fetch("https://api.openai.com/v1/chat/completions", {
