@@ -6,6 +6,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { ConnectionProvider } from "./hooks/use-connections";
 import { AuthProvider } from "./hooks/use-auth";
 import { FloatingPlayer } from "./components/app/FloatingPlayer";
+import { JobsBanner } from "./components/app/JobsBanner";
+import { JobsProvider } from "./hooks/use-jobs";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import Index from "./pages/Index.tsx";
 import Auth from "./pages/Auth.tsx";
