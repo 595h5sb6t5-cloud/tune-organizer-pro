@@ -1532,6 +1532,41 @@ export type Database = {
           },
         ]
       }
+      user_recent_plays: {
+        Row: {
+          context_uri: string | null
+          created_at: string
+          id: string
+          played_at: string
+          track_id: string
+          user_id: string
+        }
+        Insert: {
+          context_uri?: string | null
+          created_at?: string
+          id?: string
+          played_at: string
+          track_id: string
+          user_id: string
+        }
+        Update: {
+          context_uri?: string | null
+          created_at?: string
+          id?: string
+          played_at?: string
+          track_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_recent_plays_track_id_fkey"
+            columns: ["track_id"]
+            isOneToOne: false
+            referencedRelation: "tracks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_saved_albums: {
         Row: {
           added_at: string | null
@@ -1688,6 +1723,76 @@ export type Database = {
           user_id?: string | null
         }
         Relationships: []
+      }
+      user_top_artists: {
+        Row: {
+          artist_id: string
+          fetched_at: string
+          id: string
+          rank: number
+          time_range: string
+          user_id: string
+        }
+        Insert: {
+          artist_id: string
+          fetched_at?: string
+          id?: string
+          rank: number
+          time_range: string
+          user_id: string
+        }
+        Update: {
+          artist_id?: string
+          fetched_at?: string
+          id?: string
+          rank?: number
+          time_range?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_top_artists_artist_id_fkey"
+            columns: ["artist_id"]
+            isOneToOne: false
+            referencedRelation: "artists"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      user_top_tracks: {
+        Row: {
+          fetched_at: string
+          id: string
+          rank: number
+          time_range: string
+          track_id: string
+          user_id: string
+        }
+        Insert: {
+          fetched_at?: string
+          id?: string
+          rank: number
+          time_range: string
+          track_id: string
+          user_id: string
+        }
+        Update: {
+          fetched_at?: string
+          id?: string
+          rank?: number
+          time_range?: string
+          track_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_top_tracks_track_id_fkey"
+            columns: ["track_id"]
+            isOneToOne: false
+            referencedRelation: "tracks"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {
