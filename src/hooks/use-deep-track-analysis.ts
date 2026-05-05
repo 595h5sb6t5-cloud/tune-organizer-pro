@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { useJobs } from "./use-jobs";
 
 export interface DeepAnalysisProgress {
   running: boolean;
@@ -19,6 +20,7 @@ const BATCH_SIZE = 10;
 const MAX_BATCHES = 200; // safety
 
 export function useDeepTrackAnalysis() {
+  const jobsApi = useJobs();
   const [state, setState] = useState<DeepAnalysisProgress>({
     running: false,
     totalLiked: 0,
@@ -45,6 +47,13 @@ export function useDeepTrackAnalysis() {
       error: null,
     }));
 
+    const jobId = jobsApi.startJob({
+      type: "ai_analysis",
+      label: "Análisis profundo con IA",
+      message: "Iniciando análisis…",
+      retry: () => { void start(force); },
+    });
+
     let batchNum = 0;
     let analyzedAcc = 0;
     let failedAcc = 0;
@@ -52,11 +61,9 @@ export function useDeepTrackAnalysis() {
     try {
       while (batchNum < MAX_BATCHES) {
         batchNum++;
-        setState((s) => ({
-          ...s,
-          currentBatch: batchNum,
-          message: `Analizando lote ${batchNum}…`,
-        }));
+        const batchMsg = `Analizando lote ${batchNum}…`;
+        setState((s) => ({ ...s, currentBatch: batchNum, message: batchMsg }));
+        jobsApi.updateJob(jobId, { message: batchMsg });
 
         const { data, error } = await supabase.functions.invoke("analyze-tracks-deep", {
           body: { batch_size: BATCH_SIZE, force },
@@ -73,6 +80,10 @@ export function useDeepTrackAnalysis() {
         const remaining = data?.remaining ?? 0;
         const totalBatches = Math.max(batchNum, batchNum + Math.ceil(remaining / BATCH_SIZE));
 
+        const progressMsg = data?.done
+          ? "Guardando análisis…"
+          : `Analizando canción ${alreadyAnalyzed} de ${total} · lote ${batchNum} de ${totalBatches}`;
+
         setState((s) => ({
           ...s,
           totalLiked: total,
@@ -80,36 +91,31 @@ export function useDeepTrackAnalysis() {
           analyzedThisRun: analyzedAcc,
           failedThisRun: failedAcc,
           totalBatches,
-          message: data?.done
-            ? "Guardando análisis…"
-            : `Analizadas ${alreadyAnalyzed} de ${total} canciones`,
+          message: progressMsg,
         }));
+        jobsApi.updateJob(jobId, {
+          itemsProcessed: alreadyAnalyzed,
+          totalItems: total,
+          message: progressMsg,
+        });
 
         if (data?.done || (data?.analyzed ?? 0) === 0) break;
-        // small breather between batches
         await new Promise((r) => setTimeout(r, 800));
       }
 
-      setState((s) => ({
-        ...s,
-        running: false,
-        done: true,
-        message: "Análisis completado.",
-      }));
+      setState((s) => ({ ...s, running: false, done: true, message: "Análisis completado." }));
+      jobsApi.completeJob(jobId, `Análisis completado · ${analyzedAcc} canciones${failedAcc ? ` · ${failedAcc} pendientes` : ""}`);
       toast.success("Análisis profundo completado", {
         description: `${analyzedAcc} canciones analizadas${failedAcc ? ` · ${failedAcc} pendientes` : ""}`,
       });
     } catch (e: any) {
       const msg = e?.message ?? "Error desconocido";
-      setState((s) => ({
-        ...s,
-        running: false,
-        error: msg,
-        message: `Error: ${msg}`,
-      }));
+      setState((s) => ({ ...s, running: false, error: msg, message: `Error: ${msg}` }));
+      jobsApi.failJob(jobId, msg, { technical: e?.stack });
       toast.error("Análisis interrumpido", { description: msg });
     }
-  }, []);
+  }, [jobsApi]);
 
   return { ...state, start };
 }
+

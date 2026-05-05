@@ -6,6 +6,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { ConnectionProvider } from "./hooks/use-connections";
 import { AuthProvider } from "./hooks/use-auth";
 import { FloatingPlayer } from "./components/app/FloatingPlayer";
+import { JobsBanner } from "./components/app/JobsBanner";
+import { JobsProvider } from "./hooks/use-jobs";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import Index from "./pages/Index.tsx";
 import Auth from "./pages/Auth.tsx";
@@ -27,6 +29,7 @@ const App = () => (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <ConnectionProvider>
+          <JobsProvider>
           <TooltipProvider>
             <Toaster />
             <Sonner />
@@ -51,8 +54,10 @@ const App = () => (
                 <Route path="*" element={<NotFound />} />
               </Routes>
               <FloatingPlayer />
+              <JobsBanner />
             </BrowserRouter>
           </TooltipProvider>
+          </JobsProvider>
         </ConnectionProvider>
       </AuthProvider>
     </QueryClientProvider>
