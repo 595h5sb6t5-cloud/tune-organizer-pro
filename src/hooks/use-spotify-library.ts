@@ -312,6 +312,15 @@ export function useSpotifyLibrary() {
       await refreshArtists();
       if (abortRef.current) return;
 
+      setStage("tops", "active");
+      try {
+        const tops = await supabase.functions.invoke("spotify-sync-extras", { body: {} });
+        const t = tops.data ?? {};
+        setStage("tops", "done", `${t.top_tracks ?? 0} tops · ${t.recent_plays ?? 0} recent`);
+      } catch {
+        setStage("tops", "skipped");
+      }
+
       setStage("analysis", "active");
       try {
         const analysisRes = await supabase.functions.invoke("spotify-import-tracks", {
