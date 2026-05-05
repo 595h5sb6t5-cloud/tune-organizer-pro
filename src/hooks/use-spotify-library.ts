@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "./use-auth";
+import { useJobs, type JobType } from "./use-jobs";
 
 export interface SpotifyPlaylist {
   id: string;
