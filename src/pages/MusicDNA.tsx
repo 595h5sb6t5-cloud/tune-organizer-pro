@@ -72,8 +72,8 @@ const MusicDNA = () => {
     );
   }
 
-  const next = () => setStep(s => Math.min(9, (s + 1) as Step));
-  const prev = () => setStep(s => Math.max(0, (s - 1) as Step));
+  const next = () => setStep(s => (Math.min(9, s + 1) as Step));
+  const prev = () => setStep(s => (Math.max(0, s - 1) as Step));
 
   return (
     <AppLayout>
