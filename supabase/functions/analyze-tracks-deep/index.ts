@@ -148,7 +148,19 @@ Deno.serve(async (req) => {
       return json({ done: true, analyzed: 0, remaining: 0, total: totalCount ?? 0, message: "All analyzed" });
     }
 
-    const batch = pending.slice(0, batchSize);
+    let effectiveBatch = batchSize;
+    if (!isUnlimited) {
+      const { count: alreadyCount2 } = await adm
+        .from("ai_track_analysis")
+        .select("id", { head: true, count: "exact" })
+        .eq("user_id", user.id);
+      const remainingQuota = Math.max(0, planLimit - (alreadyCount2 ?? 0));
+      effectiveBatch = Math.min(batchSize, remainingQuota);
+      if (effectiveBatch === 0) {
+        return json({ done: true, analyzed: 0, remaining: 0, total: totalCount ?? 0, plan_limited: true, plan: sub?.plan ?? "free", limit: planLimit });
+      }
+    }
+    const batch = pending.slice(0, effectiveBatch);
     const spotifyIds = batch.map((b: any) => b.spotify_track_id);
 
     const [{ data: ptracks }, { data: followed }] = await Promise.all([
