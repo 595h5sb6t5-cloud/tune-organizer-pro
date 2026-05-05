@@ -5,6 +5,8 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { useSpotify, type SpotifyStatus } from "@/hooks/use-spotify";
 import { useAuth } from "@/hooks/use-auth";
+import { UsageCard } from "@/components/UsageCard";
+import { PaywallDialog } from "@/components/PaywallDialog";
 
 function getSpotifyStatusCopy(status: SpotifyStatus) {
   switch (status) {
