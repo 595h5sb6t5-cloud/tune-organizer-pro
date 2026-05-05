@@ -282,9 +282,14 @@ export type Database = {
           created_at: string
           created_by_ai: boolean
           description: string | null
+          exported_at: string | null
           id: string
           is_exported_to_spotify: boolean
+          is_public: boolean
+          last_export_error: string | null
+          last_export_step: string | null
           name: string
+          snapshot_id: string | null
           spotify_playlist_id: string | null
           spotify_url: string | null
           status: string
@@ -299,9 +304,14 @@ export type Database = {
           created_at?: string
           created_by_ai?: boolean
           description?: string | null
+          exported_at?: string | null
           id?: string
           is_exported_to_spotify?: boolean
+          is_public?: boolean
+          last_export_error?: string | null
+          last_export_step?: string | null
           name: string
+          snapshot_id?: string | null
           spotify_playlist_id?: string | null
           spotify_url?: string | null
           status?: string
@@ -316,9 +326,14 @@ export type Database = {
           created_at?: string
           created_by_ai?: boolean
           description?: string | null
+          exported_at?: string | null
           id?: string
           is_exported_to_spotify?: boolean
+          is_public?: boolean
+          last_export_error?: string | null
+          last_export_step?: string | null
           name?: string
+          snapshot_id?: string | null
           spotify_playlist_id?: string | null
           spotify_url?: string | null
           status?: string

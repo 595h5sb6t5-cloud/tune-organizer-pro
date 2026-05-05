@@ -2,8 +2,9 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import {
   Sparkles, Loader2, Music, Plus, Wand2, ExternalLink, ArrowLeft, ArrowUp, ArrowDown,
-  Trash2, Upload, Pencil, Check, X, ListMusic,
+  Trash2, Upload, Pencil, Check, X, ListMusic, AlertTriangle, Globe, Lock, RefreshCw, Settings as SettingsIcon,
 } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
 import AppLayout from "@/components/app/AppLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -188,6 +189,8 @@ function PlaylistDetail({ playlistId, onBack }: { playlistId: string; onBack: ()
   const [editName, setEditName] = useState("");
   const [editDesc, setEditDesc] = useState("");
   const [exporting, setExporting] = useState(false);
+  const [isPublic, setIsPublic] = useState(false);
+  const [exportError, setExportError] = useState<{ message: string; step?: string; needsReauth?: boolean } | null>(null);
 
   if (loading || !playlist) {
     return <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin" />Cargando…</div>;
@@ -208,39 +211,51 @@ function PlaylistDetail({ playlistId, onBack }: { playlistId: string; onBack: ()
   const exportToSpotify = async () => {
     if (tracks.length === 0) { toast.error("La playlist está vacía"); return; }
     setExporting(true);
+    setExportError(null);
     try {
       const { data, error } = await supabase.functions.invoke("spotify-export-playlist", {
         body: {
+          generated_playlist_id: playlistId,
           name: playlist.name,
           description: playlist.description ?? "",
           track_ids: tracks.map((t) => t.spotify_track_id),
+          is_public: isPublic,
+          spotify_playlist_id: playlist.spotify_playlist_id ?? undefined,
         },
       });
       if (error) throw new Error(error.message);
-      if (data?.error) throw new Error(data.error);
-
-      await supabase.from("generated_playlists").update({
-        is_exported_to_spotify: true,
-        spotify_playlist_id: data.spotify_playlist_id ?? null,
-        spotify_url: data.spotify_playlist_url ?? null,
-        status: "exported",
-      }).eq("id", playlistId);
-
-      toast.success("Exportada a Spotify");
+      if (data?.error) {
+        setExportError({ message: data.error, step: data.step, needsReauth: data.needs_reauth });
+        throw new Error(data.error);
+      }
+      toast.success(data.is_update ? "Playlist actualizada en Spotify" : "Exportada a Spotify");
       await refresh();
     } catch (e: any) {
+      if (!exportError) setExportError({ message: e.message });
       toast.error("Export falló", { description: e.message });
     } finally {
       setExporting(false);
     }
   };
 
+  const status = playlist.status || (playlist.is_exported_to_spotify ? "exported" : "draft");
+
+  const statusBadge =
+    status === "exported" ? <Badge variant="outline" className="text-xs"><Check className="w-3 h-3 mr-1" />Exported</Badge>
+    : status === "exporting" ? <Badge variant="secondary" className="text-xs"><Loader2 className="w-3 h-3 mr-1 animate-spin" />Exporting</Badge>
+    : status === "failed" ? <Badge variant="destructive" className="text-xs"><AlertTriangle className="w-3 h-3 mr-1" />Failed</Badge>
+    : status === "ready_to_export" ? <Badge className="text-xs">Ready to export</Badge>
+    : <Badge variant="secondary" className="text-xs">Draft</Badge>;
+
   return (
     <div className="max-w-4xl">
       <Button variant="ghost" onClick={onBack} className="mb-6"><ArrowLeft className="w-4 h-4 mr-2" />Volver</Button>
 
       <div className="rounded-3xl border border-border/50 bg-card/50 p-6 md:p-8 mb-6">
-        {playlist.concept && <p className="text-xs uppercase tracking-[0.2em] text-accent mb-2">{playlist.concept}</p>}
+        <div className="flex items-center gap-2 mb-2">
+          {playlist.concept && <p className="text-xs uppercase tracking-[0.2em] text-accent">{playlist.concept}</p>}
+          {statusBadge}
+        </div>
 
         {editing ? (
           <div className="space-y-3">
@@ -264,13 +279,31 @@ function PlaylistDetail({ playlistId, onBack }: { playlistId: string; onBack: ()
               <span><ListMusic className="w-3 h-3 inline mr-1" />{tracks.length} canciones</span>
             </div>
 
+            {!playlist.is_exported_to_spotify && (
+              <div className="flex items-center gap-3 mt-5 p-3 rounded-xl border border-border/50 bg-background/40">
+                {isPublic ? <Globe className="w-4 h-4 text-accent" /> : <Lock className="w-4 h-4 text-muted-foreground" />}
+                <div className="flex-1">
+                  <p className="text-sm font-medium">{isPublic ? "Pública" : "Privada"}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {isPublic ? "Cualquiera con el link podrá verla en Spotify." : "Solo tú podrás verla en tu cuenta de Spotify."}
+                  </p>
+                </div>
+                <Switch checked={isPublic} onCheckedChange={setIsPublic} disabled={exporting} />
+              </div>
+            )}
+
             <div className="flex flex-wrap gap-2 mt-5">
               {playlist.is_exported_to_spotify && playlist.spotify_url ? (
-                <Button variant="outline" size="sm" asChild>
-                  <a href={playlist.spotify_url} target="_blank" rel="noopener noreferrer">
-                    <ExternalLink className="w-4 h-4 mr-1.5" />Abrir en Spotify
-                  </a>
-                </Button>
+                <>
+                  <Button variant="hero" size="sm" asChild>
+                    <a href={playlist.spotify_url} target="_blank" rel="noopener noreferrer">
+                      <ExternalLink className="w-4 h-4 mr-1.5" />Abrir en Spotify
+                    </a>
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={exportToSpotify} disabled={exporting}>
+                    {exporting ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" />Sincronizando…</> : <><RefreshCw className="w-4 h-4 mr-1.5" />Sincronizar cambios</>}
+                  </Button>
+                </>
               ) : (
                 <Button variant="hero" size="sm" onClick={exportToSpotify} disabled={exporting}>
                   {exporting ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" />Exportando…</> : <><Upload className="w-4 h-4 mr-1.5" />Exportar a Spotify</>}
@@ -278,6 +311,39 @@ function PlaylistDetail({ playlistId, onBack }: { playlistId: string; onBack: ()
               )}
             </div>
           </>
+        )}
+
+        {exportError && (
+          <div className="mt-5 rounded-xl border border-destructive/40 bg-destructive/5 p-4">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 text-destructive mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-destructive">No se pudo exportar a Spotify</p>
+                <p className="text-xs text-muted-foreground mt-1">{exportError.message}</p>
+                {exportError.step && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Paso fallido: <code className="text-foreground">{exportError.step}</code>
+                  </p>
+                )}
+                <div className="flex flex-wrap gap-2 mt-3">
+                  <Button variant="outline" size="sm" onClick={exportToSpotify} disabled={exporting}>
+                    <RefreshCw className="w-3.5 h-3.5 mr-1.5" />Reintentar
+                  </Button>
+                  <Button variant="ghost" size="sm" asChild>
+                    <Link to="/settings"><SettingsIcon className="w-3.5 h-3.5 mr-1.5" />Revisar conexión</Link>
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {!exportError && playlist.last_export_error && status === "failed" && (
+          <div className="mt-5 rounded-xl border border-destructive/40 bg-destructive/5 p-4 text-xs text-muted-foreground">
+            <p className="font-medium text-destructive flex items-center gap-1.5"><AlertTriangle className="w-3.5 h-3.5" />Último intento falló</p>
+            <p className="mt-1">{playlist.last_export_error}</p>
+            {playlist.last_export_step && <p className="mt-1">Paso: <code className="text-foreground">{playlist.last_export_step}</code></p>}
+          </div>
         )}
       </div>
 
