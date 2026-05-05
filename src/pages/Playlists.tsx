@@ -222,7 +222,7 @@ function PlaylistDetail({ playlistId, onBack }: { playlistId: string; onBack: ()
       await supabase.from("generated_playlists").update({
         is_exported_to_spotify: true,
         spotify_playlist_id: data.spotify_playlist_id ?? null,
-        spotify_url: data.spotify_url ?? null,
+        spotify_url: data.spotify_playlist_url ?? null,
         status: "exported",
       }).eq("id", playlistId);
 
