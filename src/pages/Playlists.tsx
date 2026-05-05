@@ -219,11 +219,21 @@ function PlaylistDetail({ playlistId, onBack }: { playlistId: string; onBack: ()
     toast.success("Cambios guardados");
   };
 
+  const jobsApi = useJobs();
+
   const exportToSpotify = async () => {
     if (tracks.length === 0) { toast.error("La playlist está vacía"); return; }
     setExporting(true);
     setExportError(null);
+    const jobId = jobsApi.startJob({
+      type: "playlist_export",
+      label: `Exportando "${playlist.name}" a Spotify`,
+      message: "Verificando conexión con Spotify…",
+      totalItems: tracks.length,
+      retry: () => { void exportToSpotify(); },
+    });
     try {
+      jobsApi.updateJob(jobId, { message: `Guardando ${tracks.length} canciones en Spotify…` });
       const { data, error } = await supabase.functions.invoke("spotify-export-playlist", {
         body: {
           generated_playlist_id: playlistId,
@@ -237,12 +247,15 @@ function PlaylistDetail({ playlistId, onBack }: { playlistId: string; onBack: ()
       if (error) throw new Error(error.message);
       if (data?.error) {
         setExportError({ message: data.error, step: data.step, needsReauth: data.needs_reauth });
+        jobsApi.failJob(jobId, data.error, { step: data.step });
         throw new Error(data.error);
       }
+      jobsApi.completeJob(jobId, data.is_update ? "Playlist actualizada en Spotify" : "Playlist exportada a Spotify");
       toast.success(data.is_update ? "Playlist actualizada en Spotify" : "Exportada a Spotify");
       await refresh();
     } catch (e: any) {
       if (!exportError) setExportError({ message: e.message });
+      // failJob already called when API returned data.error
       toast.error("Export falló", { description: e.message });
     } finally {
       setExporting(false);
