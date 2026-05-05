@@ -191,7 +191,54 @@ function ScanSummary({ dna }: { dna: ReturnType<typeof useMusicDna> }) {
           </div>
         ))}
       </div>
+      <DeepAnalysisPanel onComplete={() => dna.refresh()} />
     </StepShell>
+  );
+}
+
+function DeepAnalysisPanel({ onComplete }: { onComplete: () => void }) {
+  const a = useDeepTrackAnalysis();
+  const pct = a.totalLiked > 0 ? Math.round((a.alreadyAnalyzed / a.totalLiked) * 100) : 0;
+
+  const handle = async () => {
+    await a.start(false);
+    onComplete();
+  };
+
+  return (
+    <div className="rounded-2xl border border-border/50 bg-card/50 p-6">
+      <div className="flex items-start justify-between gap-4 mb-4">
+        <div>
+          <p className="text-xs uppercase tracking-wider text-accent mb-1">Deep Analysis</p>
+          <h3 className="font-heading text-lg">Análisis musical profundo con IA</h3>
+          <p className="text-sm text-muted-foreground mt-1">
+            Cada canción se analiza individualmente: género, mood, energía, ritmo, contexto y compatibilidad.
+          </p>
+        </div>
+        <Button variant="hero" size="sm" onClick={handle} disabled={a.running}>
+          {a.running ? <><Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />Analizando…</> : <><Brain className="w-3.5 h-3.5 mr-1.5" />Iniciar</>}
+        </Button>
+      </div>
+
+      {(a.running || a.done || a.error) && (
+        <div className="space-y-2">
+          <Progress value={pct} className="h-2" />
+          <div className="flex justify-between text-xs text-muted-foreground">
+            <span>{a.message}</span>
+            <span>
+              {a.alreadyAnalyzed}/{a.totalLiked || "?"}
+              {a.failedThisRun > 0 && ` · ${a.failedThisRun} pendientes`}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {a.error && (
+        <div className="mt-3 text-xs text-destructive">
+          {a.error} — Las canciones que fallaron quedan marcadas para reintento. Puedes pulsar Iniciar de nuevo.
+        </div>
+      )}
+    </div>
   );
 }
 
