@@ -17,9 +17,9 @@ const NotFound = () => {
         <p className="mb-6 text-xl text-muted-foreground">This page doesn't exist</p>
         <div className="flex items-center justify-center gap-3">
           <Button variant="hero" className="rounded-xl gap-2" asChild>
-            <Link to="/dashboard">
+            <Link to="/library">
               <ArrowLeft className="w-4 h-4" />
-              Go to Dashboard
+              Go to Library
             </Link>
           </Button>
           <Button variant="hero-outline" className="rounded-xl" asChild>
