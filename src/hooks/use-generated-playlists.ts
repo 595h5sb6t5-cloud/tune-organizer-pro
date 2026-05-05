@@ -13,6 +13,11 @@ export interface GeneratedPlaylist {
   is_exported_to_spotify: boolean;
   spotify_url: string | null;
   spotify_playlist_id: string | null;
+  snapshot_id?: string | null;
+  is_public?: boolean;
+  last_export_error?: string | null;
+  last_export_step?: string | null;
+  exported_at?: string | null;
   created_at: string;
   track_count?: number;
 }
