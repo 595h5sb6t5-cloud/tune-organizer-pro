@@ -53,6 +53,28 @@ Deno.serve(async (req) => {
     const { data: { user }, error: uerr } = await userClient.auth.getUser();
     if (uerr || !user) return json({ error: "unauthorized" }, 401);
 
+    // Plan gating
+    const { data: sub } = await adm
+      .from("user_subscription")
+      .select("plan, playlists_limit")
+      .eq("user_id", user.id)
+      .maybeSingle();
+    const playlistsLimit = sub?.playlists_limit ?? 3;
+    if (playlistsLimit !== -1) {
+      const { count: plCount } = await adm
+        .from("generated_playlists")
+        .select("id", { head: true, count: "exact" })
+        .eq("user_id", user.id);
+      if ((plCount ?? 0) >= playlistsLimit) {
+        return json({
+          error: `Free plan limit reached (${playlistsLimit} playlists). Upgrade to Premium for unlimited.`,
+          plan_limited: true,
+          plan: sub?.plan ?? "free",
+          limit: playlistsLimit,
+        }, 402);
+      }
+    }
+
     const body = await req.json().catch(() => ({}));
     const concept: string | undefined = body.concept;
     const targetSize = Math.min(Math.max(body.target_size ?? 25, 12), 40);
