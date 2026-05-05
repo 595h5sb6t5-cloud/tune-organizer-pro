@@ -140,17 +140,10 @@ const Settings = () => {
             </div>
           </div>
 
-          <div className="p-6 rounded-2xl bg-primary text-primary-foreground">
-            <div className="flex items-center gap-2 mb-2">
-              <h3 className="font-heading text-lg">Premium Plan</h3>
-              <CheckCircle2 className="w-4 h-4 text-accent" />
-            </div>
-            <p className="text-sm opacity-80 mb-4">Unlimited imports, playlists, and exports. Renews Jan 15, 2027.</p>
-            <Button variant="warm" size="sm" className="rounded-lg opacity-60 cursor-not-allowed" disabled>
-              Manage Subscription — Coming Soon
-            </Button>
-          </div>
+          <UsageCard onUpgrade={() => setPaywallOpen(true)} />
         </div>
+
+        <PaywallDialog open={paywallOpen} onOpenChange={setPaywallOpen} />
       </div>
     </AppLayout>
   );
