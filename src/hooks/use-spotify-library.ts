@@ -402,7 +402,7 @@ export function useSpotifyLibrary() {
     } finally {
       setSyncing(false);
     }
-  }, [syncing, user, spotifyConnected, invokeSync, refreshLiked, refreshAlbums, refreshPlaylists, refreshArtists, loadSyncMeta, setStage]);
+  }, [syncing, user, spotifyConnected, invokeSync, refreshLiked, refreshAlbums, refreshPlaylists, refreshArtists, loadSyncMeta, setStage, jobsApi]);
 
   useEffect(() => {
     void refresh();
