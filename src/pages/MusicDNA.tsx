@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
 import { useMusicDna, type PlaylistConcept } from "@/hooks/use-music-dna";
 import { useSpotifyLibrary } from "@/hooks/use-spotify-library";
+import { useDeepTrackAnalysis } from "@/hooks/use-deep-track-analysis";
+import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
