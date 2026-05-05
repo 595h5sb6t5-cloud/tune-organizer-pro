@@ -47,7 +47,7 @@ export interface SavedAlbum {
 }
 
 /** Each stage the sync pipeline goes through, in order */
-export type SyncStage = "liked_songs" | "albums" | "playlists" | "artists" | "analysis";
+export type SyncStage = "profile" | "liked_songs" | "albums" | "playlists" | "artists" | "tops" | "analysis";
 
 export type StageStatus = "pending" | "active" | "done" | "error" | "skipped";
 
@@ -110,10 +110,12 @@ async function fetchAllRows<T>(
 }
 
 const INITIAL_STAGES: SyncStageState[] = [
-  { stage: "liked_songs", label: "Liked songs", status: "pending" },
-  { stage: "albums", label: "Saved albums", status: "pending" },
-  { stage: "playlists", label: "Playlists", status: "pending" },
-  { stage: "artists", label: "Followed artists", status: "pending" },
+  { stage: "profile", label: "Reading your profile", status: "pending" },
+  { stage: "liked_songs", label: "Importing liked songs", status: "pending" },
+  { stage: "albums", label: "Importing saved albums", status: "pending" },
+  { stage: "playlists", label: "Importing playlists", status: "pending" },
+  { stage: "artists", label: "Importing followed artists", status: "pending" },
+  { stage: "tops", label: "Top tracks & recent plays", status: "pending" },
   { stage: "analysis", label: "Audio analysis", status: "pending" },
 ];
 
@@ -261,10 +263,20 @@ export function useSpotifyLibrary() {
     const combinedResult: Record<string, any> = { success: true };
 
     try {
+      setStage("profile", "active");
+      try {
+        const ext = await supabase.functions.invoke("spotify-sync-extras", { body: {} });
+        if (ext.error || ext.data?.error) throw new Error(ext.error?.message || ext.data?.error);
+        setStage("profile", "done", "ready");
+      } catch (e: any) {
+        setStage("profile", "skipped", e.message);
+      }
+      if (abortRef.current) return;
+
       setStage("liked_songs", "active");
       const likedRes = await invokeSync("liked", forceFullSync);
       Object.assign(combinedResult, likedRes);
-      setStage("liked_songs", "done", `+${likedRes.liked_songs_added ?? 0}`);
+      setStage("liked_songs", "done", `${likedRes.liked_songs_added ?? 0} new`);
       await refreshLiked();
       if (abortRef.current) return;
 
@@ -299,6 +311,15 @@ export function useSpotifyLibrary() {
       setStage("artists", "done", `+${artRes.artists_added ?? 0}`);
       await refreshArtists();
       if (abortRef.current) return;
+
+      setStage("tops", "active");
+      try {
+        const tops = await supabase.functions.invoke("spotify-sync-extras", { body: {} });
+        const t = tops.data ?? {};
+        setStage("tops", "done", `${t.top_tracks ?? 0} tops · ${t.recent_plays ?? 0} recent`);
+      } catch {
+        setStage("tops", "skipped");
+      }
 
       setStage("analysis", "active");
       try {
