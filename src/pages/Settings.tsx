@@ -33,6 +33,7 @@ const Settings = () => {
   const [overlapMode, setOverlapMode] = useState(false);
   const [excludeExplicit, setExcludeExplicit] = useState(false);
   const [visibility, setVisibility] = useState<"Private" | "Public">("Private");
+  const [paywallOpen, setPaywallOpen] = useState(false);
 
   const spotifyConnected = profile?.spotify_connected || spotifyStatus === "connected" || spotifyStatus === "complete";
   const spotifyBusy = useMemo(() => ["connecting", "authorizing", "importing"].includes(spotifyStatus), [spotifyStatus]);
