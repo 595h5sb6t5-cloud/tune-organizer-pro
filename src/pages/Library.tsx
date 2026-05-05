@@ -192,21 +192,17 @@ const LibraryPage = () => {
             {savedAlbums.length > 0 && (
               <HorizontalRow title="Saved Albums" icon={<Disc3 className="w-5 h-5 text-accent" />} count={albumCount}>
                 {savedAlbums.map((album) => (
-                  <Link key={album.id} to={`/albums/${album.id}`} className="shrink-0 w-40 snap-start group">
+                  <div key={album.id} className="shrink-0 w-40 snap-start group">
                     <div className="aspect-square rounded-xl bg-secondary overflow-hidden mb-2 relative">
                       {album.image_url ? (
-                        <img src={album.image_url} alt={album.album_name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" loading="lazy" />
+                        <img src={album.image_url} alt={album.album_name} className="w-full h-full object-cover" loading="lazy" />
                       ) : (
                         <div className="w-full h-full flex items-center justify-center"><Disc3 className="w-10 h-10 text-muted-foreground" /></div>
                       )}
-                      {album.album_type && (
-                        <span className="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-muted/80 text-muted-foreground capitalize">{album.album_type}</span>
-                      )}
                     </div>
-                    <p className="text-sm font-medium truncate group-hover:text-accent transition-colors">{album.album_name}</p>
+                    <p className="text-sm font-medium truncate">{album.album_name}</p>
                     <p className="text-xs text-muted-foreground truncate">{album.artist_name}</p>
-                    <p className="text-[10px] text-muted-foreground/60">{album.total_tracks} tracks{album.release_date ? ` · ${album.release_date.slice(0, 4)}` : ""}</p>
-                  </Link>
+                  </div>
                 ))}
               </HorizontalRow>
             )}
@@ -257,7 +253,7 @@ const LibraryPage = () => {
             {/* CTA */}
             <div className="text-center pt-4">
               <Button variant="hero" asChild>
-                <Link to="/discover"><Sparkles className="w-4 h-4 mr-2" /> Discover New Music</Link>
+                <Link to="/playlists"><Sparkles className="w-4 h-4 mr-2" /> Generate AI Playlists</Link>
               </Button>
             </div>
           </div>
