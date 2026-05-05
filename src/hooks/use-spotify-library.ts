@@ -123,6 +123,7 @@ const INITIAL_STAGES: SyncStageState[] = [
 export function useSpotifyLibrary() {
   const { user, profile } = useAuth();
   const spotifyConnected = profile?.spotify_connected ?? false;
+  const jobsApi = useJobs();
 
   const [playlists, setPlaylists] = useState<SpotifyPlaylist[]>([]);
   const [likedSongs, setLikedSongs] = useState<LikedSong[]>([]);
