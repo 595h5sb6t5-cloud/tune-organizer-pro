@@ -702,6 +702,8 @@ async function syncPlaylists(
   }
   console.log(`[spotify-import-tracks] playlists to sync tracks: ${toSync.length}`);
   let totalTracks = 0;
+  let restrictedCount = 0;
+  let importedTracksPlaylistsCount = 0;
   const failedPlaylists: string[] = [];
 
   for (const pl of toSync) {
