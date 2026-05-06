@@ -1326,6 +1326,7 @@ export type Database = {
           image_url: string | null
           is_collaborative: boolean
           is_owned_by_user: boolean
+          is_public: boolean
           last_synced_at: string
           name: string
           owner_display_name: string | null
@@ -1333,7 +1334,11 @@ export type Database = {
           source_type: string | null
           spotify_owner_id: string | null
           spotify_playlist_id: string
+          spotify_total_tracks: number
+          spotify_url: string | null
           track_count: number
+          tracks_import_error: string | null
+          tracks_import_status: string
           updated_at: string
           user_id: string
         }
@@ -1344,6 +1349,7 @@ export type Database = {
           image_url?: string | null
           is_collaborative?: boolean
           is_owned_by_user?: boolean
+          is_public?: boolean
           last_synced_at?: string
           name: string
           owner_display_name?: string | null
@@ -1351,7 +1357,11 @@ export type Database = {
           source_type?: string | null
           spotify_owner_id?: string | null
           spotify_playlist_id: string
+          spotify_total_tracks?: number
+          spotify_url?: string | null
           track_count?: number
+          tracks_import_error?: string | null
+          tracks_import_status?: string
           updated_at?: string
           user_id: string
         }
@@ -1362,6 +1372,7 @@ export type Database = {
           image_url?: string | null
           is_collaborative?: boolean
           is_owned_by_user?: boolean
+          is_public?: boolean
           last_synced_at?: string
           name?: string
           owner_display_name?: string | null
@@ -1369,7 +1380,11 @@ export type Database = {
           source_type?: string | null
           spotify_owner_id?: string | null
           spotify_playlist_id?: string
+          spotify_total_tracks?: number
+          spotify_url?: string | null
           track_count?: number
+          tracks_import_error?: string | null
+          tracks_import_status?: string
           updated_at?: string
           user_id?: string
         }
