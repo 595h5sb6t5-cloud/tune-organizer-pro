@@ -532,25 +532,44 @@ Deno.serve(async (req) => {
     }
 
     /* ═══ RUN PIPELINE (user-facing dispatcher) ═══ */
-    if (mode === "run_pipeline") {
+    /* Also handles RESUME of a previously failed/paused job (no work is lost). */
+    if (mode === "run_pipeline" || mode === "resume_pipeline") {
       if (!jobId) return json({ error: "job_id required" }, 400);
 
-      // Check job is still valid
-      const { data: checkJob } = await adm.from("playlist_generation_jobs").select("status").eq("id", jobId).single();
-      if (!checkJob || ["completed", "failed", "cancelled"].includes(checkJob.status)) {
-        return json({ error: "Job already terminated" }, 400);
+      const { data: checkJob } = await adm
+        .from("playlist_generation_jobs")
+        .select("status, phase")
+        .eq("id", jobId)
+        .single();
+      if (!checkJob) return json({ error: "Job not found" }, 404);
+
+      const isResumable =
+        checkJob.status === "failed" ||
+        checkJob.status === "paused_waiting_for_next_chunk" ||
+        checkJob.status === "running" ||
+        checkJob.status === "pending";
+
+      if (checkJob.status === "completed" || checkJob.status === "cancelled") {
+        return json({ error: "Job already terminated", status: checkJob.status }, 400);
       }
+      if (mode === "run_pipeline" && !isResumable) {
+        return json({ error: "Job not in a runnable state", status: checkJob.status }, 400);
+      }
+
+      // Pick a sensible phase: keep current one if mid-pipeline, else start at tagging.
+      const resumePhase =
+        checkJob.phase && checkJob.phase !== "queued" && checkJob.phase !== "failed"
+          ? checkJob.phase
+          : "tagging";
 
       await updateJob(adm, jobId, {
         status: "running",
-        phase: "tagging",
+        phase: resumePhase,
         started_at: new Date().toISOString(),
-        status_message: "Preparing library…",
+        status_message: mode === "resume_pipeline" ? "Resuming…" : "Preparing library…",
         error_message: null,
       });
 
-      // Fire-and-forget: dispatch first step without blocking
-      // We can't await queueNextStep because fetch() blocks until process_step finishes
       const dispatchPromise = queueNextStep(functionUrl, anon, svc, jobId, userId, forceRetag);
       // @ts-ignore EdgeRuntime is a Deno Deploy global
       if (typeof EdgeRuntime !== "undefined" && EdgeRuntime.waitUntil) {
@@ -559,7 +578,7 @@ Deno.serve(async (req) => {
         dispatchPromise.catch(e => console.error("[pipeline] dispatch error:", e));
       }
 
-      return json({ success: true, job_id: jobId, message: "Pipeline started" }, 202);
+      return json({ success: true, job_id: jobId, phase: resumePhase, message: "Pipeline running" }, 202);
     }
 
     /* ═══ PROCESS STEP (internal, self-chaining) ═══ */
