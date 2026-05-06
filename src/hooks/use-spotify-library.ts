@@ -33,6 +33,8 @@ export interface FollowedArtist {
   image_url: string | null;
   genres: string[];
   popularity: number | null;
+  top_tracks_count?: number | null;
+  top_tracks_synced_at?: string | null;
 }
 
 export interface SavedAlbum {
