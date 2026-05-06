@@ -30,6 +30,9 @@ interface SpotifyPlaylistInfo {
   description: string | null;
   image_url: string | null;
   track_count: number;
+  spotify_total_tracks: number;
+  tracks_import_status: string | null;
+  tracks_import_error: string | null;
   is_owned_by_user: boolean;
   is_collaborative: boolean;
   owner_display_name: string | null;
