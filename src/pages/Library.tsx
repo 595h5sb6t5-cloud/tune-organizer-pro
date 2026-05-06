@@ -1,11 +1,12 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import AppLayout from "@/components/app/AppLayout";
 import { Button } from "@/components/ui/button";
 import { ListMusic, Sparkles, Headphones, Music, RefreshCw, Loader2, Heart, Users, CheckCircle2, AlertCircle, Circle, Disc3, ChevronRight } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useAuth } from "@/hooks/use-auth";
-import { useSpotifyLibrary, type SyncStageState } from "@/hooks/use-spotify-library";
+import { useSpotifyLibrary, type SyncStageState, type FollowedArtist } from "@/hooks/use-spotify-library";
 import { HorizontalRow } from "@/components/app/HorizontalRow";
+import { ArtistTracksDialog } from "@/components/app/ArtistTracksDialog";
 import { toast } from "sonner";
 
 function StageIcon({ status }: { status: SyncStageState["status"] }) {
@@ -26,6 +27,7 @@ function StageIcon({ status }: { status: SyncStageState["status"] }) {
 const LibraryPage = () => {
   const { profile } = useAuth();
   const spotifyConnected = profile?.spotify_connected ?? false;
+  const [openArtist, setOpenArtist] = useState<FollowedArtist | null>(null);
   const {
     playlists,
     likedSongs,
@@ -234,21 +236,39 @@ const LibraryPage = () => {
             {/* Followed Artists — horizontal scroll */}
             {followedArtists.length > 0 && (
               <HorizontalRow title="Followed Artists" icon={<Users className="w-5 h-5 text-accent" />} count={followedArtists.length}>
-                {followedArtists.map((artist) => (
-                  <div key={artist.id} className="shrink-0 w-32 snap-start text-center">
-                    {artist.image_url ? (
-                      <img src={artist.image_url} alt={artist.artist_name} className="w-24 h-24 rounded-full object-cover mx-auto mb-2" loading="lazy" />
-                    ) : (
-                      <div className="w-24 h-24 rounded-full bg-secondary flex items-center justify-center mx-auto mb-2">
-                        <Users className="w-8 h-8 text-muted-foreground" />
-                      </div>
-                    )}
-                    <p className="text-xs font-medium truncate">{artist.artist_name}</p>
-                    {artist.genres.length > 0 && <p className="text-[10px] text-muted-foreground truncate">{artist.genres[0]}</p>}
-                  </div>
-                ))}
+                {followedArtists.map((artist) => {
+                  const pending = (artist.top_tracks_count ?? 0) === 0 && !artist.top_tracks_synced_at;
+                  return (
+                    <button
+                      key={artist.id}
+                      type="button"
+                      onClick={() => setOpenArtist(artist)}
+                      className="shrink-0 w-32 snap-start text-center group focus:outline-none"
+                    >
+                      {artist.image_url ? (
+                        <img src={artist.image_url} alt={artist.artist_name} className="w-24 h-24 rounded-full object-cover mx-auto mb-2 group-hover:ring-2 group-hover:ring-accent transition" loading="lazy" />
+                      ) : (
+                        <div className="w-24 h-24 rounded-full bg-secondary flex items-center justify-center mx-auto mb-2">
+                          <Users className="w-8 h-8 text-muted-foreground" />
+                        </div>
+                      )}
+                      <p className="text-xs font-medium truncate group-hover:text-accent">{artist.artist_name}</p>
+                      <p className="text-[10px] text-muted-foreground truncate">
+                        {pending
+                          ? "tracks pending import"
+                          : `${artist.top_tracks_count ?? 0} top tracks`}
+                      </p>
+                    </button>
+                  );
+                })}
               </HorizontalRow>
             )}
+
+            <ArtistTracksDialog
+              open={!!openArtist}
+              onOpenChange={(o) => !o && setOpenArtist(null)}
+              artist={openArtist}
+            />
 
             {/* CTA */}
             <div className="text-center pt-4">

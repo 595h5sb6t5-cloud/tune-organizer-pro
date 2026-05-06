@@ -769,7 +769,7 @@ async function syncPlaylists(
  */
 async function syncFollowedArtists(
   adminClient: any, userId: string, token: string, existingArtistIds: Set<string>
-): Promise<{ added: number; removed: number; total: number }> {
+): Promise<{ added: number; removed: number; total: number; top_tracks_imported?: number; artists_with_top_tracks?: number }> {
   const artists: any[] = [];
   const spotifyArtistIds = new Set<string>();
   let after: string | null = null;
@@ -805,10 +805,10 @@ async function syncFollowedArtists(
   } catch (e) {
     if (isInsufficientScopeError(e)) {
       console.warn("[spotify-import-tracks] followed artists skipped - missing scope");
-      return { added: 0, removed: 0, total: 0 };
+      return { added: 0, removed: 0, total: 0, top_tracks_imported: 0, artists_with_top_tracks: 0 };
     }
     console.warn("[spotify-import-tracks] followed artists import failed:", e);
-    return { added: 0, removed: 0, total: 0 };
+    return { added: 0, removed: 0, total: 0, top_tracks_imported: 0, artists_with_top_tracks: 0 };
   }
 
   for (let i = 0; i < artists.length; i += 50) {
@@ -816,6 +816,101 @@ async function syncFollowedArtists(
       artists.slice(i, i + 50),
       { onConflict: "user_id,spotify_artist_id" }
     );
+  }
+
+  // Mirror to global `artists` table so they're available everywhere
+  if (artists.length) {
+    const globalRows = artists.map((a) => ({
+      spotify_artist_id: a.spotify_artist_id,
+      name: a.artist_name,
+      genres: a.genres ?? [],
+      popularity: a.popularity,
+      followers_count: a.follower_count,
+      image_url: a.image_url,
+    }));
+    for (let i = 0; i < globalRows.length; i += 100) {
+      await adminClient.from("artists").upsert(globalRows.slice(i, i + 100), { onConflict: "spotify_artist_id" });
+    }
+  }
+
+  // ── Fetch top tracks per followed artist (best-effort, batched) ──
+  let topTracksImported = 0;
+  let artistsWithTopTracks = 0;
+  const country = "US"; // Spotify accepts any market; "from_token" requires user-read scope which we already have but US is safest
+  for (const a of artists) {
+    try {
+      const tt = await spotifyGet(
+        `https://api.spotify.com/v1/artists/${a.spotify_artist_id}/top-tracks?market=${country}`,
+        token,
+      );
+      const items: any[] = tt?.tracks ?? [];
+      if (!items.length) {
+        await adminClient.from("spotify_followed_artists").update({
+          top_tracks_synced_at: new Date().toISOString(),
+          top_tracks_count: 0,
+        }).eq("user_id", userId).eq("spotify_artist_id", a.spotify_artist_id);
+        continue;
+      }
+
+      // Upsert albums first
+      const albumRows = items
+        .filter((t) => t.album)
+        .map((t) => ({
+          spotify_album_id: t.album.id,
+          name: t.album.name,
+          artist_names: (t.album.artists ?? []).map((x: any) => x.name),
+          release_date: t.album.release_date ?? null,
+          album_type: t.album.album_type ?? null,
+          total_tracks: t.album.total_tracks ?? null,
+          image_url: t.album.images?.[0]?.url ?? null,
+          spotify_url: t.album.external_urls?.spotify ?? null,
+        }));
+      if (albumRows.length) {
+        await adminClient.from("albums").upsert(albumRows, { onConflict: "spotify_album_id" });
+      }
+      const albumIds = albumRows.map((r) => r.spotify_album_id);
+      const { data: albumsData } = albumIds.length
+        ? await adminClient.from("albums").select("id, spotify_album_id").in("spotify_album_id", albumIds)
+        : { data: [] as any[] };
+      const albumMap = new Map((albumsData ?? []).map((r: any) => [r.spotify_album_id, r.id]));
+
+      const trackRows = items.map((t) => ({
+        spotify_track_id: t.id,
+        name: t.name,
+        artist_names: (t.artists ?? []).map((x: any) => x.name),
+        album_name: t.album?.name ?? null,
+        album_id: t.album ? albumMap.get(t.album.id) ?? null : null,
+        duration_ms: t.duration_ms ?? null,
+        explicit: !!t.explicit,
+        popularity: t.popularity ?? null,
+        preview_url: t.preview_url ?? null,
+        spotify_url: t.external_urls?.spotify ?? null,
+        release_date: t.album?.release_date ?? null,
+      }));
+      await adminClient.from("tracks").upsert(trackRows, { onConflict: "spotify_track_id" });
+
+      const linkRows = items.map((t) => ({
+        user_id: userId,
+        artist_spotify_id: a.spotify_artist_id,
+        track_spotify_id: t.id,
+        source: "top_tracks",
+      }));
+      await adminClient.from("artist_tracks").upsert(linkRows, {
+        onConflict: "user_id,artist_spotify_id,track_spotify_id,source",
+        ignoreDuplicates: true,
+      });
+
+      await adminClient.from("spotify_followed_artists").update({
+        top_tracks_synced_at: new Date().toISOString(),
+        top_tracks_count: items.length,
+      }).eq("user_id", userId).eq("spotify_artist_id", a.spotify_artist_id);
+
+      topTracksImported += items.length;
+      artistsWithTopTracks++;
+    } catch (e) {
+      console.warn(`[spotify-import-tracks] top-tracks failed for ${a.spotify_artist_id}:`, e);
+      // continue silently — artist remains in pending state
+    }
   }
 
   let removedCount = 0;
@@ -826,12 +921,19 @@ async function syncFollowedArtists(
   if (toRemove.length > 0) {
     for (let i = 0; i < toRemove.length; i += 100) {
       await adminClient.from("spotify_followed_artists").delete().eq("user_id", userId).in("spotify_artist_id", toRemove.slice(i, i + 100));
+      await adminClient.from("artist_tracks").delete().eq("user_id", userId).in("artist_spotify_id", toRemove.slice(i, i + 100));
     }
     removedCount = toRemove.length;
   }
 
   const addedCount = artists.filter(a => !existingArtistIds.has(a.spotify_artist_id)).length;
-  return { added: addedCount, removed: removedCount, total: artists.length };
+  return {
+    added: addedCount,
+    removed: removedCount,
+    total: artists.length,
+    top_tracks_imported: topTracksImported,
+    artists_with_top_tracks: artistsWithTopTracks,
+  };
 }
 
 // ─── Main handler ───
@@ -985,6 +1087,8 @@ Deno.serve(async (req) => {
       result.artists_total = artistResult.total;
       result.artists_added = artistResult.added;
       result.artists_removed = artistResult.removed;
+      result.artist_top_tracks_imported = artistResult.top_tracks_imported ?? 0;
+      result.artists_with_top_tracks = artistResult.artists_with_top_tracks ?? 0;
       console.log("[spotify-import-tracks] followed_artists_done", artistResult);
       await adminClient.from("spotify_connections").update({ last_artist_sync_at: now }).eq("user_id", user.id);
     }

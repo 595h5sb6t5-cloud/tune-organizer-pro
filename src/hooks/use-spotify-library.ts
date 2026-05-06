@@ -33,6 +33,8 @@ export interface FollowedArtist {
   image_url: string | null;
   genres: string[];
   popularity: number | null;
+  top_tracks_count?: number | null;
+  top_tracks_synced_at?: string | null;
 }
 
 export interface SavedAlbum {
@@ -206,7 +208,7 @@ export function useSpotifyLibrary() {
     if (!user) return;
     const all = await fetchAllRows<FollowedArtist>(
       "spotify_followed_artists",
-      "id, spotify_artist_id, artist_name, image_url, genres, popularity",
+      "id, spotify_artist_id, artist_name, image_url, genres, popularity, top_tracks_count, top_tracks_synced_at",
       user.id,
       "artist_name",
       true,
