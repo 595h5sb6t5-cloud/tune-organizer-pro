@@ -585,6 +585,7 @@ const PlaylistDetail = () => {
         expected > 0 &&
         loaded.tracks.length === 0 &&
         loaded.playlist.tracks_import_status !== "failed" &&
+        loaded.playlist.tracks_import_status !== "restricted" &&
         attemptedTrackRecoveryRef.current !== id
       ) {
         attemptedTrackRecoveryRef.current = id;
@@ -878,23 +879,33 @@ const PlaylistDetail = () => {
             (() => {
               const expected = playlist?.spotify_total_tracks ?? playlist?.track_count ?? 0;
               const status = playlist?.tracks_import_status;
+              const isRestricted = status === "restricted";
               const isFailed = status === "failed";
               const isProcessing = status === "processing" || recoveringTracks;
-              const isTrulyEmpty = expected === 0 && !isProcessing && !isFailed;
+              const isTrulyEmpty = expected === 0 && !isProcessing && !isFailed && !isRestricted;
 
               let message: string;
-              if (isProcessing) message = "Importando canciones desde Spotify…";
+              if (isRestricted) message = "Spotify no permite leer las canciones de esta playlist desde la API en Development Mode.";
+              else if (isProcessing) message = "Importando canciones desde Spotify…";
               else if (isFailed) message = "No pudimos cargar las canciones. Reintentar.";
               else if (isTrulyEmpty) message = "Esta playlist no tiene canciones.";
               else message = `Esta playlist tiene ${expected} canciones en Spotify pero aún no se han importado.`;
 
               return (
                 <div className="text-center py-12 space-y-3">
-                  <p className="text-sm text-muted-foreground">{message}</p>
-                  {playlist?.tracks_import_error && (
+                  <p className="text-sm text-muted-foreground max-w-md mx-auto">{message}</p>
+                  {isRestricted && playlist?.spotify_playlist_id && (
+                    <Button variant="secondary" className="rounded-xl gap-2" asChild>
+                      <a href={`https://open.spotify.com/playlist/${playlist.spotify_playlist_id}`} target="_blank" rel="noopener noreferrer">
+                        <ExternalLink className="w-4 h-4" />
+                        Abrir en Spotify
+                      </a>
+                    </Button>
+                  )}
+                  {!isRestricted && playlist?.tracks_import_error && (
                     <p className="text-xs text-destructive/70">{playlist.tracks_import_error}</p>
                   )}
-                  {!isTrulyEmpty && (
+                  {!isTrulyEmpty && !isRestricted && (
                     <Button
                       variant="secondary"
                       className="rounded-xl gap-2"

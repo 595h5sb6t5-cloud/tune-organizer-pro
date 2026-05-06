@@ -795,12 +795,25 @@ async function syncPlaylists(
 
       totalTracks += finalCount;
     } catch (e) {
-      failedPlaylists.push(pl.name);
       const errMsg = e instanceof Error ? e.message : String(e);
-      console.warn(`[spotify-import-tracks] Failed to import tracks for playlist ${pl.name}:`, errMsg);
-      await adminClient.from("spotify_playlists")
-        .update({ tracks_import_status: "failed", tracks_import_error: errMsg })
-        .eq("id", dbId);
+      const status = e instanceof SpotifyImportError ? e.status : 0;
+      // Spotify Development Mode restricts /v1/playlists/{id}/tracks for many playlists.
+      // Mark as `restricted` (not `failed`) and keep going — never break the whole sync.
+      if (status === 403 || status === 401) {
+        console.warn(`[spotify-import-tracks] playlist "${pl.name}" restricted by Spotify API (${status}) — keeping metadata, skipping tracks`);
+        await adminClient.from("spotify_playlists")
+          .update({
+            tracks_import_status: "restricted",
+            tracks_import_error: "Spotify no permite leer las canciones de esta playlist desde la API en Development Mode.",
+          })
+          .eq("id", dbId);
+      } else {
+        failedPlaylists.push(pl.name);
+        console.warn(`[spotify-import-tracks] Failed to import tracks for playlist ${pl.name}:`, errMsg);
+        await adminClient.from("spotify_playlists")
+          .update({ tracks_import_status: "failed", tracks_import_error: errMsg })
+          .eq("id", dbId);
+      }
     }
   }
 
