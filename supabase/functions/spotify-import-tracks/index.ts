@@ -702,6 +702,8 @@ async function syncPlaylists(
   }
   console.log(`[spotify-import-tracks] playlists to sync tracks: ${toSync.length}`);
   let totalTracks = 0;
+  let restrictedCount = 0;
+  let importedTracksPlaylistsCount = 0;
   const failedPlaylists: string[] = [];
 
   for (const pl of toSync) {
@@ -794,6 +796,7 @@ async function syncPlaylists(
         .eq("id", dbId);
 
       totalTracks += finalCount;
+      importedTracksPlaylistsCount++;
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : String(e);
       const status = e instanceof SpotifyImportError ? e.status : 0;
@@ -801,6 +804,7 @@ async function syncPlaylists(
       // Mark as `restricted` (not `failed`) and keep going — never break the whole sync.
       if (status === 403 || status === 401) {
         console.warn(`[spotify-import-tracks] playlist "${pl.name}" restricted by Spotify API (${status}) — keeping metadata, skipping tracks`);
+        restrictedCount++;
         await adminClient.from("spotify_playlists")
           .update({
             tracks_import_status: "restricted",
@@ -824,7 +828,17 @@ async function syncPlaylists(
 
   const totalChanged = playlists.filter(pl => changedSet.has(pl.id)).length;
   const playlistsRemaining = Math.max(0, totalChanged - toSync.length);
-  return { total: playlists.length, changed: changedPlaylistIds.length, removed: removedCount, tracksSynced: totalTracks, playlistsRemaining, warning };
+  return {
+    total: playlists.length,
+    changed: changedPlaylistIds.length,
+    removed: removedCount,
+    tracksSynced: totalTracks,
+    playlistsRemaining,
+    warning,
+    restrictedCount,
+    importedTracksPlaylistsCount,
+    failedCount: failedPlaylists.length,
+  };
 }
 
 /**
@@ -899,6 +913,7 @@ async function syncFollowedArtists(
   // ── Fetch top tracks per followed artist (best-effort, batched) ──
   let topTracksImported = 0;
   let artistsWithTopTracks = 0;
+  let topTracksRestrictedCount = 0;
   const country = "US"; // Spotify accepts any market; "from_token" requires user-read scope which we already have but US is safest
   for (const a of artists) {
     try {
@@ -971,6 +986,10 @@ async function syncFollowedArtists(
       topTracksImported += items.length;
       artistsWithTopTracks++;
     } catch (e) {
+      const status = e instanceof SpotifyImportError ? e.status : 0;
+      if (status === 403 || status === 401) {
+        topTracksRestrictedCount++;
+      }
       console.warn(`[spotify-import-tracks] top-tracks failed for ${a.spotify_artist_id}:`, e);
       // continue silently — artist remains in pending state
     }
@@ -996,6 +1015,7 @@ async function syncFollowedArtists(
     total: artists.length,
     top_tracks_imported: topTracksImported,
     artists_with_top_tracks: artistsWithTopTracks,
+    top_tracks_restricted_count: topTracksRestrictedCount,
   };
 }
 
@@ -1131,6 +1151,9 @@ Deno.serve(async (req) => {
     }
 
     // Step 3: Playlists + playlist tracks
+    let playlistTracksRestricted = 0;
+    let playlistTracksImportedFor = 0;
+    let playlistTracksFailed = 0;
     if (syncScope === "all" || syncScope === "playlists") {
       step = "sync_playlists";
       const plResult = await syncPlaylists(adminClient, user.id, accessToken, spotifyUserId, existingSnapshots, targetPlaylistId);
@@ -1138,12 +1161,19 @@ Deno.serve(async (req) => {
       result.playlists_changed = plResult.changed;
       result.playlists_removed = plResult.removed;
       result.playlist_tracks_synced = plResult.tracksSynced;
+      result.playlists_restricted = plResult.restrictedCount ?? 0;
+      result.playlists_with_tracks_imported = plResult.importedTracksPlaylistsCount ?? 0;
+      result.playlists_failed = plResult.failedCount ?? 0;
+      playlistTracksRestricted = plResult.restrictedCount ?? 0;
+      playlistTracksImportedFor = plResult.importedTracksPlaylistsCount ?? 0;
+      playlistTracksFailed = plResult.failedCount ?? 0;
       if (plResult.warning) warnings.push(plResult.warning);
       console.log("[spotify-import-tracks] playlists_done", plResult);
       await adminClient.from("spotify_connections").update({ last_playlist_sync_at: now }).eq("user_id", user.id);
     }
 
     // Step 4: Followed artists
+    let artistTopTracksRestricted = 0;
     if (syncScope === "all" || syncScope === "artists") {
       step = "sync_followed_artists";
       const artistResult = await syncFollowedArtists(adminClient, user.id, accessToken, existingArtistIds);
@@ -1152,6 +1182,8 @@ Deno.serve(async (req) => {
       result.artists_removed = artistResult.removed;
       result.artist_top_tracks_imported = artistResult.top_tracks_imported ?? 0;
       result.artists_with_top_tracks = artistResult.artists_with_top_tracks ?? 0;
+      result.artists_top_tracks_restricted = artistResult.top_tracks_restricted_count ?? 0;
+      artistTopTracksRestricted = artistResult.top_tracks_restricted_count ?? 0;
       console.log("[spotify-import-tracks] followed_artists_done", artistResult);
       await adminClient.from("spotify_connections").update({ last_artist_sync_at: now }).eq("user_id", user.id);
     }
@@ -1162,8 +1194,56 @@ Deno.serve(async (req) => {
     syncUpdate.last_incremental_sync_at = now;
     await adminClient.from("spotify_connections").update(syncUpdate).eq("user_id", user.id);
 
-    result.partial_success = warnings.length > 0;
-    result.warnings = warnings;
+    // ── Compose final status with Spotify Development Mode awareness ──
+    const restrictionWarnings: string[] = [];
+    if (playlistTracksRestricted > 0) {
+      restrictionWarnings.push("Spotify blocked playlist tracks in Development Mode.");
+    }
+    if (artistTopTracksRestricted > 0) {
+      restrictionWarnings.push("Spotify blocked artist top tracks in Development Mode.");
+    }
+    const allWarnings = [...warnings, ...restrictionWarnings];
+
+    const hasRestrictions = playlistTracksRestricted > 0 || artistTopTracksRestricted > 0;
+    const hasRealFailure = playlistTracksFailed > 0;
+
+    result.warnings = allWarnings;
+    result.partial_success = hasRestrictions || allWarnings.length > 0;
+    result.status = hasRealFailure
+      ? "completed_with_errors"
+      : hasRestrictions
+        ? "completed_with_restrictions"
+        : "completed";
+
+    // Sources report — what worked vs what Spotify blocked
+    result.sources = {
+      imported: {
+        liked_songs: result.liked_songs_total ?? null,
+        saved_albums: result.albums_total ?? null,
+        followed_artists: result.artists_total ?? null,
+        playlists_metadata: result.playlists_total ?? null,
+        playlists_with_tracks: playlistTracksImportedFor,
+        artists_with_top_tracks: result.artists_with_top_tracks ?? 0,
+      },
+      restricted_by_spotify: {
+        playlist_tracks: playlistTracksRestricted,
+        artist_top_tracks: artistTopTracksRestricted,
+      },
+      ai_available: [
+        "liked_songs",
+        "saved_albums",
+        "followed_artists",
+        "playlists_metadata",
+      ],
+      ai_unavailable_until_extended_quota: [
+        ...(playlistTracksRestricted > 0 ? ["playlist_tracks"] : []),
+        ...(artistTopTracksRestricted > 0 ? ["artist_top_tracks"] : []),
+      ],
+    };
+
+    result.message = hasRestrictions
+      ? "Sync completed. Spotify Development Mode blocks some endpoints — the app works fully with liked songs, saved albums, followed artists, and playlist metadata."
+      : "Sync completed successfully.";
 
     return json(result);
   } catch (e) {
