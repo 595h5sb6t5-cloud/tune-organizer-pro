@@ -405,9 +405,12 @@ async function queueNextStep(
   functionUrl: string, anonKey: string, serviceKey: string,
   jobId: string, userId: string, forceRetag: boolean,
 ): Promise<boolean> {
-  // Fire-and-forget: just confirm the request was accepted, don't wait for processing
+  // TRUE fire-and-forget: dispatch the request and detach.
+  // We do NOT await the response — each chunk must run in its own isolate
+  // so the chain isn't bound to a single 5-min wall-clock invocation.
   try {
-    const res = await fetch(functionUrl, {
+    const ctrl = new AbortController();
+    const dispatched = fetch(functionUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -416,12 +419,16 @@ async function queueNextStep(
         [INTERNAL_HEADER]: "1",
       },
       body: JSON.stringify({ mode: "process_step", job_id: jobId, user_id: userId, force_retag: forceRetag }),
+      signal: ctrl.signal,
+    }).catch((e) => {
+      // Aborted on purpose once the receiver returns 202 — that's expected.
+      if (e?.name !== "AbortError") console.error("[pipeline] dispatch fetch err:", e?.message);
     });
-    // Don't await res.text() — the response won't arrive until the step finishes
-    // Just check that the function was invoked (status will be available from headers)
-    console.log(`[pipeline] queued next step, status: ${res.status}`);
-    // Consume body in background to prevent leak, but don't block on it
-    res.text().catch(() => {});
+    // Small flush window so the request leaves this isolate, then detach.
+    await new Promise((r) => setTimeout(r, 600));
+    ctrl.abort();
+    void dispatched;
+    console.log(`[pipeline] dispatched next chunk for job ${jobId}`);
     return true;
   } catch (e: any) {
     console.error(`[pipeline] queue error:`, e.message);
