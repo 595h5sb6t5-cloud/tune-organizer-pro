@@ -633,20 +633,23 @@ async function syncPlaylists(
   }
 
   let removedCount = 0;
-  for (const dbPl of dbPlaylists || []) {
-    if (!currentSpotifyIds.has(dbPl.spotify_playlist_id)) {
-      await ensureDbWrite(
-        adminClient.from("spotify_playlist_tracks").delete().eq("playlist_id", dbPl.id),
-        "sync_playlists_cleanup_tracks",
-        { playlist_id: dbPl.id, spotify_playlist_id: dbPl.spotify_playlist_id },
-      );
-      await adminClient.from("playlist_vibe_analysis").delete().eq("playlist_id", dbPl.id);
-      await ensureDbWrite(
-        adminClient.from("spotify_playlists").delete().eq("id", dbPl.id),
-        "sync_playlists_cleanup_playlist",
-        { playlist_id: dbPl.id, spotify_playlist_id: dbPl.spotify_playlist_id },
-      );
-      removedCount++;
+  // Skip cleanup of "missing" playlists when in targeted mode — we only fetched one.
+  if (!targetPlaylistDbId) {
+    for (const dbPl of dbPlaylists || []) {
+      if (!currentSpotifyIds.has(dbPl.spotify_playlist_id)) {
+        await ensureDbWrite(
+          adminClient.from("spotify_playlist_tracks").delete().eq("playlist_id", dbPl.id),
+          "sync_playlists_cleanup_tracks",
+          { playlist_id: dbPl.id, spotify_playlist_id: dbPl.spotify_playlist_id },
+        );
+        await adminClient.from("playlist_vibe_analysis").delete().eq("playlist_id", dbPl.id);
+        await ensureDbWrite(
+          adminClient.from("spotify_playlists").delete().eq("id", dbPl.id),
+          "sync_playlists_cleanup_playlist",
+          { playlist_id: dbPl.id, spotify_playlist_id: dbPl.spotify_playlist_id },
+        );
+        removedCount++;
+      }
     }
   }
 
