@@ -504,6 +504,43 @@ async function syncPlaylists(
   let totalPl = Infinity;
   let warning: string | null = null;
 
+  // FAST PATH: targeted single-playlist sync.
+  // If we already have the playlist in DB, fetch only its metadata from Spotify
+  // instead of paginating through the entire library.
+  if (targetPlaylistDbId) {
+    const { data: existing } = await adminClient
+      .from("spotify_playlists")
+      .select("spotify_playlist_id")
+      .eq("id", targetPlaylistDbId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (existing?.spotify_playlist_id) {
+      try {
+        const pl = await spotifyGet(
+          `https://api.spotify.com/v1/playlists/${existing.spotify_playlist_id}?fields=id,name,description,images,collaborative,public,snapshot_id,owner(id,display_name),tracks(total)`,
+          token,
+        );
+        playlists.push({
+          id: pl.id,
+          name: pl.name || "Untitled",
+          description: pl.description || null,
+          image_url: pl.images?.[0]?.url || null,
+          track_count: pl.tracks?.total ?? 0,
+          owner_id: pl.owner?.id || "",
+          owner_display_name: pl.owner?.display_name || null,
+          is_owned: pl.owner?.id === spotifyUserId,
+          is_collaborative: pl.collaborative === true,
+          snapshot_id: pl.snapshot_id || null,
+        });
+        totalPl = 1;
+        offset = totalPl; // skip the listing loop below
+      } catch (e) {
+        console.warn("[spotify-import-tracks] targeted playlist fetch failed, falling back to full list", e);
+      }
+    }
+  }
+
+
   try {
     while (offset < totalPl) {
       const data = await spotifyGet(`https://api.spotify.com/v1/me/playlists?limit=50&offset=${offset}`, token);
