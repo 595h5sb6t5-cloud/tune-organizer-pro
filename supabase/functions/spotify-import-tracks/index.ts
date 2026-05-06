@@ -805,10 +805,10 @@ async function syncFollowedArtists(
   } catch (e) {
     if (isInsufficientScopeError(e)) {
       console.warn("[spotify-import-tracks] followed artists skipped - missing scope");
-      return { added: 0, removed: 0, total: 0 };
+      return { added: 0, removed: 0, total: 0, top_tracks_imported: 0, artists_with_top_tracks: 0 };
     }
     console.warn("[spotify-import-tracks] followed artists import failed:", e);
-    return { added: 0, removed: 0, total: 0 };
+    return { added: 0, removed: 0, total: 0, top_tracks_imported: 0, artists_with_top_tracks: 0 };
   }
 
   for (let i = 0; i < artists.length; i += 50) {
