@@ -184,6 +184,33 @@ export type Database = {
         }
         Relationships: []
       }
+      artist_tracks: {
+        Row: {
+          artist_spotify_id: string
+          created_at: string
+          id: string
+          source: string
+          track_spotify_id: string
+          user_id: string
+        }
+        Insert: {
+          artist_spotify_id: string
+          created_at?: string
+          id?: string
+          source?: string
+          track_spotify_id: string
+          user_id: string
+        }
+        Update: {
+          artist_spotify_id?: string
+          created_at?: string
+          id?: string
+          source?: string
+          track_spotify_id?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       artists: {
         Row: {
           created_at: string
@@ -1197,6 +1224,8 @@ export type Database = {
           image_url: string | null
           popularity: number | null
           spotify_artist_id: string
+          top_tracks_count: number
+          top_tracks_synced_at: string | null
           updated_at: string
           user_id: string
         }
@@ -1209,6 +1238,8 @@ export type Database = {
           image_url?: string | null
           popularity?: number | null
           spotify_artist_id: string
+          top_tracks_count?: number
+          top_tracks_synced_at?: string | null
           updated_at?: string
           user_id: string
         }
@@ -1221,6 +1252,8 @@ export type Database = {
           image_url?: string | null
           popularity?: number | null
           spotify_artist_id?: string
+          top_tracks_count?: number
+          top_tracks_synced_at?: string | null
           updated_at?: string
           user_id?: string
         }
