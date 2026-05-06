@@ -1,11 +1,12 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import AppLayout from "@/components/app/AppLayout";
 import { Button } from "@/components/ui/button";
 import { ListMusic, Sparkles, Headphones, Music, RefreshCw, Loader2, Heart, Users, CheckCircle2, AlertCircle, Circle, Disc3, ChevronRight } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useAuth } from "@/hooks/use-auth";
-import { useSpotifyLibrary, type SyncStageState } from "@/hooks/use-spotify-library";
+import { useSpotifyLibrary, type SyncStageState, type FollowedArtist } from "@/hooks/use-spotify-library";
 import { HorizontalRow } from "@/components/app/HorizontalRow";
+import { ArtistTracksDialog } from "@/components/app/ArtistTracksDialog";
 import { toast } from "sonner";
 
 function StageIcon({ status }: { status: SyncStageState["status"] }) {
