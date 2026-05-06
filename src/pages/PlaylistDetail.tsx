@@ -841,6 +841,16 @@ const PlaylistDetail = () => {
                   {exporting ? "Exporting…" : "Export to Spotify"}
                 </Button>
               )}
+              <Button
+                variant="ghost"
+                className="rounded-xl gap-2"
+                onClick={() => repairMissingTracks()}
+                disabled={recoveringTracks}
+                title="Re-importar canciones desde Spotify"
+              >
+                {recoveringTracks ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                Sync playlist tracks
+              </Button>
               {playlist.spotify_playlist_id && (
                 <Button variant="ghost" className="rounded-xl gap-2" asChild>
                   <a href={`https://open.spotify.com/playlist/${playlist.spotify_playlist_id}`} target="_blank" rel="noopener noreferrer">
