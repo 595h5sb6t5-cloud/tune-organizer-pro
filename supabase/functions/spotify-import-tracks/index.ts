@@ -796,6 +796,7 @@ async function syncPlaylists(
         .eq("id", dbId);
 
       totalTracks += finalCount;
+      importedTracksPlaylistsCount++;
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : String(e);
       const status = e instanceof SpotifyImportError ? e.status : 0;
@@ -803,6 +804,7 @@ async function syncPlaylists(
       // Mark as `restricted` (not `failed`) and keep going — never break the whole sync.
       if (status === 403 || status === 401) {
         console.warn(`[spotify-import-tracks] playlist "${pl.name}" restricted by Spotify API (${status}) — keeping metadata, skipping tracks`);
+        restrictedCount++;
         await adminClient.from("spotify_playlists")
           .update({
             tracks_import_status: "restricted",
