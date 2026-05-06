@@ -580,9 +580,11 @@ const PlaylistDetail = () => {
       const loaded = await loadPlaylistData();
       if (cancelled || !loaded?.playlist) return;
 
+      const expected = loaded.playlist.spotify_total_tracks || loaded.playlist.track_count || 0;
       if (
-        loaded.playlist.track_count > 0 &&
+        expected > 0 &&
         loaded.tracks.length === 0 &&
+        loaded.playlist.tracks_import_status !== "failed" &&
         attemptedTrackRecoveryRef.current !== id
       ) {
         attemptedTrackRecoveryRef.current = id;
