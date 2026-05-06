@@ -585,6 +585,7 @@ const PlaylistDetail = () => {
         expected > 0 &&
         loaded.tracks.length === 0 &&
         loaded.playlist.tracks_import_status !== "failed" &&
+        loaded.playlist.tracks_import_status !== "restricted" &&
         attemptedTrackRecoveryRef.current !== id
       ) {
         attemptedTrackRecoveryRef.current = id;
