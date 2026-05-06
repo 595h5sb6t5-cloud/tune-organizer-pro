@@ -1015,6 +1015,7 @@ async function syncFollowedArtists(
     total: artists.length,
     top_tracks_imported: topTracksImported,
     artists_with_top_tracks: artistsWithTopTracks,
+    top_tracks_restricted_count: topTracksRestrictedCount,
   };
 }
 
