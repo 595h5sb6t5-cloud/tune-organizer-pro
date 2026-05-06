@@ -27,6 +27,7 @@ function StageIcon({ status }: { status: SyncStageState["status"] }) {
 const LibraryPage = () => {
   const { profile } = useAuth();
   const spotifyConnected = profile?.spotify_connected ?? false;
+  const [openArtist, setOpenArtist] = useState<FollowedArtist | null>(null);
   const {
     playlists,
     likedSongs,
