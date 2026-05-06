@@ -864,28 +864,39 @@ const PlaylistDetail = () => {
             <span>Album</span>
             <span />
           </div>
-          {tracks.length === 0 ? (
-            <div className="text-center py-12 space-y-3">
-              <p className="text-sm text-muted-foreground">
-                {recoveringTracks
-                  ? "Refreshing playlist tracks from Spotify…"
-                  : playlist?.track_count > 0
-                    ? "This playlist exists in Spotify, but its tracks have not been stored locally yet."
-                    : "No tracks imported yet. Re-sync your library to load tracks."}
-              </p>
-              {playlist?.track_count > 0 && (
-                <Button
-                  variant="secondary"
-                  className="rounded-xl gap-2"
-                  onClick={() => repairMissingTracks()}
-                  disabled={recoveringTracks}
-                >
-                  {recoveringTracks ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-                  {recoveringTracks ? "Refreshing tracks…" : "Refresh playlist tracks"}
-                </Button>
-              )}
-            </div>
-          ) : (
+          {tracks.length === 0 ? (() => {
+            const expected = playlist?.spotify_total_tracks ?? playlist?.track_count ?? 0;
+            const status = playlist?.tracks_import_status;
+            const isFailed = status === "failed";
+            const isProcessing = status === "processing" || recoveringTracks;
+            const isTrulyEmpty = expected === 0 && !isProcessing && !isFailed;
+
+            let message: string;
+            if (isProcessing) message = "Importando canciones desde Spotify…";
+            else if (isFailed) message = "No pudimos cargar las canciones. Reintentar.";
+            else if (isTrulyEmpty) message = "Esta playlist no tiene canciones.";
+            else message = `Esta playlist tiene ${expected} canciones en Spotify pero aún no se han importado.`;
+
+            return (
+              <div className="text-center py-12 space-y-3">
+                <p className="text-sm text-muted-foreground">{message}</p>
+                {playlist?.tracks_import_error && (
+                  <p className="text-xs text-destructive/70">{playlist.tracks_import_error}</p>
+                )}
+                {!isTrulyEmpty && (
+                  <Button
+                    variant="secondary"
+                    className="rounded-xl gap-2"
+                    onClick={() => repairMissingTracks()}
+                    disabled={recoveringTracks}
+                  >
+                    {recoveringTracks ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                    {recoveringTracks ? "Sincronizando…" : "Sync playlist tracks"}
+                  </Button>
+                )}
+              </div>
+            );
+          })() : (
             tracks.map((track, i) => (
               <div key={track.id} className={`group grid ${canEdit ? "grid-cols-[40px_1fr_1fr_80px]" : "grid-cols-[40px_1fr_1fr_40px]"} gap-4 px-5 py-3 items-center hover:bg-secondary/30 transition-colors`}>
                 <span className="text-sm text-muted-foreground">{i + 1}</span>
