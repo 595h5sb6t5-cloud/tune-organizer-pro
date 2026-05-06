@@ -558,15 +558,16 @@ async function syncPlaylists(
     return "saved";
   }
 
-  // IMPORTANT: Do NOT store Spotify's reported track_count here.
-  // track_count is only updated AFTER tracks are actually inserted into DB (see below).
+  // Persist Spotify's reported total in spotify_total_tracks so the UI can detect missing tracks.
+  // track_count remains the verified count of imported rows (set after track import).
   const playlistRows = playlists.map(pl => ({
     user_id: userId,
     spotify_playlist_id: pl.id,
     name: pl.name,
     description: pl.description,
     image_url: pl.image_url,
-    // track_count intentionally omitted — will be set after track import
+    spotify_total_tracks: pl.track_count,
+    spotify_url: `https://open.spotify.com/playlist/${pl.id}`,
     spotify_owner_id: pl.owner_id,
     owner_display_name: pl.owner_display_name,
     is_owned_by_user: pl.is_owned,
