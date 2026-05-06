@@ -7,11 +7,35 @@ const corsHeaders = {
 const json = (b: unknown, s = 200) =>
   new Response(JSON.stringify(b), { status: s, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
+interface IntentProfile {
+  playlist_name: string;
+  interpreted_meaning: string;
+  emotional_context: string[];
+  use_case: string[];
+  desired_energy_range: string;
+  desired_tempo_range: string;
+  desired_moods: string[];
+  desired_genres: string[];
+  allowed_subgenres: string[];
+  avoided_genres: string[];
+  desired_instrumentation: string[];
+  vocal_style: string[];
+  lyrical_themes: string[];
+  production_style: string[];
+  compatibility_rules: string[];
+  exclusion_rules: string[];
+}
+
 interface Candidate {
-  title: string;
+  track_name: string;
   artist: string;
-  reason: string;
   fit_score: number;
+  reason_for_recommendation: string;
+  matched_moods: string[];
+  matched_contexts: string[];
+  matched_audio_features: string[];
+  possible_issue: string;
+  final_decision: "recommend" | "skip";
 }
 
 async function refreshSpotifyToken(supabase: any, userId: string) {
@@ -46,6 +70,78 @@ async function refreshSpotifyToken(supabase: any, userId: string) {
   return conn.access_token as string;
 }
 
+async function buildIntentProfile(
+  openaiKey: string,
+  pl: { name: string; concept: string | null; vibe: string | null; context: string | null; description: string | null },
+  seedTracks: string[],
+  sonicProfile: any,
+): Promise<IntentProfile> {
+  const systemPrompt = `You are a senior music curator. Given a playlist concept, interpret its DEEP musical meaning into a structured intent profile.
+Do NOT be literal about the playlist name. Decode the emotional, contextual and sonic meaning behind it.
+For example: "Late Night Drives" is NOT just any night song — it implies smooth low-medium energy, nocturnal atmosphere, introspective mood, soft production, steady relaxed tempo (~70-115 BPM), cinematic feel.
+Return STRICT JSON matching the schema. All fields required. Lists must contain concrete musical descriptors, not vague terms.`;
+
+  const userPrompt = JSON.stringify({
+    playlist: pl,
+    seed_tracks_in_playlist: seedTracks.slice(0, 15),
+    user_sonic_profile: sonicProfile,
+    schema: {
+      playlist_name: "string",
+      interpreted_meaning: "string — explain what this playlist is REALLY about, beyond the name",
+      emotional_context: ["string"],
+      use_case: ["string"],
+      desired_energy_range: "string e.g. 'low-medium to medium'",
+      desired_tempo_range: "string e.g. '70-115 BPM'",
+      desired_moods: ["string"],
+      desired_genres: ["string"],
+      allowed_subgenres: ["string"],
+      avoided_genres: ["string"],
+      desired_instrumentation: ["string"],
+      vocal_style: ["string"],
+      lyrical_themes: ["string"],
+      production_style: ["string"],
+      compatibility_rules: ["string"],
+      exclusion_rules: ["string — concrete rules the recommender MUST respect"],
+    },
+  });
+
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${openaiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "gpt-4o-mini",
+      response_format: { type: "json_object" },
+      temperature: 0.4,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+    }),
+  });
+  if (!res.ok) throw new Error(`Intent profile AI error: ${await res.text()}`);
+  const data = await res.json();
+  const parsed = JSON.parse(data.choices?.[0]?.message?.content ?? "{}");
+  // Minimal sanity defaults
+  return {
+    playlist_name: parsed.playlist_name ?? pl.name,
+    interpreted_meaning: parsed.interpreted_meaning ?? "",
+    emotional_context: parsed.emotional_context ?? [],
+    use_case: parsed.use_case ?? [],
+    desired_energy_range: parsed.desired_energy_range ?? "",
+    desired_tempo_range: parsed.desired_tempo_range ?? "",
+    desired_moods: parsed.desired_moods ?? [],
+    desired_genres: parsed.desired_genres ?? [],
+    allowed_subgenres: parsed.allowed_subgenres ?? [],
+    avoided_genres: parsed.avoided_genres ?? [],
+    desired_instrumentation: parsed.desired_instrumentation ?? [],
+    vocal_style: parsed.vocal_style ?? [],
+    lyrical_themes: parsed.lyrical_themes ?? [],
+    production_style: parsed.production_style ?? [],
+    compatibility_rules: parsed.compatibility_rules ?? [],
+    exclusion_rules: parsed.exclusion_rules ?? [],
+  };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
@@ -55,10 +151,10 @@ Deno.serve(async (req) => {
     const { data: { user }, error: userErr } = await supabase.auth.getUser(token);
     if (userErr || !user) return json({ error: "Unauthorized" }, 401);
 
-    const { generated_playlist_id, count = 12 } = await req.json().catch(() => ({} as any));
+    const { generated_playlist_id, count = 12, force_reprofile = false } = await req.json().catch(() => ({} as any));
     if (!generated_playlist_id) return json({ error: "generated_playlist_id required" }, 400);
 
-    // Plan gating: monthly recommendation cap
+    // Plan gating
     const { data: sub } = await supabase
       .from("user_subscription")
       .select("plan, recommendations_limit, current_period_started_at")
@@ -84,10 +180,11 @@ Deno.serve(async (req) => {
       }
       effectiveCount = Math.min(effectiveCount, remaining);
     }
-    // Load playlist + tracks
+
+    // Load playlist
     const { data: pl } = await supabase
       .from("generated_playlists")
-      .select("id, name, concept, vibe, context, description")
+      .select("id, name, concept, vibe, context, description, intent_profile")
       .eq("id", generated_playlist_id)
       .eq("user_id", user.id)
       .single();
@@ -109,7 +206,7 @@ Deno.serve(async (req) => {
       return json({ error: "Playlist needs at least 3 tracks to generate recommendations" }, 400);
     }
 
-    // Build EXCLUSION set
+    // Exclusions
     const [
       { data: liked },
       { data: spotifyPlTracks },
@@ -133,7 +230,6 @@ Deno.serve(async (req) => {
       else alreadySuggestedKey.add(r.spotify_track_id);
     }
 
-    // Pull rejected reasons (artist+title hints)
     const { data: rejectedFull } = await supabase
       .from("recommendations")
       .select("track_name, artist_name")
@@ -144,7 +240,7 @@ Deno.serve(async (req) => {
       .map((r) => `${r.track_name} — ${r.artist_name}`)
       .filter(Boolean);
 
-    // Sonic profile from analysis (if available) for these tracks
+    // Sonic profile from analysis of seed tracks
     const seedSpotifyIds = playlistSeed.map((t) => t.spotify_track_id).filter(Boolean) as string[];
     const { data: trackRows } = await supabase
       .from("tracks")
@@ -188,40 +284,65 @@ Deno.serve(async (req) => {
       languages: top(aggregate.languages, 3),
     };
 
-    // Top artists & followed artists context
+    const openaiKey = Deno.env.get("OPENAI_API_KEY");
+    if (!openaiKey) return json({ error: "OPENAI_API_KEY missing" }, 500);
+
+    // STEP 1: Build (or reuse) the intent profile
+    let intent: IntentProfile | null = (pl.intent_profile as IntentProfile | null) ?? null;
+    if (!intent || force_reprofile) {
+      console.log("[recommend] Building deep intent profile for:", pl.name);
+      intent = await buildIntentProfile(
+        openaiKey,
+        { name: pl.name, concept: pl.concept, vibe: pl.vibe, context: pl.context, description: pl.description },
+        playlistSeed.map((t) => `${t.name} — ${(t.artists ?? []).join(", ")}`),
+        sonicProfile,
+      );
+      await supabase
+        .from("generated_playlists")
+        .update({ intent_profile: intent })
+        .eq("id", generated_playlist_id);
+    }
+
+    // STEP 2: Generate candidates strictly filtered by the intent profile
     const { data: topArtists } = await supabase
       .from("spotify_followed_artists")
       .select("artist_name, genres")
       .eq("user_id", user.id)
       .limit(40);
 
-    // Call OpenAI to generate candidates
-    const openaiKey = Deno.env.get("OPENAI_API_KEY");
-    if (!openaiKey) return json({ error: "OPENAI_API_KEY missing" }, 500);
+    const systemPrompt = `You are a senior music curator. You are given a deep INTENT PROFILE describing what a playlist is really about (its musical meaning, mood, energy, tempo, allowed/avoided genres, instrumentation, lyrical themes and exclusion rules).
 
-    const systemPrompt = `You are a senior music curator. Given a curated playlist concept and a listener's sonic profile, suggest NEW tracks that fit the playlist's vibe. Strict rules:
-- Do NOT suggest tracks already in the user's library or the playlist (lists provided).
-- Avoid tracks the user previously rejected.
-- Do NOT recommend by mainstream popularity alone; favor coherent sonic fit.
-- Match groove, production texture, energy, mood, era when possible.
-- Only mix languages if it makes musical sense for the concept.
-- Each suggestion needs a concrete reason describing the sonic fit.
-Return STRICT JSON: {"candidates":[{"title":"","artist":"","reason":"","fit_score":0.0}]}`;
+CRITICAL RULES:
+1. Recommend tracks that MATCH the interpreted_meaning, not the literal playlist name.
+2. NEVER recommend tracks just because they are popular.
+3. NEVER recommend tracks that break the playlist's mood, energy or tempo range.
+4. RESPECT every exclusion_rule and avoided_genres entry. If a track touches them, set final_decision = "skip".
+5. Each recommendation needs: a fit_score (0-1), a concrete reason_for_recommendation, matched_moods, matched_contexts, matched_audio_features, possible_issue ("none" if none), and final_decision ("recommend" or "skip").
+6. If you cannot clearly explain why a track fits the deep meaning, skip it.
+7. Avoid duplicates against the user's existing library and previously rejected tracks.
+
+Return STRICT JSON: {"candidates":[{...}]}`;
 
     const userPrompt = JSON.stringify({
-      playlist: {
-        name: pl.name,
-        concept: pl.concept,
-        vibe: pl.vibe,
-        context: pl.context,
-        description: pl.description,
-      },
-      sonic_profile: sonicProfile,
-      seed_tracks: playlistSeed.map((t) => `${t.name} — ${(t.artists ?? []).join(", ")}`).slice(0, 20),
-      followed_artists: (topArtists ?? []).slice(0, 20).map((a) => a.artist_name),
-      rejected_examples: rejectedHints.slice(0, 20),
-      avoid_titles_artists: "Avoid duplicates; we will deduplicate against the user library on our side.",
+      intent_profile: intent,
+      seed_tracks_in_playlist: playlistSeed.map((t) => `${t.name} — ${(t.artists ?? []).join(", ")}`).slice(0, 20),
+      user_sonic_profile: sonicProfile,
+      followed_artists_hint: (topArtists ?? []).slice(0, 20).map((a) => a.artist_name),
+      previously_rejected: rejectedHints.slice(0, 20),
       requested_count: effectiveCount,
+      output_schema: {
+        candidates: [{
+          track_name: "string",
+          artist: "string",
+          fit_score: "number 0..1",
+          reason_for_recommendation: "string — must reference specific intent fields",
+          matched_moods: ["string"],
+          matched_contexts: ["string"],
+          matched_audio_features: ["string"],
+          possible_issue: "string or 'none'",
+          final_decision: "recommend | skip",
+        }],
+      },
     });
 
     const aiRes = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -230,7 +351,7 @@ Return STRICT JSON: {"candidates":[{"title":"","artist":"","reason":"","fit_scor
       body: JSON.stringify({
         model: "gpt-4o-mini",
         response_format: { type: "json_object" },
-        temperature: 0.8,
+        temperature: 0.7,
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
@@ -250,24 +371,33 @@ Return STRICT JSON: {"candidates":[{"title":"","artist":"","reason":"","fit_scor
       return json({ error: "AI returned invalid JSON" }, 500);
     }
 
-    if (!candidates.length) return json({ error: "No candidates produced" }, 500);
+    // Filter: only "recommend" with fit_score >= 0.6 and a concrete reason
+    candidates = candidates.filter((c) =>
+      c &&
+      c.final_decision === "recommend" &&
+      typeof c.fit_score === "number" &&
+      c.fit_score >= 0.6 &&
+      typeof c.reason_for_recommendation === "string" &&
+      c.reason_for_recommendation.trim().length > 20
+    );
 
-    // Resolve candidates via Spotify search
+    if (!candidates.length) return json({ error: "No suitable candidates after intent filtering", intent_profile: intent }, 200);
+
+    // Resolve via Spotify
     const accessToken = await refreshSpotifyToken(supabase, user.id);
     if (!accessToken) return json({ error: "Spotify not connected" }, 400);
 
     const inserted: any[] = [];
     for (const c of candidates) {
-      if (!c.title || !c.artist) continue;
-      const q = encodeURIComponent(`track:"${c.title}" artist:"${c.artist}"`);
+      if (!c.track_name || !c.artist) continue;
+      const q = encodeURIComponent(`track:"${c.track_name}" artist:"${c.artist}"`);
       let sr = await fetch(`https://api.spotify.com/v1/search?q=${q}&type=track&limit=1`, {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
       let sd = await sr.json().catch(() => ({} as any));
       let item = sd?.tracks?.items?.[0];
       if (!item) {
-        // fallback fuzzy
-        const q2 = encodeURIComponent(`${c.title} ${c.artist}`);
+        const q2 = encodeURIComponent(`${c.track_name} ${c.artist}`);
         sr = await fetch(`https://api.spotify.com/v1/search?q=${q2}&type=track&limit=1`, {
           headers: { Authorization: `Bearer ${accessToken}` },
         });
@@ -289,8 +419,13 @@ Return STRICT JSON: {"candidates":[{"title":"","artist":"","reason":"","fit_scor
         album_name: item.album?.name ?? null,
         image_url: item.album?.images?.[0]?.url ?? null,
         preview_url: item.preview_url ?? null,
-        fit_score: typeof c.fit_score === "number" ? Math.max(0, Math.min(1, c.fit_score)) : 0.7,
-        recommendation_reason: c.reason ?? null,
+        fit_score: Math.max(0, Math.min(1, c.fit_score)),
+        recommendation_reason: c.reason_for_recommendation,
+        matched_moods: c.matched_moods ?? [],
+        matched_contexts: c.matched_contexts ?? [],
+        matched_audio_features: c.matched_audio_features ?? [],
+        possible_issue: c.possible_issue ?? "none",
+        final_decision: c.final_decision,
         status: "pending",
       };
 
@@ -306,7 +441,12 @@ Return STRICT JSON: {"candidates":[{"title":"","artist":"","reason":"","fit_scor
       inserted.push(ins);
     }
 
-    return json({ success: true, count: inserted.length, recommendations: inserted });
+    return json({
+      success: true,
+      count: inserted.length,
+      intent_profile: intent,
+      recommendations: inserted,
+    });
   } catch (e: any) {
     console.error("[recommend-for-playlist] error", e);
     return json({ error: e?.message ?? "Unknown error" }, 500);
