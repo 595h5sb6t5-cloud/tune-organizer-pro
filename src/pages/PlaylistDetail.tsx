@@ -496,7 +496,7 @@ const PlaylistDetail = () => {
       // Load playlist metadata
       const plRes = await supabase
         .from("spotify_playlists")
-        .select("id, spotify_playlist_id, name, description, image_url, track_count, is_owned_by_user, is_collaborative, owner_display_name, spotify_owner_id")
+        .select("id, spotify_playlist_id, name, description, image_url, track_count, spotify_total_tracks, tracks_import_status, tracks_import_error, is_owned_by_user, is_collaborative, owner_display_name, spotify_owner_id")
         .eq("id", id)
         .single();
 
