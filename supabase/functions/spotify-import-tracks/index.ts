@@ -1087,6 +1087,8 @@ Deno.serve(async (req) => {
       result.artists_total = artistResult.total;
       result.artists_added = artistResult.added;
       result.artists_removed = artistResult.removed;
+      result.artist_top_tracks_imported = artistResult.top_tracks_imported ?? 0;
+      result.artists_with_top_tracks = artistResult.artists_with_top_tracks ?? 0;
       console.log("[spotify-import-tracks] followed_artists_done", artistResult);
       await adminClient.from("spotify_connections").update({ last_artist_sync_at: now }).eq("user_id", user.id);
     }
