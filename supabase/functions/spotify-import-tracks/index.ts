@@ -504,6 +504,43 @@ async function syncPlaylists(
   let totalPl = Infinity;
   let warning: string | null = null;
 
+  // FAST PATH: targeted single-playlist sync.
+  // If we already have the playlist in DB, fetch only its metadata from Spotify
+  // instead of paginating through the entire library.
+  if (targetPlaylistDbId) {
+    const { data: existing } = await adminClient
+      .from("spotify_playlists")
+      .select("spotify_playlist_id")
+      .eq("id", targetPlaylistDbId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (existing?.spotify_playlist_id) {
+      try {
+        const pl = await spotifyGet(
+          `https://api.spotify.com/v1/playlists/${existing.spotify_playlist_id}?fields=id,name,description,images,collaborative,public,snapshot_id,owner(id,display_name),tracks(total)`,
+          token,
+        );
+        playlists.push({
+          id: pl.id,
+          name: pl.name || "Untitled",
+          description: pl.description || null,
+          image_url: pl.images?.[0]?.url || null,
+          track_count: pl.tracks?.total ?? 0,
+          owner_id: pl.owner?.id || "",
+          owner_display_name: pl.owner?.display_name || null,
+          is_owned: pl.owner?.id === spotifyUserId,
+          is_collaborative: pl.collaborative === true,
+          snapshot_id: pl.snapshot_id || null,
+        });
+        totalPl = 1;
+        offset = totalPl; // skip the listing loop below
+      } catch (e) {
+        console.warn("[spotify-import-tracks] targeted playlist fetch failed, falling back to full list", e);
+      }
+    }
+  }
+
+
   try {
     while (offset < totalPl) {
       const data = await spotifyGet(`https://api.spotify.com/v1/me/playlists?limit=50&offset=${offset}`, token);
@@ -558,15 +595,16 @@ async function syncPlaylists(
     return "saved";
   }
 
-  // IMPORTANT: Do NOT store Spotify's reported track_count here.
-  // track_count is only updated AFTER tracks are actually inserted into DB (see below).
+  // Persist Spotify's reported total in spotify_total_tracks so the UI can detect missing tracks.
+  // track_count remains the verified count of imported rows (set after track import).
   const playlistRows = playlists.map(pl => ({
     user_id: userId,
     spotify_playlist_id: pl.id,
     name: pl.name,
     description: pl.description,
     image_url: pl.image_url,
-    // track_count intentionally omitted — will be set after track import
+    spotify_total_tracks: pl.track_count,
+    spotify_url: `https://open.spotify.com/playlist/${pl.id}`,
     spotify_owner_id: pl.owner_id,
     owner_display_name: pl.owner_display_name,
     is_owned_by_user: pl.is_owned,
@@ -595,20 +633,23 @@ async function syncPlaylists(
   }
 
   let removedCount = 0;
-  for (const dbPl of dbPlaylists || []) {
-    if (!currentSpotifyIds.has(dbPl.spotify_playlist_id)) {
-      await ensureDbWrite(
-        adminClient.from("spotify_playlist_tracks").delete().eq("playlist_id", dbPl.id),
-        "sync_playlists_cleanup_tracks",
-        { playlist_id: dbPl.id, spotify_playlist_id: dbPl.spotify_playlist_id },
-      );
-      await adminClient.from("playlist_vibe_analysis").delete().eq("playlist_id", dbPl.id);
-      await ensureDbWrite(
-        adminClient.from("spotify_playlists").delete().eq("id", dbPl.id),
-        "sync_playlists_cleanup_playlist",
-        { playlist_id: dbPl.id, spotify_playlist_id: dbPl.spotify_playlist_id },
-      );
-      removedCount++;
+  // Skip cleanup of "missing" playlists when in targeted mode — we only fetched one.
+  if (!targetPlaylistDbId) {
+    for (const dbPl of dbPlaylists || []) {
+      if (!currentSpotifyIds.has(dbPl.spotify_playlist_id)) {
+        await ensureDbWrite(
+          adminClient.from("spotify_playlist_tracks").delete().eq("playlist_id", dbPl.id),
+          "sync_playlists_cleanup_tracks",
+          { playlist_id: dbPl.id, spotify_playlist_id: dbPl.spotify_playlist_id },
+        );
+        await adminClient.from("playlist_vibe_analysis").delete().eq("playlist_id", dbPl.id);
+        await ensureDbWrite(
+          adminClient.from("spotify_playlists").delete().eq("id", dbPl.id),
+          "sync_playlists_cleanup_playlist",
+          { playlist_id: dbPl.id, spotify_playlist_id: dbPl.spotify_playlist_id },
+        );
+        removedCount++;
+      }
     }
   }
 
@@ -667,6 +708,11 @@ async function syncPlaylists(
     const dbId = playlistIdMap.get(pl.id);
     if (!dbId) continue;
 
+    // Mark this playlist as processing
+    await adminClient.from("spotify_playlists")
+      .update({ tracks_import_status: "processing", tracks_import_error: null })
+      .eq("id", dbId);
+
     try {
       // Delete existing tracks first for clean re-import
       const delResult = await adminClient.from("spotify_playlist_tracks").delete().eq("playlist_id", dbId);
@@ -675,7 +721,8 @@ async function syncPlaylists(
       }
 
       const trackRows: any[] = [];
-      let nextUrl: string | null = `https://api.spotify.com/v1/playlists/${pl.id}/items?limit=100&offset=0`;
+      const seenTrackIds = new Set<string>();
+      let nextUrl: string | null = `https://api.spotify.com/v1/playlists/${pl.id}/tracks?limit=100&offset=0&fields=next,total,items(added_at,added_by(id),track(id,uri,name,duration_ms,preview_url,artists(name),album(name,images)))`;
       let expectedTotal = pl.track_count;
       let pageNum = 0;
 
@@ -686,10 +733,12 @@ async function syncPlaylists(
         if (typeof data.total === "number") {
           expectedTotal = data.total;
         }
-        for (let idx = 0; idx < items.length; idx++) {
-          const item = items[idx];
+        for (const item of items) {
           const track = item?.track;
           if (!track || !track.id) continue;
+          // Dedupe within a single playlist (Spotify allows duplicates, our unique constraint forbids them)
+          if (seenTrackIds.has(track.id)) continue;
+          seenTrackIds.add(track.id);
           const artists = (track.artists || []).map((a: any) => a?.name).filter(Boolean).join(", ");
           trackRows.push({
             user_id: userId,
@@ -713,20 +762,14 @@ async function syncPlaylists(
 
       console.log(`[spotify-import-tracks] playlist "${pl.name}": inserting ${trackRows.length} tracks into DB`);
 
-      // Insert tracks in batches — use insert, not upsert, since we deleted first
+      // Upsert tracks in batches — handles dedupe via unique (playlist_id, spotify_track_id)
       for (let i = 0; i < trackRows.length; i += 100) {
         const batch = trackRows.slice(i, i + 100);
-        const insertResult = await adminClient.from("spotify_playlist_tracks").insert(batch);
-        if (insertResult.error) {
-          console.error(`[spotify-import-tracks] insert batch failed for "${pl.name}" batch ${i}:`, insertResult.error.message);
-          // Fallback to upsert for this batch
-          const upsertResult = await adminClient.from("spotify_playlist_tracks").upsert(batch, {
-            onConflict: "playlist_id,spotify_track_id",
-            ignoreDuplicates: true,
-          });
-          if (upsertResult.error) {
-            console.error(`[spotify-import-tracks] upsert fallback also failed:`, upsertResult.error.message);
-          }
+        const upsertResult = await adminClient.from("spotify_playlist_tracks").upsert(batch, {
+          onConflict: "playlist_id,spotify_track_id",
+        });
+        if (upsertResult.error) {
+          console.error(`[spotify-import-tracks] upsert batch failed for "${pl.name}" batch ${i}:`, upsertResult.error.message);
         }
       }
 
@@ -737,12 +780,15 @@ async function syncPlaylists(
         .eq("playlist_id", dbId);
 
       const finalCount = verifiedCount ?? trackRows.length;
-      console.log(`[spotify-import-tracks] playlist "${pl.name}": verified ${finalCount} tracks in DB (expected ${trackRows.length})`);
+      console.log(`[spotify-import-tracks] playlist "${pl.name}": verified ${finalCount} tracks in DB (expected ${trackRows.length}, spotify total ${expectedTotal})`);
 
       await adminClient
         .from("spotify_playlists")
         .update({
           track_count: finalCount,
+          spotify_total_tracks: expectedTotal,
+          tracks_import_status: "completed",
+          tracks_import_error: null,
           last_synced_at: new Date().toISOString(),
         })
         .eq("id", dbId);
@@ -750,7 +796,11 @@ async function syncPlaylists(
       totalTracks += finalCount;
     } catch (e) {
       failedPlaylists.push(pl.name);
-      console.warn(`[spotify-import-tracks] Failed to import tracks for playlist ${pl.name}:`, e);
+      const errMsg = e instanceof Error ? e.message : String(e);
+      console.warn(`[spotify-import-tracks] Failed to import tracks for playlist ${pl.name}:`, errMsg);
+      await adminClient.from("spotify_playlists")
+        .update({ tracks_import_status: "failed", tracks_import_error: errMsg })
+        .eq("id", dbId);
     }
   }
 

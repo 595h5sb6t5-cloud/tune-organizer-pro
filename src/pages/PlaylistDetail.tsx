@@ -30,6 +30,9 @@ interface SpotifyPlaylistInfo {
   description: string | null;
   image_url: string | null;
   track_count: number;
+  spotify_total_tracks: number;
+  tracks_import_status: string | null;
+  tracks_import_error: string | null;
   is_owned_by_user: boolean;
   is_collaborative: boolean;
   owner_display_name: string | null;
@@ -493,7 +496,7 @@ const PlaylistDetail = () => {
       // Load playlist metadata
       const plRes = await supabase
         .from("spotify_playlists")
-        .select("id, spotify_playlist_id, name, description, image_url, track_count, is_owned_by_user, is_collaborative, owner_display_name, spotify_owner_id")
+        .select("id, spotify_playlist_id, name, description, image_url, track_count, spotify_total_tracks, tracks_import_status, tracks_import_error, is_owned_by_user, is_collaborative, owner_display_name, spotify_owner_id")
         .eq("id", id)
         .single();
 
@@ -577,9 +580,11 @@ const PlaylistDetail = () => {
       const loaded = await loadPlaylistData();
       if (cancelled || !loaded?.playlist) return;
 
+      const expected = loaded.playlist.spotify_total_tracks || loaded.playlist.track_count || 0;
       if (
-        loaded.playlist.track_count > 0 &&
+        expected > 0 &&
         loaded.tracks.length === 0 &&
+        loaded.playlist.tracks_import_status !== "failed" &&
         attemptedTrackRecoveryRef.current !== id
       ) {
         attemptedTrackRecoveryRef.current = id;
@@ -836,6 +841,16 @@ const PlaylistDetail = () => {
                   {exporting ? "Exporting…" : "Export to Spotify"}
                 </Button>
               )}
+              <Button
+                variant="ghost"
+                className="rounded-xl gap-2"
+                onClick={() => repairMissingTracks()}
+                disabled={recoveringTracks}
+                title="Re-importar canciones desde Spotify"
+              >
+                {recoveringTracks ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                Sync playlist tracks
+              </Button>
               {playlist.spotify_playlist_id && (
                 <Button variant="ghost" className="rounded-xl gap-2" asChild>
                   <a href={`https://open.spotify.com/playlist/${playlist.spotify_playlist_id}`} target="_blank" rel="noopener noreferrer">
@@ -860,26 +875,39 @@ const PlaylistDetail = () => {
             <span />
           </div>
           {tracks.length === 0 ? (
-            <div className="text-center py-12 space-y-3">
-              <p className="text-sm text-muted-foreground">
-                {recoveringTracks
-                  ? "Refreshing playlist tracks from Spotify…"
-                  : playlist?.track_count > 0
-                    ? "This playlist exists in Spotify, but its tracks have not been stored locally yet."
-                    : "No tracks imported yet. Re-sync your library to load tracks."}
-              </p>
-              {playlist?.track_count > 0 && (
-                <Button
-                  variant="secondary"
-                  className="rounded-xl gap-2"
-                  onClick={() => repairMissingTracks()}
-                  disabled={recoveringTracks}
-                >
-                  {recoveringTracks ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-                  {recoveringTracks ? "Refreshing tracks…" : "Refresh playlist tracks"}
-                </Button>
-              )}
-            </div>
+            (() => {
+              const expected = playlist?.spotify_total_tracks ?? playlist?.track_count ?? 0;
+              const status = playlist?.tracks_import_status;
+              const isFailed = status === "failed";
+              const isProcessing = status === "processing" || recoveringTracks;
+              const isTrulyEmpty = expected === 0 && !isProcessing && !isFailed;
+
+              let message: string;
+              if (isProcessing) message = "Importando canciones desde Spotify…";
+              else if (isFailed) message = "No pudimos cargar las canciones. Reintentar.";
+              else if (isTrulyEmpty) message = "Esta playlist no tiene canciones.";
+              else message = `Esta playlist tiene ${expected} canciones en Spotify pero aún no se han importado.`;
+
+              return (
+                <div className="text-center py-12 space-y-3">
+                  <p className="text-sm text-muted-foreground">{message}</p>
+                  {playlist?.tracks_import_error && (
+                    <p className="text-xs text-destructive/70">{playlist.tracks_import_error}</p>
+                  )}
+                  {!isTrulyEmpty && (
+                    <Button
+                      variant="secondary"
+                      className="rounded-xl gap-2"
+                      onClick={() => repairMissingTracks()}
+                      disabled={recoveringTracks}
+                    >
+                      {recoveringTracks ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                      {recoveringTracks ? "Sincronizando…" : "Sync playlist tracks"}
+                    </Button>
+                  )}
+                </div>
+              );
+            })()
           ) : (
             tracks.map((track, i) => (
               <div key={track.id} className={`group grid ${canEdit ? "grid-cols-[40px_1fr_1fr_80px]" : "grid-cols-[40px_1fr_1fr_40px]"} gap-4 px-5 py-3 items-center hover:bg-secondary/30 transition-colors`}>
