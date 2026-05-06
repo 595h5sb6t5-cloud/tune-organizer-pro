@@ -986,6 +986,10 @@ async function syncFollowedArtists(
       topTracksImported += items.length;
       artistsWithTopTracks++;
     } catch (e) {
+      const status = e instanceof SpotifyImportError ? e.status : 0;
+      if (status === 403 || status === 401) {
+        topTracksRestrictedCount++;
+      }
       console.warn(`[spotify-import-tracks] top-tracks failed for ${a.spotify_artist_id}:`, e);
       // continue silently — artist remains in pending state
     }
