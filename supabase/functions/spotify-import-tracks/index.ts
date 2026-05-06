@@ -769,7 +769,7 @@ async function syncPlaylists(
  */
 async function syncFollowedArtists(
   adminClient: any, userId: string, token: string, existingArtistIds: Set<string>
-): Promise<{ added: number; removed: number; total: number }> {
+): Promise<{ added: number; removed: number; total: number; top_tracks_imported?: number; artists_with_top_tracks?: number }> {
   const artists: any[] = [];
   const spotifyArtistIds = new Set<string>();
   let after: string | null = null;
