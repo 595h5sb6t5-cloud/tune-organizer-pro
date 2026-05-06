@@ -594,8 +594,12 @@ Deno.serve(async (req) => {
 
       if (jobErr || !job) return json({ error: "Job not found" }, 404);
       if (job.user_id !== userId) return json({ error: "Forbidden" }, 403);
-      if (["completed", "failed", "cancelled"].includes(job.status)) {
+      if (["completed", "cancelled"].includes(job.status)) {
         return json({ success: true, terminal: true });
+      }
+      // If a previous chunk crashed (failed) or paused, auto-recover and keep going.
+      if (job.status === "failed" || job.status === "paused_waiting_for_next_chunk") {
+        await updateJob(adm, jobId!, { status: "running", error_message: null });
       }
 
       const queue = () => {
