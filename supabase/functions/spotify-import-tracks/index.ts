@@ -828,7 +828,17 @@ async function syncPlaylists(
 
   const totalChanged = playlists.filter(pl => changedSet.has(pl.id)).length;
   const playlistsRemaining = Math.max(0, totalChanged - toSync.length);
-  return { total: playlists.length, changed: changedPlaylistIds.length, removed: removedCount, tracksSynced: totalTracks, playlistsRemaining, warning };
+  return {
+    total: playlists.length,
+    changed: changedPlaylistIds.length,
+    removed: removedCount,
+    tracksSynced: totalTracks,
+    playlistsRemaining,
+    warning,
+    restrictedCount,
+    importedTracksPlaylistsCount,
+    failedCount: failedPlaylists.length,
+  };
 }
 
 /**
