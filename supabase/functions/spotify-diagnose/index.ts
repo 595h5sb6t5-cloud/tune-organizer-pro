@@ -9,8 +9,10 @@ async function spotifyFetch(url: string, token: string) {
   const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
   const text = await res.text();
   let body: any = null;
-  try { body = JSON.parse(text); } catch { body = { raw: text.slice(0, 300) }; }
-  return { status: res.status, ok: res.ok, body, wwwAuth: res.headers.get("www-authenticate") };
+  try { body = JSON.parse(text); } catch { body = { raw: text.slice(0, 500) }; }
+  const headers: Record<string, string> = {};
+  res.headers.forEach((v, k) => { headers[k] = v; });
+  return { status: res.status, ok: res.ok, body, headers };
 }
 
 Deno.serve(async (req) => {
@@ -28,11 +30,12 @@ Deno.serve(async (req) => {
 
   const admin = createClient(supabaseUrl, serviceKey);
   const { data: conn } = await admin.from("spotify_connections")
-    .select("access_token, refresh_token, expires_at, spotify_user_id")
+    .select("access_token, refresh_token, expires_at, spotify_user_id, updated_at, created_at")
     .eq("user_id", user.id).single();
   if (!conn) return new Response(JSON.stringify({ error: "no spotify connection" }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
   let token = conn.access_token;
+  let refreshed = false;
   if (new Date(conn.expires_at) <= new Date(Date.now() + 30 * 1000)) {
     const r = await fetch("https://accounts.spotify.com/api/token", {
       method: "POST",
@@ -42,6 +45,7 @@ Deno.serve(async (req) => {
     const j = await r.json();
     if (j.access_token) {
       token = j.access_token;
+      refreshed = true;
       await admin.from("spotify_connections").update({
         access_token: j.access_token,
         expires_at: new Date(Date.now() + j.expires_in * 1000).toISOString(),
@@ -49,84 +53,41 @@ Deno.serve(async (req) => {
     }
   }
 
-  // Get profile to know spotify user id
   const me = await spotifyFetch("https://api.spotify.com/v1/me", token);
-  const myId = me.body?.id;
-
-  // Get all playlists (paginate up to ~100)
-  const allPlaylists: any[] = [];
-  let url: string | null = "https://api.spotify.com/v1/me/playlists?limit=50";
-  while (url && allPlaylists.length < 200) {
-    const r: any = await spotifyFetch(url, token);
-    if (!r.ok) break;
-    allPlaylists.push(...(r.body?.items ?? []));
-    url = r.body?.next ?? null;
-  }
-
-  // Categorize playlists
-  const owned = allPlaylists.filter(p => p?.owner?.id === myId);
-  const ownedPublic = owned.filter(p => p?.public === true);
-  const ownedPrivate = owned.filter(p => p?.public === false);
-  const collaborative = allPlaylists.filter(p => p?.collaborative === true);
-  const savedFromOthers = allPlaylists.filter(p => p?.owner?.id && p.owner.id !== myId);
-  const savedNonSpotify = savedFromOthers.filter(p => p?.owner?.id !== "spotify");
-  const savedFromSpotifyEditorial = savedFromOthers.filter(p => p?.owner?.id === "spotify");
-
-  // Pick at least 5 distinct samples covering categories
-  const picks: any[] = [];
-  const addUnique = (p: any) => { if (p && !picks.find(x => x.id === p.id)) picks.push(p); };
-  if (owned[0]) addUnique(owned[0]);
-  if (ownedPublic.find(p => p.id !== picks[0]?.id)) addUnique(ownedPublic.find(p => p.id !== picks[0]?.id));
-  if (ownedPrivate[0]) addUnique(ownedPrivate[0]);
-  if (collaborative[0]) addUnique(collaborative[0]);
-  if (savedNonSpotify[0]) addUnique(savedNonSpotify[0]);
-  if (savedNonSpotify[1]) addUnique(savedNonSpotify[1]);
-  if (savedFromSpotifyEditorial[0]) addUnique(savedFromSpotifyEditorial[0]);
-  // Top up from any remaining
-  for (const p of allPlaylists) { if (picks.length >= 7) break; addUnique(p); }
-
-  const probes = [];
-  for (const p of picks) {
-    const tr = await spotifyFetch(`https://api.spotify.com/v1/playlists/${p.id}/tracks?limit=100`, token);
-    let categorization = "ok";
-    if (tr.status === 403) categorization = "restricted_or_inaccessible";
-    else if (tr.status === 404) categorization = "not_found";
-    else if (tr.status === 401) categorization = "auth_problem";
-    else if (!tr.ok) categorization = "other_error";
-
-    probes.push({
-      playlist_name: p?.name ?? null,
-      playlist_id: p?.id ?? null,
-      owner_id: p?.owner?.id ?? null,
-      owner_display_name: p?.owner?.display_name ?? null,
-      is_owner: p?.owner?.id === myId,
-      collaborative: p?.collaborative ?? null,
-      public: p?.public ?? null,
-      total_tracks_meta: p?.tracks?.total ?? null,
-      tracks_request: {
-        status: tr.status,
-        ok: tr.ok,
-        items_returned: Array.isArray(tr.body?.items) ? tr.body.items.length : null,
-        body_total: tr.body?.total ?? null,
-        error_status: tr.body?.error?.status ?? null,
-        error_message: tr.body?.error?.message ?? null,
-        www_authenticate: tr.wwwAuth,
-      },
-      categorization,
-    });
-  }
+  const playlistId = "3DFFXGlZHn4a17Haa4KmDZ";
+  const meta = await spotifyFetch(`https://api.spotify.com/v1/playlists/${playlistId}`, token);
+  const tracks = await spotifyFetch(`https://api.spotify.com/v1/playlists/${playlistId}/tracks?limit=100`, token);
 
   return new Response(JSON.stringify({
-    spotify_user_id: myId,
-    total_playlists_found: allPlaylists.length,
-    counts: {
-      owned: owned.length,
-      owned_public: ownedPublic.length,
-      owned_private: ownedPrivate.length,
-      collaborative: collaborative.length,
-      saved_from_others: savedFromOthers.length,
-      saved_from_spotify_editorial: savedFromSpotifyEditorial.length,
+    token_info: {
+      connection_created_at: conn.created_at,
+      connection_updated_at: conn.updated_at,
+      expires_at: conn.expires_at,
+      refreshed_now: refreshed,
+      token_prefix: token?.slice(0, 12) + "...",
     },
-    probes,
+    me: { status: me.status, id: me.body?.id, display_name: me.body?.display_name },
+    playlist_meta: {
+      status: meta.status,
+      name: meta.body?.name,
+      owner_id: meta.body?.owner?.id,
+      public: meta.body?.public,
+      collaborative: meta.body?.collaborative,
+      total_tracks: meta.body?.tracks?.total,
+      error: meta.body?.error,
+    },
+    playlist_tracks: {
+      status: tracks.status,
+      ok: tracks.ok,
+      items_returned: Array.isArray(tracks.body?.items) ? tracks.body.items.length : null,
+      total: tracks.body?.total ?? null,
+      error: tracks.body?.error ?? null,
+      headers: {
+        "www-authenticate": tracks.headers["www-authenticate"] ?? null,
+        "retry-after": tracks.headers["retry-after"] ?? null,
+        "x-ratelimit-remaining": tracks.headers["x-ratelimit-remaining"] ?? null,
+        "content-type": tracks.headers["content-type"] ?? null,
+      },
+    },
   }, null, 2), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 });
 });
