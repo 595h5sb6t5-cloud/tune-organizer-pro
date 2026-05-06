@@ -913,6 +913,7 @@ async function syncFollowedArtists(
   // ── Fetch top tracks per followed artist (best-effort, batched) ──
   let topTracksImported = 0;
   let artistsWithTopTracks = 0;
+  let topTracksRestrictedCount = 0;
   const country = "US"; // Spotify accepts any market; "from_token" requires user-read scope which we already have but US is safest
   for (const a of artists) {
     try {
