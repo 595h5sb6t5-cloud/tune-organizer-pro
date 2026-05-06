@@ -5,33 +5,12 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-async function probe(name: string, url: string, token: string) {
+async function spotifyFetch(url: string, token: string) {
   const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
   const text = await res.text();
   let body: any = null;
-  try { body = JSON.parse(text); } catch { body = { raw: text.slice(0, 500) }; }
-
-  const wwwAuth = res.headers.get("www-authenticate");
-  let itemCount: number | null = null;
-  if (body && typeof body === "object") {
-    if (Array.isArray(body.items)) itemCount = body.items.length;
-    else if (Array.isArray(body?.artists?.items)) itemCount = body.artists.items.length;
-    else if (Array.isArray(body?.tracks)) itemCount = body.tracks.length;
-  }
-
-  return {
-    endpoint: name,
-    url,
-    status: res.status,
-    ok: res.ok,
-    item_count: itemCount,
-    total: body?.total ?? body?.artists?.total ?? null,
-    error_message: body?.error?.message ?? body?.error_description ?? body?.error ?? null,
-    error_status: body?.error?.status ?? null,
-    www_authenticate: wwwAuth,
-    first_playlist_id: name === "GET /v1/me/playlists" ? body?.items?.[0]?.id ?? null : undefined,
-    first_playlist_name: name === "GET /v1/me/playlists" ? body?.items?.[0]?.name ?? null : undefined,
-  };
+  try { body = JSON.parse(text); } catch { body = { raw: text.slice(0, 300) }; }
+  return { status: res.status, ok: res.ok, body, wwwAuth: res.headers.get("www-authenticate") };
 }
 
 Deno.serve(async (req) => {
@@ -49,26 +28,20 @@ Deno.serve(async (req) => {
 
   const admin = createClient(supabaseUrl, serviceKey);
   const { data: conn } = await admin.from("spotify_connections")
-    .select("access_token, refresh_token, expires_at")
+    .select("access_token, refresh_token, expires_at, spotify_user_id")
     .eq("user_id", user.id).single();
-
   if (!conn) return new Response(JSON.stringify({ error: "no spotify connection" }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
   let token = conn.access_token;
-  let refreshed = false;
-  const expired = new Date(conn.expires_at) <= new Date(Date.now() + 30 * 1000);
-  if (expired) {
-    const clientId = Deno.env.get("SPOTIFY_CLIENT_ID")!;
-    const clientSecret = Deno.env.get("SPOTIFY_CLIENT_SECRET")!;
+  if (new Date(conn.expires_at) <= new Date(Date.now() + 30 * 1000)) {
     const r = await fetch("https://accounts.spotify.com/api/token", {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded", Authorization: `Basic ${btoa(`${clientId}:${clientSecret}`)}` },
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Authorization: `Basic ${btoa(`${Deno.env.get("SPOTIFY_CLIENT_ID")}:${Deno.env.get("SPOTIFY_CLIENT_SECRET")}`)}` },
       body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: conn.refresh_token }),
     });
     const j = await r.json();
     if (j.access_token) {
       token = j.access_token;
-      refreshed = true;
       await admin.from("spotify_connections").update({
         access_token: j.access_token,
         expires_at: new Date(Date.now() + j.expires_in * 1000).toISOString(),
@@ -76,28 +49,84 @@ Deno.serve(async (req) => {
     }
   }
 
-  const results: any[] = [];
-  results.push(await probe("GET /v1/me", "https://api.spotify.com/v1/me", token));
-  results.push(await probe("GET /v1/me/tracks", "https://api.spotify.com/v1/me/tracks?limit=50", token));
-  const playlistsRes = await probe("GET /v1/me/playlists", "https://api.spotify.com/v1/me/playlists?limit=50", token);
-  results.push(playlistsRes);
-  results.push(await probe("GET /v1/me/following?type=artist", "https://api.spotify.com/v1/me/following?type=artist&limit=50", token));
+  // Get profile to know spotify user id
+  const me = await spotifyFetch("https://api.spotify.com/v1/me", token);
+  const myId = me.body?.id;
 
-  const firstPlaylistId = (playlistsRes as any).first_playlist_id;
-  if (firstPlaylistId) {
-    results.push(await probe(
-      `GET /v1/playlists/${firstPlaylistId}/tracks`,
-      `https://api.spotify.com/v1/playlists/${firstPlaylistId}/tracks?limit=100`,
-      token,
-    ));
-  } else {
-    results.push({ endpoint: "GET /v1/playlists/{id}/tracks", skipped: "no playlist id available" });
+  // Get all playlists (paginate up to ~100)
+  const allPlaylists: any[] = [];
+  let url: string | null = "https://api.spotify.com/v1/me/playlists?limit=50";
+  while (url && allPlaylists.length < 200) {
+    const r: any = await spotifyFetch(url, token);
+    if (!r.ok) break;
+    allPlaylists.push(...(r.body?.items ?? []));
+    url = r.body?.next ?? null;
+  }
+
+  // Categorize playlists
+  const owned = allPlaylists.filter(p => p?.owner?.id === myId);
+  const ownedPublic = owned.filter(p => p?.public === true);
+  const ownedPrivate = owned.filter(p => p?.public === false);
+  const collaborative = allPlaylists.filter(p => p?.collaborative === true);
+  const savedFromOthers = allPlaylists.filter(p => p?.owner?.id && p.owner.id !== myId);
+  const savedNonSpotify = savedFromOthers.filter(p => p?.owner?.id !== "spotify");
+  const savedFromSpotifyEditorial = savedFromOthers.filter(p => p?.owner?.id === "spotify");
+
+  // Pick at least 5 distinct samples covering categories
+  const picks: any[] = [];
+  const addUnique = (p: any) => { if (p && !picks.find(x => x.id === p.id)) picks.push(p); };
+  if (owned[0]) addUnique(owned[0]);
+  if (ownedPublic.find(p => p.id !== picks[0]?.id)) addUnique(ownedPublic.find(p => p.id !== picks[0]?.id));
+  if (ownedPrivate[0]) addUnique(ownedPrivate[0]);
+  if (collaborative[0]) addUnique(collaborative[0]);
+  if (savedNonSpotify[0]) addUnique(savedNonSpotify[0]);
+  if (savedNonSpotify[1]) addUnique(savedNonSpotify[1]);
+  if (savedFromSpotifyEditorial[0]) addUnique(savedFromSpotifyEditorial[0]);
+  // Top up from any remaining
+  for (const p of allPlaylists) { if (picks.length >= 7) break; addUnique(p); }
+
+  const probes = [];
+  for (const p of picks) {
+    const tr = await spotifyFetch(`https://api.spotify.com/v1/playlists/${p.id}/tracks?limit=100`, token);
+    let categorization = "ok";
+    if (tr.status === 403) categorization = "restricted_or_inaccessible";
+    else if (tr.status === 404) categorization = "not_found";
+    else if (tr.status === 401) categorization = "auth_problem";
+    else if (!tr.ok) categorization = "other_error";
+
+    probes.push({
+      playlist_name: p?.name ?? null,
+      playlist_id: p?.id ?? null,
+      owner_id: p?.owner?.id ?? null,
+      owner_display_name: p?.owner?.display_name ?? null,
+      is_owner: p?.owner?.id === myId,
+      collaborative: p?.collaborative ?? null,
+      public: p?.public ?? null,
+      total_tracks_meta: p?.tracks?.total ?? null,
+      tracks_request: {
+        status: tr.status,
+        ok: tr.ok,
+        items_returned: Array.isArray(tr.body?.items) ? tr.body.items.length : null,
+        body_total: tr.body?.total ?? null,
+        error_status: tr.body?.error?.status ?? null,
+        error_message: tr.body?.error?.message ?? null,
+        www_authenticate: tr.wwwAuth,
+      },
+      categorization,
+    });
   }
 
   return new Response(JSON.stringify({
-    user_id: user.id,
-    token_refreshed_now: refreshed,
-    token_expires_at: conn.expires_at,
-    results,
+    spotify_user_id: myId,
+    total_playlists_found: allPlaylists.length,
+    counts: {
+      owned: owned.length,
+      owned_public: ownedPublic.length,
+      owned_private: ownedPrivate.length,
+      collaborative: collaborative.length,
+      saved_from_others: savedFromOthers.length,
+      saved_from_spotify_editorial: savedFromSpotifyEditorial.length,
+    },
+    probes,
   }, null, 2), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 });
 });
