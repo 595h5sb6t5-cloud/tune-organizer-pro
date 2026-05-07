@@ -405,12 +405,11 @@ async function queueNextStep(
   functionUrl: string, anonKey: string, serviceKey: string,
   jobId: string, userId: string, forceRetag: boolean,
 ): Promise<boolean> {
-  // TRUE fire-and-forget: dispatch the request and detach.
-  // We do NOT await the response — each chunk must run in its own isolate
-  // so the chain isn't bound to a single 5-min wall-clock invocation.
+  // The receiver acknowledges with HTTP 202 immediately and continues work
+  // inside its own EdgeRuntime.waitUntil(). So we just await the fetch.
+  // We use AbortSignal.timeout as a safety net only — never abort on purpose.
   try {
-    const ctrl = new AbortController();
-    const dispatched = fetch(functionUrl, {
+    const res = await fetch(functionUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -419,19 +418,14 @@ async function queueNextStep(
         [INTERNAL_HEADER]: "1",
       },
       body: JSON.stringify({ mode: "process_step", job_id: jobId, user_id: userId, force_retag: forceRetag }),
-      signal: ctrl.signal,
-    }).catch((e) => {
-      // Aborted on purpose once the receiver returns 202 — that's expected.
-      if (e?.name !== "AbortError") console.error("[pipeline] dispatch fetch err:", e?.message);
+      signal: AbortSignal.timeout(20_000),
     });
-    // Small flush window so the request leaves this isolate, then detach.
-    await new Promise((r) => setTimeout(r, 600));
-    ctrl.abort();
-    void dispatched;
-    console.log(`[pipeline] dispatched next chunk for job ${jobId}`);
-    return true;
+    console.log(`[pipeline] dispatched next chunk for job ${jobId} → HTTP ${res.status}`);
+    // Drain body to free the connection; ignore content
+    try { await res.text(); } catch { /* ignore */ }
+    return res.ok || res.status === 202;
   } catch (e: any) {
-    console.error(`[pipeline] queue error:`, e.message);
+    console.error(`[pipeline] queue error:`, e?.message || e);
     return false;
   }
 }
@@ -602,17 +596,29 @@ Deno.serve(async (req) => {
         await updateJob(adm, jobId!, { status: "running", error_message: null });
       }
 
-      const queue = () => {
-        const p = queueNextStep(functionUrl, anon, svc, jobId!, userId, forceRetag);
-        // @ts-ignore EdgeRuntime is a Deno Deploy global
-        if (typeof EdgeRuntime !== "undefined" && EdgeRuntime.waitUntil) {
-          EdgeRuntime.waitUntil(p);
-        } else {
-          p.catch(e => console.error("[pipeline] queue error:", e));
-        }
+      const queue = async () => {
+        await queueNextStep(functionUrl, anon, svc, jobId!, userId, forceRetag);
       };
 
-      try {
+      // Pause-on-error helper: never marks job as failed for transient errors.
+      // Saved progress remains intact; resume will pick up from groove_feel IS NULL.
+      const pauseAndChain = async (reason: string) => {
+        try {
+          await updateJob(adm, jobId!, {
+            status: "paused_waiting_for_next_chunk",
+            error_message: reason.substring(0, 500),
+            status_message: "Paused — auto-resuming next chunk…",
+          });
+        } catch (e) { console.error("[pipeline] pause update failed:", e); }
+        try { await queue(); } catch (e) { console.error("[pipeline] pause-chain queue failed:", e); }
+      };
+
+      // Worker that performs the actual chunk and chains the next one.
+      // We ACK 202 to the dispatcher immediately and run this in waitUntil
+      // so the parent isolate is freed (no nested 5-min wall-clock dependency).
+      const runChunk = async () => {
+        try {
+          // (phase handlers below; their `return json(...)` only exits runChunk)
         /* ── PHASE: TAGGING ── */
         if (job.phase === "tagging" || job.phase === "queued") {
           let totalSongs = job.total_songs;
@@ -1112,13 +1118,25 @@ Deno.serve(async (req) => {
           return json({ success: true, phase: "done" });
         }
 
-        await failJob(adm, jobId!, `Unknown phase: ${job.phase}`);
-        return json({ error: `Unknown phase: ${job.phase}` }, 400);
-      } catch (e: any) {
-        console.error("[pipeline] step error:", e);
-        await failJob(adm, jobId!, e.message || "Pipeline failed").catch(() => {});
-        return json({ error: e.message }, 500);
+          await failJob(adm, jobId!, `Unknown phase: ${job.phase}`);
+          return;
+        } catch (e: any) {
+          console.error("[pipeline] step error:", e);
+          // Critical: do NOT mark as failed if progress was saved.
+          // Pause cleanly and chain the next chunk so the pipeline self-heals.
+          await pauseAndChain(e?.message || "transient chunk error");
+        }
+      };
+
+      // Ack 202 immediately and run worker in background.
+      // @ts-ignore EdgeRuntime is a Deno Deploy global
+      if (typeof EdgeRuntime !== "undefined" && EdgeRuntime.waitUntil) {
+        // @ts-ignore
+        EdgeRuntime.waitUntil(runChunk());
+      } else {
+        runChunk().catch((e) => console.error("[pipeline] runChunk err:", e));
       }
+      return json({ accepted: true, job_id: jobId, phase: job.phase }, 202);
     }
 
     return json({ error: `Unknown mode: ${mode}` }, 400);
