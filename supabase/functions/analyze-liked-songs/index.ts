@@ -596,16 +596,15 @@ Deno.serve(async (req) => {
         await updateJob(adm, jobId!, { status: "running", error_message: null });
       }
 
-      const queue = () => {
-        const p = queueNextStep(functionUrl, anon, svc, jobId!, userId, forceRetag);
-        // @ts-ignore EdgeRuntime is a Deno Deploy global
-        if (typeof EdgeRuntime !== "undefined" && EdgeRuntime.waitUntil) {
-          EdgeRuntime.waitUntil(p);
-        } else {
-          p.catch(e => console.error("[pipeline] queue error:", e));
-        }
+      const queue = async () => {
+        // Awaited inline now (caller wraps the whole worker in waitUntil).
+        await queueNextStep(functionUrl, anon, svc, jobId!, userId, forceRetag);
       };
 
+      // Worker — runs entire chunk + chains next dispatch. Wrapped in waitUntil
+      // so we can ACK 202 to the parent immediately and free its isolate.
+      const runChunk = async () => {
+        try {
       try {
         /* ── PHASE: TAGGING ── */
         if (job.phase === "tagging" || job.phase === "queued") {
