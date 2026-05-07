@@ -405,12 +405,11 @@ async function queueNextStep(
   functionUrl: string, anonKey: string, serviceKey: string,
   jobId: string, userId: string, forceRetag: boolean,
 ): Promise<boolean> {
-  // TRUE fire-and-forget: dispatch the request and detach.
-  // We do NOT await the response — each chunk must run in its own isolate
-  // so the chain isn't bound to a single 5-min wall-clock invocation.
+  // The receiver acknowledges with HTTP 202 immediately and continues work
+  // inside its own EdgeRuntime.waitUntil(). So we just await the fetch.
+  // We use AbortSignal.timeout as a safety net only — never abort on purpose.
   try {
-    const ctrl = new AbortController();
-    const dispatched = fetch(functionUrl, {
+    const res = await fetch(functionUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -419,19 +418,14 @@ async function queueNextStep(
         [INTERNAL_HEADER]: "1",
       },
       body: JSON.stringify({ mode: "process_step", job_id: jobId, user_id: userId, force_retag: forceRetag }),
-      signal: ctrl.signal,
-    }).catch((e) => {
-      // Aborted on purpose once the receiver returns 202 — that's expected.
-      if (e?.name !== "AbortError") console.error("[pipeline] dispatch fetch err:", e?.message);
+      signal: AbortSignal.timeout(20_000),
     });
-    // Small flush window so the request leaves this isolate, then detach.
-    await new Promise((r) => setTimeout(r, 600));
-    ctrl.abort();
-    void dispatched;
-    console.log(`[pipeline] dispatched next chunk for job ${jobId}`);
-    return true;
+    console.log(`[pipeline] dispatched next chunk for job ${jobId} → HTTP ${res.status}`);
+    // Drain body to free the connection; ignore content
+    try { await res.text(); } catch { /* ignore */ }
+    return res.ok || res.status === 202;
   } catch (e: any) {
-    console.error(`[pipeline] queue error:`, e.message);
+    console.error(`[pipeline] queue error:`, e?.message || e);
     return false;
   }
 }
