@@ -1118,13 +1118,25 @@ Deno.serve(async (req) => {
           return json({ success: true, phase: "done" });
         }
 
-        await failJob(adm, jobId!, `Unknown phase: ${job.phase}`);
-        return json({ error: `Unknown phase: ${job.phase}` }, 400);
-      } catch (e: any) {
-        console.error("[pipeline] step error:", e);
-        await failJob(adm, jobId!, e.message || "Pipeline failed").catch(() => {});
-        return json({ error: e.message }, 500);
+          await failJob(adm, jobId!, `Unknown phase: ${job.phase}`);
+          return;
+        } catch (e: any) {
+          console.error("[pipeline] step error:", e);
+          // Critical: do NOT mark as failed if progress was saved.
+          // Pause cleanly and chain the next chunk so the pipeline self-heals.
+          await pauseAndChain(e?.message || "transient chunk error");
+        }
+      };
+
+      // Ack 202 immediately and run worker in background.
+      // @ts-ignore EdgeRuntime is a Deno Deploy global
+      if (typeof EdgeRuntime !== "undefined" && EdgeRuntime.waitUntil) {
+        // @ts-ignore
+        EdgeRuntime.waitUntil(runChunk());
+      } else {
+        runChunk().catch((e) => console.error("[pipeline] runChunk err:", e));
       }
+      return json({ accepted: true, job_id: jobId, phase: job.phase }, 202);
     }
 
     return json({ error: `Unknown mode: ${mode}` }, 400);
