@@ -597,12 +597,25 @@ Deno.serve(async (req) => {
       }
 
       const queue = async () => {
-        // Awaited inline now (caller wraps the whole worker in waitUntil).
         await queueNextStep(functionUrl, anon, svc, jobId!, userId, forceRetag);
       };
 
-      // Worker — runs entire chunk + chains next dispatch. Wrapped in waitUntil
-      // so we can ACK 202 to the parent immediately and free its isolate.
+      // Pause-on-error helper: never marks job as failed for transient errors.
+      // Saved progress remains intact; resume will pick up from groove_feel IS NULL.
+      const pauseAndChain = async (reason: string) => {
+        try {
+          await updateJob(adm, jobId!, {
+            status: "paused_waiting_for_next_chunk",
+            error_message: reason.substring(0, 500),
+            status_message: "Paused — auto-resuming next chunk…",
+          });
+        } catch (e) { console.error("[pipeline] pause update failed:", e); }
+        try { await queue(); } catch (e) { console.error("[pipeline] pause-chain queue failed:", e); }
+      };
+
+      // Worker that performs the actual chunk and chains the next one.
+      // We ACK 202 to the dispatcher immediately and run this in waitUntil
+      // so the parent isolate is freed (no nested 5-min wall-clock dependency).
       const runChunk = async () => {
         try {
       try {
