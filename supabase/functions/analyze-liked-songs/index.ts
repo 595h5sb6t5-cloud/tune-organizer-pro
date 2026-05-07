@@ -618,7 +618,7 @@ Deno.serve(async (req) => {
       // so the parent isolate is freed (no nested 5-min wall-clock dependency).
       const runChunk = async () => {
         try {
-      try {
+          // (phase handlers below; their `return json(...)` only exits runChunk)
         /* ── PHASE: TAGGING ── */
         if (job.phase === "tagging" || job.phase === "queued") {
           let totalSongs = job.total_songs;
