@@ -687,14 +687,8 @@ function Phase2ReportBody({ report }: { report: any }) {
   );
 }
 
-function Stat({ label, value }: { label: string; value: any }) {
-  return (
-    <div className="rounded-xl border border-border/40 bg-background/40 p-3">
-      <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">{label}</p>
-      <p className="font-heading text-xl mt-1">{value}</p>
-    </div>
-  );
-}
+
+
 
 
 function PlaylistDetail({ playlistId, onBack }: { playlistId: string; onBack: () => void }) {
