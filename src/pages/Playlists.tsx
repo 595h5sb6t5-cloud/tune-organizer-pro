@@ -56,6 +56,10 @@ const Playlists = () => {
           </div>
         </div>
 
+        <Phase1DiagnosticPanel />
+
+        <div className="h-6" />
+
         <ClusterSampleTest onPromoted={(id) => { void refresh(); setSelected(id); }} />
 
         <div className="mt-10">
