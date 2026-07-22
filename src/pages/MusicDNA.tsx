@@ -214,9 +214,17 @@ function DeepAnalysisPanel({ onComplete }: { onComplete: () => void }) {
   const stageLabel = j?.stage && j.stage in STAGE_LABEL ? STAGE_LABEL[j.stage as keyof typeof STAGE_LABEL] : "Sin actividad reciente";
   const hasActivity = !!j && (a.isRunning || a.isDone || a.isFailed);
 
-  // When status transitions to completed, refresh parent stats.
+  // When status transitions to completed, refresh parent stats — once per job id.
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
+  const refreshedForRef = useRef<string | null>(null);
   const doneId = a.isDone ? j?.id ?? null : null;
-  useEffect(() => { if (doneId) onComplete(); }, [doneId, onComplete]);
+  useEffect(() => {
+    if (doneId && refreshedForRef.current !== doneId) {
+      refreshedForRef.current = doneId;
+      onCompleteRef.current();
+    }
+  }, [doneId]);
 
   const handleStart = () => { void a.start(false); };
   const handleRetry = () => { void a.start(false); };
