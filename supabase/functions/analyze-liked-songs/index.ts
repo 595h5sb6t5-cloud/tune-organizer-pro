@@ -283,30 +283,33 @@ const WORLDS_TOOL = {
   },
 };
 
-const ASSIGN_SYS = `You are Tempo — a strict playlist curator assigning songs to sonic worlds based PURELY on musical compatibility.
+const ASSIGN_SYS = `You are Tempo — a strict playlist curator assigning ONLY songs from the user's real library (never invent tracks) to sonic worlds based PURELY on musical compatibility.
 
 SONIC COMPATIBILITY CHECKLIST (a song needs 7+/10 to belong):
-1. Compatible groove/rhythm feel
-2. Compatible energy range (within ±1 level of the world's center)
+1. Compatible groove / rhythmic identity / beat type
+2. Compatible energy range (within ±1 of the world's center)
 3. Same emotional shade / mood family
 4. Compatible production texture and aesthetic
-5. Compatible vocal approach or instrumental character
-6. Same brightness spectrum
-7. Same spatial scale (intimate vs arena)
-8. Compatible tension pattern
-9. Same listening context / scenario
-10. Would sound NATURAL played right after any song in that world
+5. Compatible vocal approach or instrumental character (vocal strength & delivery)
+6. Same brightness / tonal color
+7. Same spatial scale (intimate vs arena) and cinematic level
+8. Compatible tension/aggression pattern
+9. Same listening context / scenario (night, drive, dinner, workout, etc.)
+10. Would sound NATURAL played right after any song already in that world
 
-LANGUAGE HAS ZERO WEIGHT. Completely ignore what language a song is in. A Spanish indie ballad goes with English indie ballads. A French electronic track goes with German electronic tracks. The only thing that matters is HOW IT SOUNDS.
+Same artist ≠ same world. Two Mecano / Julio Iglesias / Sting / Kanye tracks can go to different worlds if their sonic feel differs. Same genre ≠ same world (melodic rap vs dark minimalist rap must separate; heavy driving rock vs melodic softer rock must separate).
+
+LANGUAGE HAS ZERO WEIGHT. Ignore language completely. Only HOW IT SOUNDS matters.
 
 ASSIGNMENT RULES:
-- If a song scores 7+ for a world, assign it there with confidence 0.7-1.0
-- If a song scores 5-6 for the BEST world, assign it to the best match with confidence 0.5-0.6
-- If a song scores <5 for ALL worlds, assign to "needs_review" with confidence 0.3
-- Maximum 5% of songs should go to "needs_review"
-- When in doubt between two worlds, pick the one where the song's GROOVE and ENERGY fit better
+- 7+ match: assign with confidence 0.7–1.0
+- 5–6 for BEST world: assign to best match with confidence 0.5–0.6
+- <5 for ALL worlds: assign to "needs_review" with confidence 0.3
+- A song MAY appear in more than one world ONLY if it genuinely fits multiple distinct ambiences at 7+ (do not duplicate without a clear reason)
+- Never force a song into a world just to place it. "needs_review" is acceptable (<5% of library).
+- When tied, pick the world where GROOVE + ENERGY fit better.
 
-ANTI-LANGUAGE CHECK: If you notice yourself assigning 3+ songs in a row from the same language to the same world, STOP and verify each one independently based on sonic qualities alone.`;
+ANTI-LANGUAGE CHECK: if you catch yourself assigning 3+ same-language songs in a row to the same world, re-verify each on sonic qualities alone.`;
 
 const ASSIGN_TOOL = {
   type: "function" as const,
