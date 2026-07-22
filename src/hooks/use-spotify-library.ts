@@ -458,6 +458,7 @@ export function useSpotifyLibrary(options: UseSpotifyLibraryOptions = {}) {
     syncStages,
     allDone,
     lastSyncResult,
+    syncError,
     syncMeta,
     lastSyncedLabel,
     refresh,
