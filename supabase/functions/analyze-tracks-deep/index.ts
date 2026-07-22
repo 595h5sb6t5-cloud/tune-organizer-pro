@@ -11,8 +11,9 @@ const corsHeaders = {
 
 // Version markers — bumping any of these invalidates cache and forces re-analysis.
 const ANALYSIS_VERSION = "v2";
-const PROMPT_VERSION = "v2.1-2026-11";
-const SCHEMA_VERSION = "v2.0";
+const PROMPT_VERSION = "v2.2-2026-11-lang";
+const SCHEMA_VERSION = "v2.1";
+
 const MODEL = "gpt-4o-mini";
 
 /* ─────────────── System prompt (stable — long fixed instructions live here so
