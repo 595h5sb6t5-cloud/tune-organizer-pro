@@ -325,28 +325,110 @@ function Stat({ label, value }: { label: string; value: number | string }) {
   );
 }
 
+const V3_PROMPT_VERSION = "v3.0-2026-family-subgenre";
+const SAMPLE_ANALYSIS_BATCH_SIZE = 40;
+const MAX_ATTEMPTS_PER_TRACK = 3;
+
+type SampleState = {
+  sample_id: string;
+  label: string;
+  size: number;
+  library_size: number;
+  spotify_track_ids: string[];
+  reasons_summary: Record<string, number>;
+  preview: { spotify_track_id: string; name: string | null; artist: string | null; reason: string }[];
+};
+
+async function countAnalyzedInSample(userId: string, ids: string[]): Promise<Set<string>> {
+  if (!ids.length) return new Set();
+  const done = new Set<string>();
+  const CHUNK = 200;
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const slice = ids.slice(i, i + CHUNK);
+    const { data } = await supabase
+      .from("ai_track_analysis")
+      .select("spotify_track_id")
+      .eq("user_id", userId)
+      .eq("analysis_version", "v3")
+      .eq("prompt_version", V3_PROMPT_VERSION)
+      .in("spotify_track_id", slice);
+    for (const r of data ?? []) if (r.spotify_track_id) done.add(r.spotify_track_id);
+  }
+  return done;
+}
+
 function Phase1DiagnosticPanel() {
+  const { user } = useAuth();
   const [buildingSample, setBuildingSample] = useState(false);
+  const [loadingExisting, setLoadingExisting] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
-  const [sample, setSample] = useState<null | {
-    sample_id: string; label: string; size: number; library_size: number;
-    spotify_track_ids: string[];
-    reasons_summary: Record<string, number>;
-    preview: { spotify_track_id: string; name: string | null; artist: string | null; reason: string }[];
-  }>(null);
-  const [analysisResult, setAnalysisResult] = useState<null | {
-    analyzed: number; failed: number; remaining: number; batch_size: number;
-  }>(null);
+  const [sample, setSample] = useState<SampleState | null>(null);
+  const [analyzedIds, setAnalyzedIds] = useState<Set<string>>(new Set());
+  const [failedAttempts, setFailedAttempts] = useState<Record<string, number>>({});
+  const [permanentlyFailed, setPermanentlyFailed] = useState<Set<string>>(new Set());
+  const [currentBatch, setCurrentBatch] = useState<{ index: number; total: number } | null>(null);
+  const [lastError, setLastError] = useState<string | null>(null);
   const jobsApi = useJobs();
+
+  const sampleSize = sample?.size ?? 0;
+  const processed = analyzedIds.size;
+  const failed = permanentlyFailed.size;
+  const pending = Math.max(0, sampleSize - processed - failed);
+  const complete = sample != null && processed + failed >= sampleSize;
+
+  // Load latest persisted sample on mount so refreshing the page doesn't lose progress.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!user) { setLoadingExisting(false); return; }
+      const { data } = await supabase
+        .from("diagnostic_samples")
+        .select("id, label, size, spotify_track_ids, selection_reasons")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (cancelled) return;
+      if (data) {
+        const ids = (data.spotify_track_ids as string[]) ?? [];
+        const reasons = (data.selection_reasons as Record<string, string>) ?? {};
+        const summary: Record<string, number> = {};
+        for (const r of Object.values(reasons)) {
+          const key = String(r).split(":")[0];
+          summary[key] = (summary[key] ?? 0) + 1;
+        }
+        setSample({
+          sample_id: data.id,
+          label: data.label,
+          size: data.size,
+          library_size: 0,
+          spotify_track_ids: ids,
+          reasons_summary: summary,
+          preview: [],
+        });
+        const done = await countAnalyzedInSample(user.id, ids);
+        if (!cancelled) setAnalyzedIds(done);
+      }
+      setLoadingExisting(false);
+    })();
+    return () => { cancelled = true; };
+  }, [user?.id]);
 
   const buildSample = async () => {
     setBuildingSample(true);
-    setAnalysisResult(null);
+    setLastError(null);
+    setAnalyzedIds(new Set());
+    setPermanentlyFailed(new Set());
+    setFailedAttempts({});
     try {
       const { data, error } = await supabase.functions.invoke("select-diagnostic-sample", { body: { size: 150 } });
       if (error) throw new Error(error.message);
       if (data?.error) throw new Error(data.error);
       setSample(data);
+      if (user) {
+        const done = await countAnalyzedInSample(user.id, data.spotify_track_ids ?? []);
+        setAnalyzedIds(done);
+      }
       toast.success("Muestra lista", { description: `${data.size} canciones de ${data.library_size}` });
     } catch (e: any) {
       toast.error("No se pudo armar la muestra", { description: e.message });
@@ -355,43 +437,97 @@ function Phase1DiagnosticPanel() {
     }
   };
 
-  const analyzeSample = async () => {
-    if (!sample) return;
+  const runAnalysisLoop = async () => {
+    if (!sample || !user) return;
     setAnalyzing(true);
+    setLastError(null);
     const jobId = jobsApi.startJob({
       type: "playlist_generation",
       label: `Analizando muestra Fase 1 (${sample.size} canciones)`,
-      message: "Corriendo análisis v3.0 con familia, subgénero y house_profile…",
-      retry: () => { void analyzeSample(); },
+      message: "Corriendo análisis v3.0 en lotes resumibles…",
+      retry: () => { void runAnalysisLoop(); },
     });
+
     try {
-      // Run in one batch — 150 tracks with concurrency=8 takes ~1-2 min.
-      const { data, error } = await supabase.functions.invoke("analyze-tracks-deep", {
-        body: {
-          spotify_track_ids: sample.spotify_track_ids,
-          batch_size: sample.size,
-          concurrency: 8,
-          diagnostic: true,
-          force: true,
-        },
-      });
-      if (error) throw new Error(error.message);
-      if (data?.error) throw new Error(data.error);
-      setAnalysisResult({
-        analyzed: data.analyzed ?? 0,
-        failed: data.failed ?? 0,
-        remaining: data.remaining ?? 0,
-        batch_size: data.batch_size ?? 0,
-      });
-      jobsApi.completeJob(jobId, `${data.analyzed} analizadas · ${data.failed} fallidas`);
-      toast.success("Análisis v3.0 completado", { description: `${data.analyzed} canciones con familia + subgénero + house_profile` });
+      let currentAnalyzed = new Set(analyzedIds);
+      let currentFailedAttempts = { ...failedAttempts };
+      let currentPermanentFailed = new Set(permanentlyFailed);
+      let safety = 0;
+
+      while (safety++ < 20) {
+        const remaining = sample.spotify_track_ids.filter(
+          (id) => !currentAnalyzed.has(id) && !currentPermanentFailed.has(id),
+        );
+        if (remaining.length === 0) break;
+
+        const batch = remaining.slice(0, SAMPLE_ANALYSIS_BATCH_SIZE);
+        const batchIndex = Math.ceil((sample.size - remaining.length) / SAMPLE_ANALYSIS_BATCH_SIZE) + 1;
+        const totalBatches = Math.ceil(sample.size / SAMPLE_ANALYSIS_BATCH_SIZE);
+        setCurrentBatch({ index: batchIndex, total: totalBatches });
+
+        const { data, error } = await supabase.functions.invoke("analyze-tracks-deep", {
+          body: {
+            spotify_track_ids: batch,
+            batch_size: batch.length,
+            concurrency: 8,
+            diagnostic: true,
+            force: false,
+          },
+        });
+        if (error) throw new Error(error.message);
+        if (data?.error) throw new Error(data.error);
+
+        // Re-check DB (source of truth) — the function response can be misleading
+        // because it reports library-wide counters.
+        const doneNow = await countAnalyzedInSample(user.id, sample.spotify_track_ids);
+        currentAnalyzed = doneNow;
+        setAnalyzedIds(new Set(doneNow));
+
+        // Any ID in the batch that still isn't analyzed → increment failure count
+        for (const id of batch) {
+          if (!doneNow.has(id)) {
+            const next = (currentFailedAttempts[id] ?? 0) + 1;
+            currentFailedAttempts[id] = next;
+            if (next >= MAX_ATTEMPTS_PER_TRACK) {
+              currentPermanentFailed.add(id);
+              console.warn(`[phase1] permanently failed: ${id} (${next} attempts)`);
+            }
+          } else {
+            delete currentFailedAttempts[id];
+          }
+        }
+        setFailedAttempts({ ...currentFailedAttempts });
+        setPermanentlyFailed(new Set(currentPermanentFailed));
+
+        jobsApi.updateJob(jobId, {
+          message: `Lote ${batchIndex}/${totalBatches} · ${doneNow.size}/${sample.size} analizadas · ${currentPermanentFailed.size} fallidas`,
+        });
+      }
+
+      setCurrentBatch(null);
+      const finalAnalyzed = currentAnalyzed.size;
+      const finalFailed = currentPermanentFailed.size;
+      jobsApi.completeJob(jobId, `${finalAnalyzed}/${sample.size} analizadas · ${finalFailed} fallidas`);
+      if (finalAnalyzed >= sample.size) {
+        toast.success("Muestra 150/150 completa", { description: "Fase 2 desbloqueada" });
+      } else if (finalAnalyzed + finalFailed >= sample.size) {
+        toast.warning(`${finalAnalyzed} analizadas, ${finalFailed} imposibles`, {
+          description: "Revisa los IDs fallidos antes de aprobar Fase 2",
+        });
+      } else {
+        toast.info(`Progreso: ${finalAnalyzed}/${sample.size}`, { description: "Vuelve a correr para continuar" });
+      }
     } catch (e: any) {
+      setLastError(e.message);
       jobsApi.failJob(jobId, e.message);
-      toast.error("Análisis falló", { description: e.message });
+      toast.error("Análisis interrumpido", { description: e.message });
     } finally {
       setAnalyzing(false);
+      setCurrentBatch(null);
     }
   };
+
+  const percent = sampleSize ? Math.round((processed / sampleSize) * 100) : 0;
 
   return (
     <div className="rounded-3xl border border-accent/40 bg-accent/5 p-6 md:p-8 mb-2">
@@ -401,50 +537,108 @@ function Phase1DiagnosticPanel() {
       </div>
       <h2 className="font-heading text-2xl mb-2">Muestra de 150 canciones (v3.0 — familia + subgénero + house_profile)</h2>
       <p className="text-sm text-muted-foreground mb-4">
-        Arma una muestra diseñada para romper el sistema (House de varios subgéneros, RÜFÜS DU SOL, Kanye + Elton John, artistas de identidad fuerte, cruces de género),
-        y córrele el nuevo análisis profundo. Los datos que salgan de aquí son los que Fase 2 usará para el clustering endurecido.
+        Arma una muestra de 150 canciones y córrele el análisis v3.0 en lotes resumibles. Fase 2 solo se desbloquea cuando las 150 estén completas.
       </p>
 
       <div className="flex flex-wrap gap-2 mb-4">
-        <Button variant="hero" onClick={buildSample} disabled={buildingSample || analyzing}>
-          {buildingSample ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Armando…</> : <>1. Armar muestra (150)</>}
+        <Button variant="hero" onClick={buildSample} disabled={buildingSample || analyzing || loadingExisting}>
+          {buildingSample ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Armando…</> : <>1. Armar muestra nueva (150)</>}
         </Button>
-        <Button variant="outline" onClick={analyzeSample} disabled={!sample || analyzing}>
-          {analyzing ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Analizando…</> : <>2. Correr análisis v3.0</>}
+        <Button variant="outline" onClick={runAnalysisLoop} disabled={!sample || analyzing || loadingExisting || complete}>
+          {analyzing
+            ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Analizando lote {currentBatch?.index}/{currentBatch?.total}…</>
+            : complete ? <>Muestra completa ✓</> : <>2. Correr / continuar análisis v3.0</>}
         </Button>
       </div>
 
       {sample && (
         <div className="rounded-2xl border border-border/50 bg-background/50 p-4 space-y-3">
-          <div className="flex flex-wrap gap-2 text-xs">
-            <Badge variant="secondary">{sample.size} canciones · biblioteca {sample.library_size}</Badge>
-            {Object.entries(sample.reasons_summary).map(([k, v]) => (
-              <Badge key={k} variant="outline">{k}: {v}</Badge>
-            ))}
+          {/* Sample-scoped progress */}
+          <div>
+            <div className="flex justify-between text-xs mb-1">
+              <span className="text-muted-foreground">Progreso de la muestra</span>
+              <span className="font-mono">{processed} / {sampleSize} ({percent}%)</span>
+            </div>
+            <div className="h-2 rounded-full bg-background overflow-hidden">
+              <div
+                className={`h-full transition-all ${complete ? "bg-emerald-500" : "bg-accent"}`}
+                style={{ width: `${percent}%` }}
+              />
+            </div>
+            <div className="flex flex-wrap gap-2 text-xs mt-2">
+              <Badge variant="secondary">sample_size: {sampleSize}</Badge>
+              <Badge variant="secondary">sample_processed: {processed}</Badge>
+              <Badge variant={pending > 0 ? "outline" : "secondary"}>sample_pending: {pending}</Badge>
+              <Badge variant={failed > 0 ? "destructive" : "secondary"}>sample_failed: {failed}</Badge>
+              {currentBatch && (
+                <Badge variant="outline">current_batch: {currentBatch.index}/{currentBatch.total}</Badge>
+              )}
+              <Badge variant="outline">
+                status: {complete ? "completed" : analyzing ? "running" : failed > 0 && pending === 0 ? "failed" : "idle"}
+              </Badge>
+            </div>
           </div>
-          <details>
-            <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">Ver preview (30 canciones)</summary>
-            <ul className="mt-2 space-y-1 max-h-56 overflow-y-auto pr-2 text-xs">
-              {sample.preview.map((t) => (
-                <li key={t.spotify_track_id} className="flex justify-between gap-2">
-                  <span className="truncate">{t.name} — <span className="text-muted-foreground">{t.artist}</span></span>
-                  <span className="text-muted-foreground shrink-0">{t.reason}</span>
-                </li>
+
+          {Object.keys(sample.reasons_summary).length > 0 && (
+            <div className="flex flex-wrap gap-1 text-xs pt-2 border-t border-border/40">
+              <span className="text-muted-foreground mr-1">Cuotas:</span>
+              {Object.entries(sample.reasons_summary).map(([k, v]) => (
+                <Badge key={k} variant="outline" className="text-[10px]">{k}: {v}</Badge>
               ))}
-            </ul>
-          </details>
+            </div>
+          )}
+
+          {sample.preview.length > 0 && (
+            <details>
+              <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">Ver preview (30 canciones)</summary>
+              <ul className="mt-2 space-y-1 max-h-56 overflow-y-auto pr-2 text-xs">
+                {sample.preview.map((t) => (
+                  <li key={t.spotify_track_id} className="flex justify-between gap-2">
+                    <span className="truncate">{t.name} — <span className="text-muted-foreground">{t.artist}</span></span>
+                    <span className="text-muted-foreground shrink-0">{t.reason}</span>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+
+          {permanentlyFailed.size > 0 && (
+            <details>
+              <summary className="cursor-pointer text-xs text-destructive hover:text-foreground">
+                Ver {permanentlyFailed.size} IDs fallidos permanentemente
+              </summary>
+              <ul className="mt-2 space-y-1 max-h-40 overflow-y-auto pr-2 text-[10px] font-mono">
+                {Array.from(permanentlyFailed).map((id) => (
+                  <li key={id} className="text-muted-foreground">{id}</li>
+                ))}
+              </ul>
+            </details>
+          )}
         </div>
       )}
 
-      {analysisResult && (
+      {lastError && (
+        <div className="mt-3 rounded-xl border border-destructive/40 bg-destructive/5 p-3 text-xs text-destructive">
+          {lastError}
+        </div>
+      )}
+
+      {complete && (
         <div className="mt-4 rounded-2xl border border-emerald-500/40 bg-emerald-500/5 p-4 text-sm">
-          <p><strong>{analysisResult.analyzed}</strong> canciones analizadas con schema v3.0 · <strong>{analysisResult.failed}</strong> fallidas · pendientes: {analysisResult.remaining}</p>
+          <p>
+            <strong>{processed}/{sampleSize}</strong> analizadas con <code>music_family</code>, <code>primary_subgenre</code>,{" "}
+            <code>artist_context</code> y <code>house_profile</code> cuando aplique.
+            {failed > 0 && <> · <strong>{failed}</strong> fallidas (revisar antes de aprobar Fase 2)</>}
+          </p>
           <p className="text-xs text-muted-foreground mt-1">
-            Cada canción ahora tiene: <code>music_family</code>, <code>primary_subgenre</code>, <code>house_profile</code> (cuando aplique) y <code>artist_context</code>.
-            Siguiente paso (Fase 2): correr el clustering endurecido sobre esta muestra y comparar contra el resultado actual.
+            Fase 2 (clustering endurecido) ya puede correr sobre esta muestra.
           </p>
         </div>
       )}
+
+      <p className="text-[10px] text-muted-foreground mt-3">
+        Nota: la biblioteca completa (fuera de la muestra) se analiza aparte con su propio contador; no se mezcla con este panel.
+      </p>
     </div>
   );
 }
