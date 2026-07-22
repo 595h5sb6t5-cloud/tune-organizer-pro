@@ -16,12 +16,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { useJobs } from "@/hooks/use-jobs";
 import { toast } from "sonner";
 
-const SUGGESTED_CONCEPTS = [
-  "Late Night Drive", "Tropical Sunset", "Soft Indie Mood", "Poolside Grooves",
-  "Old School Soul", "Dance Clean Energy", "Main Character Walk", "Sunday Morning Calm",
-  "Beach Club Chill", "Golden Hour Grooves", "Elegant Indie Funk", "Warm Electronic Sunset",
-  "Pre-Game Energy", "Chill but Expensive", "Romantic but not Cheesy",
-];
+// Old concept-first generator kept in code for reference; UI uses ClusterSampleTest.
+
 
 const Playlists = () => {
   const { profile } = useAuth();
