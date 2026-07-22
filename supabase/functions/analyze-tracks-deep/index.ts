@@ -434,6 +434,7 @@ Deno.serve(async (req) => {
     const cache_hits_total = liked.length - pending.length;
 
     if (pending.length === 0) {
+      firePhase2Guard(supabaseUrl, svc, userId);
       return json({ done: true, analyzed: 0, remaining: 0, total: totalCount ?? 0, cache_hits: cache_hits_total, message: "All up to date" });
     }
 
