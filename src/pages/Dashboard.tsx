@@ -90,9 +90,8 @@ const Dashboard = () => {
         </div>
 
         {/* Stats grid */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <StatCard icon={Heart} label="Liked Songs" value={likedCount} to="/liked-songs" />
-          <StatCard icon={ListMusic} label="Playlists" value={playlists.length} to="/library" />
           <StatCard icon={Users} label="Followed Artists" value={followedArtists.length} to="/library" />
           <StatCard icon={Disc3} label="Saved Albums" value={albumCount} to="/library" />
         </div>
