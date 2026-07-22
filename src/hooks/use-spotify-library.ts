@@ -410,7 +410,7 @@ export function useSpotifyLibrary() {
 
   const lastSyncedLabel = formatTimeAgo(syncMeta.lastIncrementalSyncAt || syncMeta.lastFullSyncAt);
   const allDone = ["completed", "completed_with_restrictions"].includes(String(lastRunStatus)) &&
-    syncStages.every((stage) => stage.status === "done" || stage.status === "skipped");
+    syncStages.every((stage) => stage.status === "done" || stage.status === "skipped" || stage.status === "error");
 
   return {
     playlists,
