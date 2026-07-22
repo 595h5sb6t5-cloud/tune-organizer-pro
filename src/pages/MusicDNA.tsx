@@ -197,46 +197,118 @@ function ScanSummary({ dna }: { dna: ReturnType<typeof useMusicDna> }) {
   );
 }
 
-function DeepAnalysisPanel({ onComplete }: { onComplete: () => void }) {
-  const a = useDeepTrackAnalysis();
-  const pct = a.totalLiked > 0 ? Math.round((a.alreadyAnalyzed / a.totalLiked) * 100) : 0;
+function formatEta(seconds: number | null): string {
+  if (seconds == null || !Number.isFinite(seconds) || seconds <= 0) return "—";
+  if (seconds < 60) return `${seconds}s`;
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  if (m < 60) return s ? `${m}m ${s}s` : `${m}m`;
+  const h = Math.floor(m / 60);
+  return `${h}h ${m % 60}m`;
+}
 
-  const handle = async () => {
-    await a.start(false);
-    onComplete();
-  };
+function DeepAnalysisPanel({ onComplete }: { onComplete: () => void }) {
+  const a = useDeepAnalysisProgress();
+  const j = a.job;
+  const remaining = j ? Math.max(0, j.totalItems - j.itemsProcessed) : 0;
+  const stageLabel = j?.stage && j.stage in STAGE_LABEL ? STAGE_LABEL[j.stage as keyof typeof STAGE_LABEL] : "Sin actividad reciente";
+  const hasActivity = !!j && (a.isRunning || a.isDone || a.isFailed);
+
+  // When status transitions to completed, refresh parent stats.
+  const doneId = a.isDone ? j?.id ?? null : null;
+  useEffect(() => { if (doneId) onComplete(); }, [doneId, onComplete]);
+
+  const handleStart = () => { void a.start(false); };
+  const handleRetry = () => { void a.start(false); };
 
   return (
     <div className="rounded-2xl border border-border/50 bg-card/50 p-6">
       <div className="flex items-start justify-between gap-4 mb-4">
-        <div>
+        <div className="min-w-0">
           <p className="text-xs uppercase tracking-wider text-accent mb-1">Deep Analysis</p>
           <h3 className="font-heading text-lg">Análisis musical profundo con IA</h3>
           <p className="text-sm text-muted-foreground mt-1">
-            Cada canción se analiza individualmente: género, mood, energía, ritmo, contexto y compatibilidad.
+            Cada canción se analiza individualmente: género, mood, energía, ritmo, contexto y compatibilidad. Puedes cerrar esta pantalla; sigue en segundo plano.
           </p>
         </div>
-        <Button variant="hero" size="sm" onClick={handle} disabled={a.running}>
-          {a.running ? <><Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />Analizando…</> : <><Brain className="w-3.5 h-3.5 mr-1.5" />Iniciar</>}
-        </Button>
+        <div className="shrink-0">
+          {a.isRunning ? (
+            <Button variant="outline" size="sm" disabled>
+              <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />En curso
+            </Button>
+          ) : a.isFailed ? (
+            <Button variant="hero" size="sm" onClick={handleRetry} disabled={a.starting}>
+              <RefreshCw className="w-3.5 h-3.5 mr-1.5" />Reintentar
+            </Button>
+          ) : (
+            <Button variant="hero" size="sm" onClick={handleStart} disabled={a.starting || a.loading}>
+              {a.starting ? <><Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />Iniciando…</> : <><Brain className="w-3.5 h-3.5 mr-1.5" />{a.isDone ? "Reanalizar" : "Iniciar"}</>}
+            </Button>
+          )}
+        </div>
       </div>
 
-      {(a.running || a.done || a.error) && (
-        <div className="space-y-2">
-          <Progress value={pct} className="h-2" />
-          <div className="flex justify-between text-xs text-muted-foreground">
-            <span>{a.message}</span>
-            <span>
-              {a.alreadyAnalyzed}/{a.totalLiked || "?"}
-              {a.failedThisRun > 0 && ` · ${a.failedThisRun} pendientes`}
-            </span>
+      {hasActivity && j && (
+        <div className="space-y-4">
+          {/* Stage */}
+          <div className="flex items-center gap-2 text-xs">
+            {a.isDone ? (
+              <><CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" /><span className="text-emerald-500 font-medium">{stageLabel}</span></>
+            ) : a.isFailed ? (
+              <><AlertCircle className="w-3.5 h-3.5 text-destructive" /><span className="text-destructive font-medium">{stageLabel}</span></>
+            ) : (
+              <><Loader2 className="w-3.5 h-3.5 animate-spin text-accent" /><span className="text-accent font-medium">{stageLabel}</span></>
+            )}
           </div>
-        </div>
-      )}
 
-      {a.error && (
-        <div className="mt-3 text-xs text-destructive">
-          {a.error} — Las canciones que fallaron quedan marcadas para reintento. Puedes pulsar Iniciar de nuevo.
+          {/* Progress bar */}
+          <Progress value={a.progressPct} className="h-2" />
+
+          {/* Numbers row */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+            <div className="rounded-lg bg-card/60 border border-border/40 p-3">
+              <p className="text-muted-foreground uppercase tracking-wider text-[10px] mb-1">Progreso</p>
+              <p className="font-heading text-base">{j.itemsProcessed.toLocaleString()} <span className="text-muted-foreground text-xs">/ {j.totalItems.toLocaleString()}</span></p>
+              <p className="text-muted-foreground text-[11px]">{a.progressPct}%</p>
+            </div>
+            <div className="rounded-lg bg-card/60 border border-border/40 p-3">
+              <p className="text-muted-foreground uppercase tracking-wider text-[10px] mb-1">Restantes</p>
+              <p className="font-heading text-base">{remaining.toLocaleString()}</p>
+              <p className="text-muted-foreground text-[11px]">canciones</p>
+            </div>
+            <div className="rounded-lg bg-card/60 border border-border/40 p-3">
+              <p className="text-muted-foreground uppercase tracking-wider text-[10px] mb-1 flex items-center gap-1"><Timer className="w-3 h-3" />Tiempo restante</p>
+              <p className="font-heading text-base">{a.isRunning ? formatEta(j.etaSeconds) : "—"}</p>
+              <p className="text-muted-foreground text-[11px]">{j.avgMsPerTrack ? `${Math.round(j.avgMsPerTrack)}ms/canción` : "calculando…"}</p>
+            </div>
+            <div className="rounded-lg bg-card/60 border border-border/40 p-3">
+              <p className="text-muted-foreground uppercase tracking-wider text-[10px] mb-1">Reintentos</p>
+              <p className="font-heading text-base">{j.retryCount.toLocaleString()}</p>
+              <p className="text-muted-foreground text-[11px]">{j.failedCount > 0 ? `${j.failedCount} pendientes` : "todo ok"}</p>
+            </div>
+          </div>
+
+          {/* Cache hits + batches */}
+          {(j.cacheHits > 0 || j.batchesCompleted > 0) && (
+            <p className="text-[11px] text-muted-foreground">
+              {j.batchesCompleted > 0 && <>Lote {j.batchesCompleted} · </>}
+              {j.cacheHits > 0 && <>{j.cacheHits.toLocaleString()} canciones reutilizadas del análisis previo</>}
+            </p>
+          )}
+
+          {/* Errors surfaced without stopping */}
+          {j.lastError && a.isRunning && (
+            <div className="text-[11px] text-amber-600 dark:text-amber-500 flex items-start gap-1.5">
+              <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+              <span>Error transitorio: {j.lastError}. Continuamos con el siguiente lote.</span>
+            </div>
+          )}
+          {a.isFailed && j.errorMessage && (
+            <div className="text-xs text-destructive flex items-start gap-1.5">
+              <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+              <span>{j.errorMessage}</span>
+            </div>
+          )}
         </div>
       )}
     </div>
