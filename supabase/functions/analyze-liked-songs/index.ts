@@ -786,7 +786,7 @@ Deno.serve(async (req) => {
           ].join("\n");
 
           const result = await callAI(API_KEY, "gpt-4o-mini", WORLDS_SYS,
-            `Design ALL sonic worlds for this library. Aim for ${suggest}+ distinct worlds.\n\nREMINDER: NEVER group by language. NEVER create "Uncategorized". Every world needs a specific sonic identity.\n\n${ctx}\n\nUse define_sonic_worlds.`,
+            `Design ALL sonic worlds for this library. Aim for ${suggest}+ distinct worlds.\n\nREMINDER: Respect the LANGUAGE RULE (English alone; Spanish/Portuguese/Italian/French can share Romance worlds). NEVER create "Uncategorized". Every world needs a specific sonic identity + compatible language family.\n\n${ctx}\n\nUse define_sonic_worlds.`,
             [WORLDS_TOOL], { type: "function", function: { name: "define_sonic_worlds" } }, 0.5, 8192);
 
           const worlds = result.worlds || [];
