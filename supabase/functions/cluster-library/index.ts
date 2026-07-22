@@ -389,7 +389,7 @@ Deno.serve(async (req) => {
         clustered_tracks: clusters.reduce((a, c) => a + c.members.length, 0),
         unassigned: unassigned.length,
       },
-      thresholds: { MIN_SIZE, RELAX_MIN_SIZE, RELAX_AVG, RELAX_MIN, AVG_COMPAT_MIN, MIN_COMPAT_FLOOR, SEED_JOIN_THRESHOLD, MAX_DIM_SPREAD },
+      thresholds: { MIN_SIZE, AVG_COMPAT_MIN, MIN_COMPAT_FLOOR, PCT_ABOVE_STRONG, STRONG_FIT, SEED_JOIN_THRESHOLD, MAX_DIM_SPREAD },
       clusters: report,
       unassigned: unassignedReport,
     });
