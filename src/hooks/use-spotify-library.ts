@@ -146,12 +146,16 @@ function stageStatus(status: string): StageStatus {
 }
 
 function stageDetail(row: any): string | undefined {
-  if (row.error_message) return String(row.error_message);
+  const status = String(row.status || "pending");
+  if (row.error_message) {
+    if (status === "waiting_rate_limit" || String(row.error_message).toLowerCase().includes("rate limit")) return "Rate limited";
+    return "Failed";
+  }
   const processed = Number(row.items_processed ?? 0);
   const found = Number(row.items_found ?? 0);
   const created = Number(row.items_created ?? 0);
   const removed = Number(row.items_removed_or_deactivated ?? 0);
-  if (row.status === "running" && found > 0) return `${processed} / ${found}`;
+  if (status === "running" && found > 0) return `${processed} / ${found}`;
   const parts: string[] = [];
   if (processed > 0 || found > 0) parts.push(found > 0 ? `${processed}/${found}` : `${processed}`);
   if (created > 0) parts.push(`+${created}`);
@@ -180,6 +184,15 @@ function mapStages(rows: any[] | null | undefined): SyncStageState[] {
   });
 }
 
+function extractSyncError(run: any | null, stages: any[] | null | undefined): string | null {
+  if (run?.error_message) return String(run.error_message);
+  if (!stages?.length) return null;
+  for (const row of stages) {
+    if (row.error_message) return String(row.error_message);
+  }
+  return null;
+}
+
 function isActiveRun(run: any | null) {
   return !!run && ["pending", "running", "waiting_rate_limit"].includes(String(run.status));
 }
@@ -201,6 +214,7 @@ export function useSpotifyLibrary(options: UseSpotifyLibraryOptions = {}) {
   const [lastSyncResult, setLastSyncResult] = useState<Record<string, any> | null>(null);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [lastRunStatus, setLastRunStatus] = useState<string | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
   const pollingRef = useRef<number | null>(null);
   const [syncMeta, setSyncMeta] = useState<SyncMetadata>({
     syncStatus: "idle",
@@ -354,6 +368,7 @@ export function useSpotifyLibrary(options: UseSpotifyLibraryOptions = {}) {
     setActiveRunId(run?.id ?? null);
     setLastRunStatus(run?.status ?? null);
     setSyncing(isActiveRun(run));
+    setSyncError(extractSyncError(run, res.stages));
     if (run?.summary) setLastSyncResult(run.summary);
     if (run && !isActiveRun(run)) await refreshData();
     return run;
@@ -443,6 +458,7 @@ export function useSpotifyLibrary(options: UseSpotifyLibraryOptions = {}) {
     syncStages,
     allDone,
     lastSyncResult,
+    syncError,
     syncMeta,
     lastSyncedLabel,
     refresh,
