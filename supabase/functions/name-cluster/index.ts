@@ -192,14 +192,21 @@ Name this specific sonic world.`;
       min_compat: cluster.min_compat,
       dimensions_summary: cluster.dominant_dimensions,
       source_cluster_id: cluster_id,
+      intent_profile: {
+        second_layer: {
+          dominant_genre: dominantGenre,
+          dropped: dropReport.map((f) => ({ name: f.name, artist: f.artist, reason: f.action, final: Number(f.final.toFixed(3)) })),
+          flagged: flagReport.map((f) => ({ name: f.name, artist: f.artist, action: f.action, final: Number(f.final.toFixed(3)), sonic: Number(f.sonic.toFixed(3)), context: Number(f.context.toFixed(3)), penalty: Number(f.penalty.toFixed(3)) })),
+        },
+      },
     }).select("id").single();
     if (plErr || !pl) return json({ error: "failed to create playlist", detail: plErr?.message }, 500);
 
-    // Ensure tracks rows
-    const { data: existing } = await adm.from("tracks").select("id, spotify_track_id").in("spotify_track_id", sids);
+    // Ensure tracks rows (only the filtered set)
+    const { data: existing } = await adm.from("tracks").select("id, spotify_track_id").in("spotify_track_id", filteredSids);
     const idMap = new Map<string, string>();
     for (const t of existing ?? []) idMap.set(t.spotify_track_id, t.id);
-    const toInsert = sids.filter((s) => !idMap.has(s)).map((s) => {
+    const toInsert = filteredSids.filter((s) => !idMap.has(s)).map((s) => {
       const l: any = nameMap.get(s) ?? {};
       return { spotify_track_id: s, name: l.track_name ?? "Unknown", artist_names: l.artist_name ? [l.artist_name] : [], album_name: null };
     });
@@ -208,20 +215,32 @@ Name this specific sonic world.`;
       for (const t of ins ?? []) idMap.set(t.spotify_track_id, t.id);
     }
 
-    const rows = (cts ?? []).map((t: any, i: number) => ({
+    const compatMap = new Map((cts ?? []).map((t: any) => [t.spotify_track_id, t.compat_to_centroid]));
+    const rows = filteredSids.map((s, i) => ({
       generated_playlist_id: pl.id,
       user_id: user.id,
-      track_id: idMap.get(t.spotify_track_id)!,
+      track_id: idMap.get(s)!,
       position: i + 1,
       added_by: "ai",
-      fit_score: t.compat_to_centroid,
+      fit_score: compatMap.get(s) ?? null,
       reason_for_inclusion: null,
     })).filter((r) => r.track_id);
     if (rows.length) await adm.from("generated_playlist_tracks").insert(rows);
 
     await adm.from("cluster_candidates").update({ status: "promoted", promoted_playlist_id: pl.id }).eq("id", cluster_id);
 
-    return json({ success: true, playlist_id: pl.id, name, track_count: rows.length });
+    return json({
+      success: true,
+      playlist_id: pl.id,
+      name,
+      track_count: rows.length,
+      second_layer: {
+        dropped: dropReport.length,
+        flagged: flagReport.length,
+        dominant_genre: dominantGenre,
+      },
+    });
+
   } catch (e: any) {
     console.error("name-cluster", e);
     return json({ error: e?.message ?? "unknown" }, 500);
