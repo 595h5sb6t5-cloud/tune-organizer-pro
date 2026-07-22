@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import {
   Sparkles, Loader2, Music, Plus, Wand2, ExternalLink, ArrowLeft, ArrowUp, ArrowDown,
-  Trash2, Upload, Pencil, Check, X, ListMusic, AlertTriangle, Globe, Lock, RefreshCw, Settings as SettingsIcon,
+  Trash2, Upload, Pencil, Check, X, ListMusic, AlertTriangle, Globe, Lock, RefreshCw, Settings as SettingsIcon, ShieldCheck,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import AppLayout from "@/components/app/AppLayout";
@@ -202,6 +202,8 @@ function PlaylistDetail({ playlistId, onBack }: { playlistId: string; onBack: ()
   const [exporting, setExporting] = useState(false);
   const [isPublic, setIsPublic] = useState(false);
   const [exportError, setExportError] = useState<{ message: string; step?: string; needsReauth?: boolean } | null>(null);
+  const [reviewing, setReviewing] = useState(false);
+  const [review, setReview] = useState<any>(null);
 
   if (loading || !playlist) {
     return <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin" />Cargando…</div>;
@@ -261,6 +263,33 @@ function PlaylistDetail({ playlistId, onBack }: { playlistId: string; onBack: ()
       setExporting(false);
     }
   };
+
+  const runReview = async (apply: boolean) => {
+    setReviewing(true);
+    const jobId = jobsApi.startJob({
+      type: "playlist_review",
+      label: apply ? `Aplicando revisión a "${playlist.name}"` : `Revisando "${playlist.name}" con IA`,
+      message: "Analizando coherencia sonora…",
+      retry: () => { void runReview(apply); },
+    });
+    try {
+      const { data, error } = await supabase.functions.invoke("review-playlist", {
+        body: { generated_playlist_id: playlistId, apply },
+      });
+      if (error) throw new Error(error.message);
+      if (data?.error) throw new Error(data.error);
+      setReview(data.review);
+      jobsApi.completeJob(jobId, apply ? "Revisión aplicada" : `Coherencia ${(data.review?.coherence_score ?? 0).toFixed(2)}`);
+      if (apply) { await refresh(); toast.success("Revisión aplicada"); }
+      else toast.success("Revisión lista");
+    } catch (e: any) {
+      jobsApi.failJob(jobId, e.message);
+      toast.error("No se pudo revisar", { description: e.message });
+    } finally {
+      setReviewing(false);
+    }
+  };
+
 
   const status = playlist.status || (playlist.is_exported_to_spotify ? "exported" : "draft");
 
@@ -333,9 +362,58 @@ function PlaylistDetail({ playlistId, onBack }: { playlistId: string; onBack: ()
                   {exporting ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" />Exportando…</> : <><Upload className="w-4 h-4 mr-1.5" />Exportar a Spotify</>}
                 </Button>
               )}
+              <Button variant="outline" size="sm" onClick={() => runReview(false)} disabled={reviewing || tracks.length === 0}>
+                {reviewing ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" />Revisando…</> : <><ShieldCheck className="w-4 h-4 mr-1.5" />Revisar con IA</>}
+              </Button>
             </div>
+
+            {review && (
+              <div className="mt-5 rounded-2xl border border-border/50 bg-background/40 p-4">
+                <div className="flex items-center justify-between gap-3 mb-3">
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck className={`w-4 h-4 ${review.approved ? "text-accent" : "text-destructive"}`} />
+                    <p className="text-sm font-medium">
+                      {review.approved ? "Playlist aprobada" : "Necesita ajustes"}
+                    </p>
+                  </div>
+                  <div className="flex gap-3 text-xs text-muted-foreground tabular-nums">
+                    <span>Coh. {Math.round((review.coherence_score ?? 0) * 100)}%</span>
+                    <span>Nom. {Math.round((review.name_score ?? 0) * 100)}%</span>
+                    <span>Ord. {Math.round((review.ordering_score ?? 0) * 100)}%</span>
+                  </div>
+                </div>
+                {review.main_issue && review.main_issue !== "ninguno" && (
+                  <p className="text-xs text-muted-foreground mb-3"><strong className="text-foreground">Problema:</strong> {review.main_issue}</p>
+                )}
+                {review.songs_to_remove?.length > 0 && (
+                  <div className="mb-2">
+                    <p className="text-xs font-medium mb-1">Sugiere eliminar {review.songs_to_remove.length}:</p>
+                    <ul className="text-xs text-muted-foreground space-y-1">
+                      {review.songs_to_remove.slice(0, 5).map((r: any, i: number) => (
+                        <li key={i}>• {tracks.find(t => t.spotify_track_id === r.spotify_track_id)?.name ?? r.spotify_track_id}: {r.reason}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {review.songs_to_reorder?.length > 0 && (
+                  <p className="text-xs text-muted-foreground mb-2">Sugiere reordenar {review.songs_to_reorder.length} canciones.</p>
+                )}
+                {review.should_split && (
+                  <p className="text-xs text-muted-foreground mb-2"><strong className="text-foreground">Dividir:</strong> {review.split_reason}</p>
+                )}
+                <div className="flex flex-wrap gap-2 mt-3">
+                  <Button variant="hero" size="sm" onClick={() => runReview(true)} disabled={reviewing}>
+                    <Check className="w-3.5 h-3.5 mr-1.5" />Aplicar cambios
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => setReview(null)}>
+                    <X className="w-3.5 h-3.5 mr-1.5" />Descartar
+                  </Button>
+                </div>
+              </div>
+            )}
           </>
         )}
+
 
         {exportError && (
           <div className="mt-5 rounded-xl border border-destructive/40 bg-destructive/5 p-4">
