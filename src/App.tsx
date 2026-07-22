@@ -44,7 +44,7 @@ const App = () => (
                 <Route path="/ai-playlists" element={<Playlists />} />
                 <Route path="/playlists" element={<Navigate to="/ai-playlists" replace />} />
                 <Route path="/playlists/:id" element={<PlaylistDetail />} />
-                <Route path="/discover" element={<Discover />} />
+                <Route path="/discover" element={<Navigate to="/ai-playlists" replace />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="/spotify-callback" element={<SpotifyCallback />} />
                 <Route path="/sync" element={<Navigate to="/dashboard" replace />} />
