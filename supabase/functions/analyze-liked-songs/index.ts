@@ -913,7 +913,7 @@ Deno.serve(async (req) => {
 
             const sl = songs.map((s: any, i: number) => fmtSong(s, i)).join("\n");
             const p = await callAI(API_KEY, "gpt-4o-mini", ASSIGN_SYS,
-              `WORLDS (${assignable.length}):\n${ws}\n\nSONGS TO ASSIGN (${songs.length}):\n${sl}\n\nAssign each song to its best sonic world. Use "needs_review" ONLY if the song truly doesn't fit anywhere (<5% of songs). IGNORE language completely.\n\nUse assign_songs.`,
+              `WORLDS (${assignable.length}):\n${ws}\n\nSONGS TO ASSIGN (${songs.length}):\n${sl}\n\nAssign each song to its best sonic world. Use "needs_review" ONLY if the song truly doesn't fit anywhere (<5% of songs), including when no world has a compatible language family. RESPECT the language rule: English only in English-family worlds; Spanish/Portuguese/Italian/French can share Romance-family worlds; instrumental is neutral.\n\nUse assign_songs.`,
               [ASSIGN_TOOL], { type: "function", function: { name: "assign_songs" } }, 0.2, 4096);
 
             const assignMap = new Map<number, { world_id: string; confidence: number }>();
