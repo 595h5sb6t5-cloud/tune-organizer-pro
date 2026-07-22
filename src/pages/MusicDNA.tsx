@@ -64,7 +64,9 @@ const MusicDNA = () => {
     );
   }
 
-  if (dna.loading) {
+  const initialDnaLoading = dna.loading && dna.totals.liked === 0 && dna.totals.analyzed === 0;
+
+  if (initialDnaLoading) {
     return (
       <AppLayout>
         <div className="flex flex-col items-center justify-center min-h-[60vh] gap-3">
@@ -218,9 +220,16 @@ function DeepAnalysisPanel({ onComplete }: { onComplete: () => void }) {
   const onCompleteRef = useRef(onComplete);
   onCompleteRef.current = onComplete;
   const refreshedForRef = useRef<string | null>(null);
+  const observedRunningRef = useRef<Set<string>>(new Set());
   const doneId = a.isDone ? j?.id ?? null : null;
   useEffect(() => {
-    if (doneId && refreshedForRef.current !== doneId) {
+    if (j?.id && a.isRunning) {
+      observedRunningRef.current.add(j.id);
+    }
+  }, [j?.id, a.isRunning]);
+
+  useEffect(() => {
+    if (doneId && observedRunningRef.current.has(doneId) && refreshedForRef.current !== doneId) {
       refreshedForRef.current = doneId;
       onCompleteRef.current();
     }
