@@ -40,6 +40,7 @@ const LibraryPage = () => {
     syncStages,
     allDone,
     lastSyncResult,
+    syncError,
     lastSyncedLabel,
     resync,
   } = useSpotifyLibrary();
