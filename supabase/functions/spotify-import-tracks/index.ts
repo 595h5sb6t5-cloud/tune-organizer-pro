@@ -1169,6 +1169,7 @@ Deno.serve(async (req) => {
     let forceFullSync = false;
     let syncScope: "all" | "liked" | "playlists" | "artists" | "albums" | "analysis" = "all";
     let targetPlaylistId: string | undefined; // DB UUID of a single playlist to sync
+    let syncRunId = crypto.randomUUID();
     try {
       const body = await req.json();
       if (body?.force_full) forceFullSync = true;
@@ -1178,6 +1179,9 @@ Deno.serve(async (req) => {
       if (body?.playlist_id && typeof body.playlist_id === "string") {
         targetPlaylistId = body.playlist_id;
         syncScope = "playlists"; // force scope to playlists when targeting one
+      }
+      if (body?.sync_run_id && typeof body.sync_run_id === "string") {
+        syncRunId = body.sync_run_id;
       }
     } catch { /* no body is fine */ }
 
@@ -1238,7 +1242,7 @@ Deno.serve(async (req) => {
         accessToken,
         isFullSync,
         existingTrackIds,
-          crypto.randomUUID(),
+          syncRunId,
         userMarket,
         connection.last_incremental_sync_at || connection.last_full_sync_at,
       );
