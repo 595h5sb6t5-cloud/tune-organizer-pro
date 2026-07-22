@@ -608,7 +608,7 @@ function Phase1DiagnosticPanel() {
             </div>
             <div className="h-2 rounded-full bg-background overflow-hidden">
               <div
-                className={`h-full transition-all ${complete ? "bg-emerald-500" : "bg-accent"}`}
+                className={`h-full transition-all ${phase2Unlocked ? "bg-emerald-500" : status === "failed" ? "bg-destructive" : "bg-accent"}`}
                 style={{ width: `${percent}%` }}
               />
             </div>
@@ -620,8 +620,8 @@ function Phase1DiagnosticPanel() {
               {currentBatch && (
                 <Badge variant="outline">current_batch: {currentBatch.index}/{currentBatch.total}</Badge>
               )}
-              <Badge variant="outline">
-                status: {complete ? "completed" : analyzing ? "running" : failed > 0 && pending === 0 ? "failed" : "idle"}
+              <Badge variant={status === "completed" ? "secondary" : status === "failed" ? "destructive" : "outline"}>
+                status: {status}
               </Badge>
             </div>
           </div>
