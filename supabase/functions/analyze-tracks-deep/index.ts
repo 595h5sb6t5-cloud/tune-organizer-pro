@@ -291,14 +291,25 @@ Deno.serve(async (req) => {
     const isUnlimited = planLimit === -1;
 
     // ── Stage: DB read ──
+    // Paginate liked_songs so we cover the whole library, not just the top page.
+    // Only unanalyzed tracks reach the OpenAI stage; already-cached ones are
+    // filtered out below.
     const tDbRead0 = performance.now();
-    const fetchLimit = isUnlimited ? Math.max(batchSize * 3, 200) : Math.min(planLimit + 100, 2000);
-    const { data: liked } = await adm
-      .from("liked_songs")
-      .select("id, spotify_track_id, track_name, artist_name, album_name, audio_tempo, audio_energy, audio_valence, audio_danceability, audio_acousticness, audio_instrumentalness, audio_speechiness, genre_tags, mood")
-      .eq("user_id", userId)
-      .order("added_at", { ascending: false })
-      .limit(fetchLimit);
+    const PAGE_SIZE = 1000;
+    const HARD_CAP = isUnlimited ? 10000 : Math.min(planLimit + 500, 5000);
+    const liked: any[] = [];
+    for (let offset = 0; offset < HARD_CAP; offset += PAGE_SIZE) {
+      const upper = Math.min(offset + PAGE_SIZE, HARD_CAP) - 1;
+      const { data: page } = await adm
+        .from("liked_songs")
+        .select("id, spotify_track_id, track_name, artist_name, album_name, audio_tempo, audio_energy, audio_valence, audio_danceability, audio_acousticness, audio_instrumentalness, audio_speechiness, genre_tags, mood")
+        .eq("user_id", userId)
+        .order("added_at", { ascending: false })
+        .range(offset, upper);
+      if (!page || page.length === 0) break;
+      liked.push(...page);
+      if (page.length < PAGE_SIZE) break;
+    }
 
     if (!liked || liked.length === 0) {
       return json({ done: true, analyzed: 0, remaining: 0, total: 0, message: "No liked songs" });
