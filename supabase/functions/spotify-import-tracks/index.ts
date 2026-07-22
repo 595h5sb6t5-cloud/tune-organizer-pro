@@ -287,7 +287,7 @@ async function syncLikedSongs(
   adminClient: any,
   userId: string,
   token: string,
-  _isFullSync: boolean,
+  isFullSync: boolean,
   existingTrackIds: Set<string>,
   userMarket?: string,
   lastSyncCutoff?: string | null,
@@ -300,7 +300,16 @@ async function syncLikedSongs(
   const cutoffMs = lastSyncCutoff ? new Date(lastSyncCutoff).getTime() : 0;
   const requirePlayable = Boolean(userMarket);
 
-  while (offset < total) {
+  // Incremental fast-path: stop as soon as we've walked past the last sync
+  // cutoff AND have seen a run of tracks we already have locally. Liked songs
+  // come back sorted by added_at DESC, so once we clear the cutoff there are
+  // no more new items to find.
+  const canEarlyExit = !isFullSync && cutoffMs > 0;
+  let pastCutoff = false;
+  let consecutiveKnown = 0;
+  const KNOWN_THRESHOLD = 100;
+
+  outer: while (offset < total) {
     const params = new URLSearchParams({ limit: "50", offset: String(offset) });
     if (userMarket) params.set("market", userMarket);
     const data = await spotifyGet(`https://api.spotify.com/v1/me/tracks?${params.toString()}`, token);
@@ -316,6 +325,17 @@ async function syncLikedSongs(
       }
       spotifyLikedIds.add(t.spotify_track_id);
       spotifyLiked.push(t);
+
+      if (canEarlyExit) {
+        const addedAtMs = t.added_at ? new Date(t.added_at).getTime() : 0;
+        if (addedAtMs && addedAtMs <= cutoffMs) pastCutoff = true;
+        if (existingTrackIds.has(t.spotify_track_id)) consecutiveKnown++;
+        else consecutiveKnown = 0;
+        if (pastCutoff && consecutiveKnown >= KNOWN_THRESHOLD) {
+          console.log(`[spotify-import-tracks] liked songs early-exit at offset ${offset} (past cutoff + ${consecutiveKnown} known)`);
+          break outer;
+        }
+      }
     }
 
     offset += 50;
@@ -325,17 +345,20 @@ async function syncLikedSongs(
     if (items.length === 0) break;
   }
 
-  const addedCount = spotifyLiked.filter((t) => {
-    if (existingTrackIds.has(t.spotify_track_id)) return false;
+  const scannedFullLibrary = offset >= total;
+
+  // Only upsert NEW tracks to avoid rewriting 1600+ rows every sync.
+  const newTracks = spotifyLiked.filter((t) => !existingTrackIds.has(t.spotify_track_id));
+  const addedCount = newTracks.filter((t) => {
     if (!cutoffMs) return true;
     const addedAtMs = t.added_at ? new Date(t.added_at).getTime() : 0;
     return addedAtMs > cutoffMs;
   }).length;
 
-  console.log(`[spotify-import-tracks] liked songs done: scanned ${offset}, spotifyRawTotal ${total}, visible ${spotifyLikedIds.size}, hidden ${hiddenOrUnavailable}, newSinceLastSync ${addedCount}`);
+  console.log(`[spotify-import-tracks] liked songs done: scanned ${offset}, spotifyRawTotal ${total}, visible ${spotifyLikedIds.size}, hidden ${hiddenOrUnavailable}, new ${newTracks.length}`);
 
-  for (let i = 0; i < spotifyLiked.length; i += 100) {
-    const batch = spotifyLiked.slice(i, i + 100);
+  for (let i = 0; i < newTracks.length; i += 100) {
+    const batch = newTracks.slice(i, i + 100);
     await ensureDbWrite(
       adminClient.from("liked_songs").upsert(batch, { onConflict: "user_id,spotify_track_id" }),
       "upsert_liked_songs",
@@ -346,31 +369,34 @@ async function syncLikedSongs(
     );
   }
 
+  // Only reconcile deletions when we've actually walked the whole library.
   let removedCount = 0;
-  const toRemove: string[] = [];
-  for (const existingId of existingTrackIds) {
-    if (!spotifyLikedIds.has(existingId)) toRemove.push(existingId);
-  }
-  if (toRemove.length > 0) {
-    for (let i = 0; i < toRemove.length; i += 100) {
-      const chunk = toRemove.slice(i, i + 100);
-      await ensureDbWrite(
-        adminClient.from("liked_songs").delete().eq("user_id", userId).in("spotify_track_id", chunk),
-        "delete_stale_liked_songs",
-      );
-      await ensureDbWrite(
-        adminClient.from("imported_tracks").delete().eq("user_id", userId).in("spotify_track_id", chunk),
-        "delete_stale_imported_tracks",
-      );
+  if (scannedFullLibrary) {
+    const toRemove: string[] = [];
+    for (const existingId of existingTrackIds) {
+      if (!spotifyLikedIds.has(existingId)) toRemove.push(existingId);
     }
-    removedCount = toRemove.length;
-    console.info("[spotify-import-tracks] removed stale/hidden liked songs:", removedCount);
+    if (toRemove.length > 0) {
+      for (let i = 0; i < toRemove.length; i += 100) {
+        const chunk = toRemove.slice(i, i + 100);
+        await ensureDbWrite(
+          adminClient.from("liked_songs").delete().eq("user_id", userId).in("spotify_track_id", chunk),
+          "delete_stale_liked_songs",
+        );
+        await ensureDbWrite(
+          adminClient.from("imported_tracks").delete().eq("user_id", userId).in("spotify_track_id", chunk),
+          "delete_stale_imported_tracks",
+        );
+      }
+      removedCount = toRemove.length;
+      console.info("[spotify-import-tracks] removed stale/hidden liked songs:", removedCount);
+    }
   }
 
   return {
     added: addedCount,
     removed: removedCount,
-    total: spotifyLikedIds.size,
+    total: scannedFullLibrary ? spotifyLikedIds.size : existingTrackIds.size + newTracks.length - 0,
     spotify_total_raw: Number.isFinite(total) ? total : spotifyLikedIds.size,
     hidden_or_unavailable: hiddenOrUnavailable,
   };
