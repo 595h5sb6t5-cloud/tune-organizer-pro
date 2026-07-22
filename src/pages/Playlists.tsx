@@ -264,6 +264,33 @@ function PlaylistDetail({ playlistId, onBack }: { playlistId: string; onBack: ()
     }
   };
 
+  const runReview = async (apply: boolean) => {
+    setReviewing(true);
+    const jobId = jobsApi.startJob({
+      type: "playlist_review",
+      label: apply ? `Aplicando revisión a "${playlist.name}"` : `Revisando "${playlist.name}" con IA`,
+      message: "Analizando coherencia sonora…",
+      retry: () => { void runReview(apply); },
+    });
+    try {
+      const { data, error } = await supabase.functions.invoke("review-playlist", {
+        body: { generated_playlist_id: playlistId, apply },
+      });
+      if (error) throw new Error(error.message);
+      if (data?.error) throw new Error(data.error);
+      setReview(data.review);
+      jobsApi.completeJob(jobId, apply ? "Revisión aplicada" : `Coherencia ${(data.review?.coherence_score ?? 0).toFixed(2)}`);
+      if (apply) { await refresh(); toast.success("Revisión aplicada"); }
+      else toast.success("Revisión lista");
+    } catch (e: any) {
+      jobsApi.failJob(jobId, e.message);
+      toast.error("No se pudo revisar", { description: e.message });
+    } finally {
+      setReviewing(false);
+    }
+  };
+
+
   const status = playlist.status || (playlist.is_exported_to_spotify ? "exported" : "draft");
 
   const statusBadge =
