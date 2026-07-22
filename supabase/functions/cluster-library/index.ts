@@ -283,15 +283,14 @@ Deno.serve(async (req) => {
         const avg = compats.reduce((a, b) => a + b, 0) / compats.length;
         const mn = Math.min(...compats);
 
-        // Validate
+        // Validate against master-prompt quality gates
+        const pctStrong = compats.filter((c) => c >= STRONG_FIT).length / compats.length;
         let ok = true;
         let reason: string | undefined;
-        if (avg < AVG_COMPAT_MIN) { ok = false; reason = `avg_compat ${avg.toFixed(2)} < ${AVG_COMPAT_MIN}`; }
+        if (members.length < MIN_SIZE) { ok = false; reason = `size ${members.length} < ${MIN_SIZE}`; }
+        else if (avg < AVG_COMPAT_MIN) { ok = false; reason = `avg_compat ${avg.toFixed(2)} < ${AVG_COMPAT_MIN}`; }
         else if (mn < MIN_COMPAT_FLOOR) { ok = false; reason = `min_compat ${mn.toFixed(2)} < ${MIN_COMPAT_FLOOR}`; }
-        else if (members.length < RELAX_MIN_SIZE) { ok = false; reason = `size ${members.length} < ${RELAX_MIN_SIZE}`; }
-        else if (members.length < MIN_SIZE && (avg < RELAX_AVG || mn < RELAX_MIN)) {
-          ok = false; reason = `size ${members.length} needs avg>=${RELAX_AVG} & min>=${RELAX_MIN}`;
-        }
+        else if (pctStrong < PCT_ABOVE_STRONG) { ok = false; reason = `only ${(pctStrong * 100).toFixed(0)}% of tracks >= ${STRONG_FIT} (need ${PCT_ABOVE_STRONG * 100}%)`; }
 
         if (ok) {
           clusters.push({
