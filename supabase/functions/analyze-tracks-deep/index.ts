@@ -352,7 +352,7 @@ Deno.serve(async (req) => {
       userId = user.id;
     }
 
-    const batchSize: number = Math.min(Math.max(body.batch_size ?? 10, 1), 100);
+    const batchSize: number = Math.min(Math.max(body.batch_size ?? 10, 1), 200);
     const concurrency: number = Math.min(Math.max(body.concurrency ?? 5, 1), 15);
     const force = body.force === true;
     const profile = body.profile === true;
