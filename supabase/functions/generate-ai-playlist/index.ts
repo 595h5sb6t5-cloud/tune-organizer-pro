@@ -150,14 +150,28 @@ Deno.serve(async (req) => {
     const tracksRaw: any[] = Array.isArray(parsed.tracks) ? parsed.tracks : [];
     if (tracksRaw.length === 0) return json({ error: "AI returned no tracks" }, 502);
 
-    // Map AI picks to actual liked songs (dedupe + validate)
+    // Map AI picks to actual liked songs (dedupe + validate, tolerate spotify: URIs)
     const validIds = new Set(liked.map((l) => l.spotify_track_id));
+    const norm = (v: unknown) => {
+      const s = String(v ?? "").trim();
+      const m = s.match(/([a-zA-Z0-9]{22})$/);
+      return m ? m[1] : s;
+    };
     const seen = new Set<string>();
     const picked = tracksRaw
+      .map((t) => ({ ...t, spotify_track_id: norm(t.spotify_track_id) }))
       .filter((t) => t.spotify_track_id && validIds.has(t.spotify_track_id) && !seen.has(t.spotify_track_id) && (seen.add(t.spotify_track_id), true))
       .sort((a, b) => (a.position ?? 999) - (b.position ?? 999));
 
-    if (picked.length < 5) return json({ error: "Not enough valid tracks selected" }, 502);
+    if (picked.length < 5) {
+      const sample = tracksRaw.slice(0, 3).map((t) => t.spotify_track_id);
+      console.error("Not enough valid tracks. AI returned", tracksRaw.length, "matched", picked.length, "sample:", sample);
+      return json({
+        error: `AI selected ${picked.length} valid tracks from your library (need ≥5). Try again or provide a more specific concept.`,
+        ai_returned: tracksRaw.length,
+        matched: picked.length,
+      }, 502);
+    }
 
     // Insert generated_playlists
     const { data: pl, error: plErr } = await adm
