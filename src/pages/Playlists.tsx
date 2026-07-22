@@ -60,6 +60,10 @@ const Playlists = () => {
 
         <div className="h-6" />
 
+        <Phase2ReportPanel />
+
+        <div className="h-6" />
+
         <ClusterSampleTest onPromoted={(id) => { void refresh(); setSelected(id); }} />
 
         <div className="mt-10">
