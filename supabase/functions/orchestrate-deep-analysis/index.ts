@@ -83,8 +83,20 @@ async function runLoop(
     .maybeSingle();
 
   const priorMeta: Partial<JobMeta> = (jobRow?.meta as any) ?? {};
+
+  // Baseline coverage before this run starts (existing v2 rows) — this becomes
+  // the "cache hits" number reported to the user (reused from prior analyses).
+  const { count: baselineCount } = await adm
+    .from("ai_track_analysis")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .eq("analysis_version", "v2")
+    .eq("prompt_version", "v2.1-2026-11")
+    .eq("schema_version", "v2.0");
+
   const meta: JobMeta = {
-    cache_hits: priorMeta.cache_hits ?? 0,
+    cache_hits: priorMeta.cache_hits ?? (baselineCount ?? 0),
+    freshly_analyzed: priorMeta.freshly_analyzed ?? 0,
     failed_count: priorMeta.failed_count ?? 0,
     retry_count: priorMeta.retry_count ?? 0,
     batches_completed: priorMeta.batches_completed ?? 0,
@@ -95,7 +107,7 @@ async function runLoop(
     force,
   };
 
-  let processedTotal = jobRow?.items_processed ?? 0;
+  let processedTotal = jobRow?.items_processed ?? (baselineCount ?? 0);
   let totalItems = jobRow?.total_items ?? 0;
   let consecutiveFailures = 0;
   const batchDurationsMs: number[] = [];
