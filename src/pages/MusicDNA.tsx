@@ -433,7 +433,7 @@ function EnergyStep({ dna }: { dna: ReturnType<typeof useMusicDna> }) {
 
 function LanguageStep({ dna }: { dna: ReturnType<typeof useMusicDna> }) {
   return (
-    <StepShell eyebrow="Language Mix" title="Los idiomas en tu rotación." subtitle="El idioma es un eje real de agrupación: el inglés va solo con el inglés; español, portugués, italiano y francés pueden compartir playlist.">
+    <StepShell eyebrow="Language Mix" title="Los idiomas en tu rotación." subtitle="El idioma es solo un dato de contexto. Nunca agrupamos playlists por idioma.">
       {dna.languageMix.length > 0 ? (
         <BarList items={dna.languageMix} empty="" />
       ) : (
@@ -441,8 +441,7 @@ function LanguageStep({ dna }: { dna: ReturnType<typeof useMusicDna> }) {
           <Globe2 className="w-6 h-6 text-accent shrink-0 mt-1" />
           <div>
             <p className="font-medium mb-1">Sin datos de idioma suficientes</p>
-            <p className="text-sm text-muted-foreground">El inglés se agrupa solo con inglés; español, portugués, italiano y francés pueden compartir playlist.</p>
-
+            <p className="text-sm text-muted-foreground">El idioma es solo un dato de contexto y nunca se usa para agrupar playlists.</p>
           </div>
         </div>
 

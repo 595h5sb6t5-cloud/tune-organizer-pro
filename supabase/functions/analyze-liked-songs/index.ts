@@ -183,7 +183,7 @@ Dimensions:
 15. intimacy_scale — intimate / personal / social / arena / epic
 16. tension_level — very relaxed / relaxed / moderate / tense / intense
 
-Language IS relevant for grouping. Detect it accurately (english / spanish / portuguese / italian / french / instrumental / other). Tag by sonic qualities normally; language is a separate axis used later by the clusterer.
+CRITICAL: Do NOT factor language into ANY of these dimensions. A Spanish song and an English song with the same sonic qualities must get the same tags.
 Be SPECIFIC and CREATIVE with your descriptions. Generic tags are useless.`;
 
 const TAG_TOOL = {
@@ -221,7 +221,7 @@ const TAG_TOOL = {
 
 const WORLDS_SYS = `You are Tempo — an elite music curator organizing ONLY the songs already in the user's Spotify library (liked songs, saved album tracks, followed artists). NEVER invent tracks or artists. Define "sonic worlds" (playlist concepts) where every song transitions naturally into the next and the whole playlist feels like ONE experience.
 
-DO NOT organize by: genre alone, artist, decade, or a single generic energy label. Those are supporting signals, never the reason a playlist exists.
+DO NOT organize by: genre alone, artist, language, decade, or a single generic energy label. Those are supporting signals, never the reason a playlist exists.
 
 Instead group by the FULL sonic feel — combining: energy, tempo, rhythm, beat type, drum presence & intensity, bass use, amount of melody, internal changes/dynamics, tonal color, emotion, atmosphere, main instruments, vocal strength & delivery, aggression vs calm, nostalgia, elegance, party-ness, night-ness, cinematic quality, movement, softness vs heaviness, and how easily the song sits next to other songs.
 
@@ -232,28 +232,22 @@ Understand that two songs from the SAME artist or genre can belong in totally di
 - AC/DC's heavy, constant-drive rock does NOT mix with melodic softer rock.
 - Kanye/Mac Miller's melodic emotional rap does NOT mix with 21 Savage's dark, dry, minimalist rap even though all are "rap".
 
-LANGUAGE RULE (hard):
-- English songs go ONLY with other English songs.
-- Spanish, Portuguese, Italian and French can share worlds with each other (Romance / Latin family), when sonic DNA matches.
-- Never mix English with Spanish/Portuguese/Italian/French in the same world.
-- Other languages (Japanese, Korean, German, etc.) stay within their own family unless sonic DNA is exceptional.
-- Instrumental / no-vocals songs can join any language family if sonic DNA matches.
-- Sonic DNA still decides everything WITHIN a compatible language family.
-
 IRON RULES:
-1. Respect the LANGUAGE RULE above as a hard filter, then group by sonic DNA.
-2. NEVER name a world after a language ("Spanish Songs", "English Tracks") — name by sonic identity.
+1. NEVER group by language. Sonic DNA is the only grouping signal.
+2. NEVER name a world after a language ("Spanish Songs", "English Tracks").
 3. NEVER create catch-alls ("Uncategorized", "Other", "Mixed", "Various", "Misc").
 4. NEVER name a world with only a broad genre ("Pop", "Rock", "Rap", "Indie"). Always specify the VIBE.
 5. NEVER be too generic ("Chill Songs", "Party Music", "Old Music"). Prefer things like: "Rock con guitarras fuertes y ritmo constante", "Rap melódico para escuchar de noche", "Pop ochentero suave con sintetizadores", "Canciones oscuras con bajo pesado", "Canciones alegres que no llegan a fiesta", "Música intensa para manejar".
-6. Each world has ONE clear identity: specific mood + energy behavior + production texture + listening scenario + compatible language family.
+6. Each world has ONE clear identity: specific mood + energy behavior + production texture + listening scenario.
 
 QUALITY STANDARDS:
 - Consistent energy range (±1 level) OR an intentional progression declared in vibe_description.
 - Recognizable production aesthetic and rhythmic identity.
 - Size targets: aim for 15–50 songs per world; minimum 8 (only go lower if identity is very sharp); if a world would exceed ~60, split it by real sonic sub-differences.
-- Provide "what_belongs" (required sonic qualities + accepted language family) and "what_breaks_it" (what would feel jarring, including wrong language family).
+- Provide "what_belongs" (required sonic qualities) and "what_breaks_it" (what would feel jarring).
 - Songs that clearly don't fit any world go to "Needs Review" — target under 5% of library.
+
+ANTI-LANGUAGE-BIAS CHECK: if a world would end up >70% one language WITHOUT shared groove/production/energy, split it.
 
 USE the user's existing playlists as taste hints — mirror curation instincts, elevate with deeper sonic analysis.`;
 
@@ -305,19 +299,17 @@ SONIC COMPATIBILITY CHECKLIST (a song needs 7+/10 to belong):
 
 Same artist ≠ same world. Two Mecano / Julio Iglesias / Sting / Kanye tracks can go to different worlds if their sonic feel differs. Same genre ≠ same world (melodic rap vs dark minimalist rap must separate; heavy driving rock vs melodic softer rock must separate).
 
-LANGUAGE FILTER (hard):
-- English songs ONLY join English-family worlds. Never assign an English song to a world whose accepted family is Romance/Latin (Spanish/Portuguese/Italian/French), and vice versa.
-- Spanish, Portuguese, Italian and French songs can be assigned to the same Romance/Latin world if sonic DNA matches.
-- Instrumental / no-vocals songs may join any family when sonic DNA matches.
-- If a song's language conflicts with the world's family, it goes to "needs_review" (or a different, compatible world) even if the sonic DNA is perfect.
+LANGUAGE HAS ZERO WEIGHT. Ignore language completely. Only HOW IT SOUNDS matters.
 
 ASSIGNMENT RULES:
-- 7+ match AND compatible language family: assign with confidence 0.7–1.0
-- 5–6 for BEST compatible world: assign with confidence 0.5–0.6
-- <5 for ALL worlds, OR language mismatch on every world: assign to "needs_review" with confidence 0.3
-- A song MAY appear in more than one world ONLY if it genuinely fits multiple distinct ambiences at 7+ AND both share a compatible language family
+- 7+ match: assign with confidence 0.7–1.0
+- 5–6 for BEST world: assign to best match with confidence 0.5–0.6
+- <5 for ALL worlds: assign to "needs_review" with confidence 0.3
+- A song MAY appear in more than one world ONLY if it genuinely fits multiple distinct ambiences at 7+ (do not duplicate without a clear reason)
 - Never force a song into a world just to place it. "needs_review" is acceptable (<5% of library).
-- When tied, pick the world where GROOVE + ENERGY fit better.`;
+- When tied, pick the world where GROOVE + ENERGY fit better.
+
+ANTI-LANGUAGE CHECK: if you catch yourself assigning 3+ same-language songs in a row to the same world, re-verify each on sonic qualities alone.`;
 
 const ASSIGN_TOOL = {
   type: "function" as const,
@@ -348,7 +340,7 @@ const ASSIGN_TOOL = {
 const VALIDATE_SYS = `You are Tempo — final quality control for generated playlists. You catch mistakes that would make playlists feel incoherent or lazy.
 
 CHECK EACH PLAYLIST FOR:
-1. LANGUAGE MIX: Flag any playlist that mixes English with Spanish/Portuguese/Italian/French. English must stay alone; Romance languages can coexist. Instrumental songs are neutral.
+1. LANGUAGE TRAP: If >70% of songs share a language, verify they ALSO share sonic qualities. If they don't, flag for splitting.
 2. COHERENCE: Do all songs share compatible groove, energy, mood, and production? Would they flow naturally in sequence?
 3. SIZE: Flag playlists with <5 songs (merge into closest match) or >100 songs (split by sub-vibes).
 4. IDENTITY: Does the playlist name accurately reflect the actual sonic content?
@@ -786,7 +778,7 @@ Deno.serve(async (req) => {
           ].join("\n");
 
           const result = await callAI(API_KEY, "gpt-4o-mini", WORLDS_SYS,
-            `Design ALL sonic worlds for this library. Aim for ${suggest}+ distinct worlds.\n\nREMINDER: Respect the LANGUAGE RULE (English alone; Spanish/Portuguese/Italian/French can share Romance worlds). NEVER create "Uncategorized". Every world needs a specific sonic identity + compatible language family.\n\n${ctx}\n\nUse define_sonic_worlds.`,
+            `Design ALL sonic worlds for this library. Aim for ${suggest}+ distinct worlds.\n\nREMINDER: NEVER group by language. NEVER create "Uncategorized". Every world needs a specific sonic identity.\n\n${ctx}\n\nUse define_sonic_worlds.`,
             [WORLDS_TOOL], { type: "function", function: { name: "define_sonic_worlds" } }, 0.5, 8192);
 
           const worlds = result.worlds || [];
@@ -913,7 +905,7 @@ Deno.serve(async (req) => {
 
             const sl = songs.map((s: any, i: number) => fmtSong(s, i)).join("\n");
             const p = await callAI(API_KEY, "gpt-4o-mini", ASSIGN_SYS,
-              `WORLDS (${assignable.length}):\n${ws}\n\nSONGS TO ASSIGN (${songs.length}):\n${sl}\n\nAssign each song to its best sonic world. Use "needs_review" ONLY if the song truly doesn't fit anywhere (<5% of songs), including when no world has a compatible language family. RESPECT the language rule: English only in English-family worlds; Spanish/Portuguese/Italian/French can share Romance-family worlds; instrumental is neutral.\n\nUse assign_songs.`,
+              `WORLDS (${assignable.length}):\n${ws}\n\nSONGS TO ASSIGN (${songs.length}):\n${sl}\n\nAssign each song to its best sonic world. Use "needs_review" ONLY if the song truly doesn't fit anywhere (<5% of songs). IGNORE language completely.\n\nUse assign_songs.`,
               [ASSIGN_TOOL], { type: "function", function: { name: "assign_songs" } }, 0.2, 4096);
 
             const assignMap = new Map<number, { world_id: string; confidence: number }>();
@@ -1088,7 +1080,7 @@ Deno.serve(async (req) => {
               }
 
               const v = await callAI(API_KEY, "gpt-4o-mini", VALIDATE_SYS,
-                `Review these ${cls.length} playlists for quality. Flag language mixes (English mixed with Romance languages), incoherent groupings, bad names, and outliers.\n\n${sums.join("\n\n")}\n\nUse validate_playlists.`,
+                `Review these ${cls.length} playlists for quality. Flag language traps, incoherent groupings, bad names, and outliers.\n\n${sums.join("\n\n")}\n\nUse validate_playlists.`,
                 [VALIDATE_TOOL], { type: "function", function: { name: "validate_playlists" } }, 0.2, 4096);
 
               for (const act of v.actions || []) {
