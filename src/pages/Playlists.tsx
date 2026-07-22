@@ -586,11 +586,16 @@ function Phase1DiagnosticPanel() {
         <Button variant="hero" onClick={buildSample} disabled={buildingSample || analyzing || loadingExisting}>
           {buildingSample ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Armando…</> : <>1. Armar muestra nueva (150)</>}
         </Button>
-        <Button variant="outline" onClick={runAnalysisLoop} disabled={!sample || analyzing || loadingExisting || complete}>
+        <Button variant="outline" onClick={runAnalysisLoop} disabled={!sample || analyzing || loadingExisting || phase2Unlocked}>
           {analyzing
             ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Analizando lote {currentBatch?.index}/{currentBatch?.total}…</>
-            : complete ? <>Muestra completa ✓</> : <>2. Correr / continuar análisis v3.0</>}
+            : phase2Unlocked ? <>Muestra completa ✓</> : <>2. Correr / continuar análisis v3.0</>}
         </Button>
+        {(failed > 0 || Object.keys(failedAttempts).length > 0) && !analyzing && (
+          <Button variant="ghost" onClick={resetFailedState}>
+            Reset fallidos → pending
+          </Button>
+        )}
       </div>
 
       {sample && (
