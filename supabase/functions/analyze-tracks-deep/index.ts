@@ -539,6 +539,14 @@ Deno.serve(async (req) => {
         transition_in: r.transition_in, transition_out: r.transition_out,
         language: r.language ?? null,
         analysis_confidence: r.analysis_confidence,
+        // v3 new fields
+        music_family: r.music_family ?? null,
+        primary_subgenre: r.primary_subgenre ?? null,
+        secondary_subgenres: r.secondary_subgenres ?? [],
+        subgenre_confidence: r.subgenre_confidence ?? null,
+        is_house_related: r.is_house_related === true,
+        house_profile: r.house_profile ?? null,
+        artist_context: r.artist_context ?? null,
 
         full_analysis: r,
         // metadata
