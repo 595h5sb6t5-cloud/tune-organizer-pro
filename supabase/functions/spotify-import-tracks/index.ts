@@ -175,6 +175,7 @@ type TrackRow = {
 function extractTrack(item: any, userId: string): TrackRow | null {
   const track = item?.track;
   if (!track || typeof track.id !== "string") return null;
+  if (track.is_local === true || track.is_playable === false) return null;
   const artists = Array.isArray(track.artists) ? track.artists.map((a: any) => a?.name).filter(Boolean).join(", ") : "";
   const album = track.album;
   const images = album?.images || [];
@@ -232,6 +233,27 @@ async function getAllUnfetchedAudioFeatureIds(adminClient: any, userId: string):
 
 // ─── Sync helpers ───
 
+async function fetchAllRows<T = Record<string, unknown>>(
+  queryFactory: () => any,
+  pageSize = 1000,
+): Promise<T[]> {
+  const rows: T[] = [];
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await queryFactory().range(from, from + pageSize - 1);
+    if (error) throw error;
+
+    const batch = (data || []) as T[];
+    rows.push(...batch);
+
+    if (batch.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return rows;
+}
+
 function shouldDoFullSync(connection: SpotifyConnectionRow, forceFullSync: boolean): boolean {
   if (forceFullSync) return true;
   if (!connection.last_full_sync_at) return true;
@@ -244,7 +266,7 @@ function shouldDoFullSync(connection: SpotifyConnectionRow, forceFullSync: boole
  * LIKED SONGS — full bidirectional sync.
  */
 async function syncLikedSongs(
-  adminClient: any, userId: string, token: string, isFullSync: boolean, existingTrackIds: Set<string>
+  adminClient: any, userId: string, token: string, isFullSync: boolean, existingTrackIds: Set<string>, userMarket?: string
 ): Promise<{ added: number; removed: number; total: number }> {
   const spotifyLiked: TrackRow[] = [];
   const spotifyLikedIds = new Set<string>();
@@ -253,9 +275,10 @@ async function syncLikedSongs(
   let consecutiveKnown = 0;
   let earlyStopped = false;
   const KNOWN_THRESHOLD = 100;
+  const marketParam = userMarket ? `&market=${encodeURIComponent(userMarket)}` : "";
 
   while (offset < total) {
-    const data = await spotifyGet(`https://api.spotify.com/v1/me/tracks?limit=50&offset=${offset}`, token);
+    const data = await spotifyGet(`https://api.spotify.com/v1/me/tracks?limit=50&offset=${offset}${marketParam}`, token);
     total = data.total ?? 0;
     const items = data.items || [];
 
@@ -284,7 +307,7 @@ async function syncLikedSongs(
   }
 
   const completedFullScan = !earlyStopped && offset >= total;
-  console.log(`[spotify-import-tracks] liked songs done: scanned ${offset}, total ${total}, new ${spotifyLiked.length}, fullScan=${completedFullScan}`);
+    console.log(`[spotify-import-tracks] liked songs done: scanned ${offset}, spotifyTotal ${total}, importable ${spotifyLikedIds.size}, new ${spotifyLiked.length}, fullScan=${completedFullScan}`);
 
   for (let i = 0; i < spotifyLiked.length; i += 100) {
     const batch = spotifyLiked.slice(i, i + 100);
@@ -309,7 +332,7 @@ async function syncLikedSongs(
     }
   }
 
-  return { added: spotifyLiked.length, removed: removedCount, total: spotifyLikedIds.size || total };
+    return { added: spotifyLiked.length, removed: removedCount, total: spotifyLikedIds.size || total };
 }
 
 
@@ -1075,9 +1098,11 @@ Deno.serve(async (req) => {
     }).eq("user_id", user.id);
 
     let spotifyUserId = "";
+    let userMarket = "";
     try {
       const profile = await spotifyGet("https://api.spotify.com/v1/me", accessToken);
       spotifyUserId = profile.id || "";
+      userMarket = typeof profile.country === "string" ? profile.country : "";
       if (spotifyUserId) {
         await adminClient.from("spotify_connections").update({ spotify_user_id: spotifyUserId }).eq("user_id", user.id);
       }
@@ -1086,20 +1111,20 @@ Deno.serve(async (req) => {
     }
 
     // Load existing data for diffing
-    const [trackRes, playlistRes, artistRes, albumRes] = await Promise.all([
-      adminClient.from("liked_songs").select("spotify_track_id").eq("user_id", user.id),
-      adminClient.from("spotify_playlists").select("spotify_playlist_id, snapshot_id").eq("user_id", user.id),
-      adminClient.from("spotify_followed_artists").select("spotify_artist_id").eq("user_id", user.id),
-      adminClient.from("spotify_saved_albums").select("spotify_album_id").eq("user_id", user.id),
+    const [trackRows, playlistRows, artistRows, albumRows] = await Promise.all([
+      fetchAllRows(() => adminClient.from("liked_songs").select("spotify_track_id").eq("user_id", user.id)),
+      fetchAllRows(() => adminClient.from("spotify_playlists").select("spotify_playlist_id, snapshot_id").eq("user_id", user.id)),
+      fetchAllRows(() => adminClient.from("spotify_followed_artists").select("spotify_artist_id").eq("user_id", user.id)),
+      fetchAllRows(() => adminClient.from("spotify_saved_albums").select("spotify_album_id").eq("user_id", user.id)),
     ]);
 
-    const existingTrackIds = new Set((trackRes.data || []).map((r: any) => r.spotify_track_id));
+    const existingTrackIds = new Set((trackRows || []).map((r: any) => r.spotify_track_id));
     const existingSnapshots = new Map<string, string>();
-    for (const p of playlistRes.data || []) {
+    for (const p of playlistRows || []) {
       if (p.snapshot_id) existingSnapshots.set(p.spotify_playlist_id, p.snapshot_id);
     }
-    const existingArtistIds = new Set((artistRes.data || []).map((r: any) => r.spotify_artist_id));
-    const existingAlbumIds = new Set((albumRes.data || []).map((r: any) => r.spotify_album_id));
+    const existingArtistIds = new Set((artistRows || []).map((r: any) => r.spotify_artist_id));
+    const existingAlbumIds = new Set((albumRows || []).map((r: any) => r.spotify_album_id));
 
     const now = new Date().toISOString();
     const result: Record<string, any> = { success: true, sync_mode: syncMode };
@@ -1108,7 +1133,7 @@ Deno.serve(async (req) => {
     // Step 1: Liked songs
     if (syncScope === "all" || syncScope === "liked") {
       step = "sync_liked_songs";
-      const likedResult = await syncLikedSongs(adminClient, user.id, accessToken, isFullSync, existingTrackIds);
+      const likedResult = await syncLikedSongs(adminClient, user.id, accessToken, isFullSync, existingTrackIds, userMarket);
       result.liked_songs_added = likedResult.added;
       result.liked_songs_removed = likedResult.removed;
       result.liked_songs_total = likedResult.total;
