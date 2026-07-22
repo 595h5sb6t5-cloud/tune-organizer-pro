@@ -374,7 +374,16 @@ function Phase1DiagnosticPanel() {
   const processed = analyzedIds.size;
   const failed = permanentlyFailed.size;
   const pending = Math.max(0, sampleSize - processed - failed);
-  const complete = sample != null && processed + failed >= sampleSize;
+  const complete = sample != null && sampleSize > 0 && processed >= sampleSize;
+  // State machine: pending | running | partially_completed | completed | failed
+  const status: "pending" | "running" | "partially_completed" | "completed" | "failed" =
+    !sample ? "pending"
+    : analyzing ? "running"
+    : processed >= sampleSize && failed === 0 ? "completed"
+    : processed === 0 && failed > 0 ? "failed"
+    : processed > 0 && processed + failed >= sampleSize ? "partially_completed"
+    : "pending";
+  const phase2Unlocked = status === "completed";
 
   // Load latest persisted sample on mount so refreshing the page doesn't lose progress.
   useEffect(() => {
@@ -437,6 +446,13 @@ function Phase1DiagnosticPanel() {
     }
   };
 
+  const resetFailedState = () => {
+    setPermanentlyFailed(new Set());
+    setFailedAttempts({});
+    setLastError(null);
+    toast.success("Reintentos reseteados", { description: "Las canciones fallidas vuelven a pending" });
+  };
+
   const runAnalysisLoop = async () => {
     if (!sample || !user) return;
     setAnalyzing(true);
@@ -453,6 +469,7 @@ function Phase1DiagnosticPanel() {
       let currentFailedAttempts = { ...failedAttempts };
       let currentPermanentFailed = new Set(permanentlyFailed);
       let safety = 0;
+      let consecutiveEmptyBatches = 0; // circuit breaker for shared errors
 
       while (safety++ < 20) {
         const remaining = sample.spotify_track_ids.filter(
@@ -464,6 +481,8 @@ function Phase1DiagnosticPanel() {
         const batchIndex = Math.ceil((sample.size - remaining.length) / SAMPLE_ANALYSIS_BATCH_SIZE) + 1;
         const totalBatches = Math.ceil(sample.size / SAMPLE_ANALYSIS_BATCH_SIZE);
         setCurrentBatch({ index: batchIndex, total: totalBatches });
+
+        const analyzedBefore = currentAnalyzed.size;
 
         const { data, error } = await supabase.functions.invoke("analyze-tracks-deep", {
           body: {
@@ -477,11 +496,34 @@ function Phase1DiagnosticPanel() {
         if (error) throw new Error(error.message);
         if (data?.error) throw new Error(data.error);
 
+        // Sanity: backend must return v3 markers. If not, deploy is stale.
+        if (data?.prompt_version && data.prompt_version !== V3_PROMPT_VERSION) {
+          throw new Error(
+            `Backend devolvió prompt_version=${data.prompt_version} (esperado ${V3_PROMPT_VERSION}). El edge function analyze-tracks-deep está desactualizado — re-deploy pendiente.`,
+          );
+        }
+
         // Re-check DB (source of truth) — the function response can be misleading
         // because it reports library-wide counters.
         const doneNow = await countAnalyzedInSample(user.id, sample.spotify_track_ids);
         currentAnalyzed = doneNow;
         setAnalyzedIds(new Set(doneNow));
+
+        const analyzedAfter = doneNow.size;
+        const gained = analyzedAfter - analyzedBefore;
+
+        if (gained === 0) {
+          consecutiveEmptyBatches++;
+          // Circuit breaker: if 3 consecutive batches yield 0 new rows,
+          // it's a shared error (schema, DB, deploy). Don't waste credits.
+          if (consecutiveEmptyBatches >= 3) {
+            throw new Error(
+              "3 lotes seguidos sin nuevas filas v3 en DB. Detengo para evitar gastar créditos. Revisa deploy de analyze-tracks-deep, columnas v3 o errores del edge function.",
+            );
+          }
+        } else {
+          consecutiveEmptyBatches = 0;
+        }
 
         // Any ID in the batch that still isn't analyzed → increment failure count
         for (const id of batch) {
@@ -508,11 +550,11 @@ function Phase1DiagnosticPanel() {
       const finalAnalyzed = currentAnalyzed.size;
       const finalFailed = currentPermanentFailed.size;
       jobsApi.completeJob(jobId, `${finalAnalyzed}/${sample.size} analizadas · ${finalFailed} fallidas`);
-      if (finalAnalyzed >= sample.size) {
+      if (finalAnalyzed >= sample.size && finalFailed === 0) {
         toast.success("Muestra 150/150 completa", { description: "Fase 2 desbloqueada" });
       } else if (finalAnalyzed + finalFailed >= sample.size) {
         toast.warning(`${finalAnalyzed} analizadas, ${finalFailed} imposibles`, {
-          description: "Revisa los IDs fallidos antes de aprobar Fase 2",
+          description: "Fase 2 sigue bloqueada mientras haya fallidas",
         });
       } else {
         toast.info(`Progreso: ${finalAnalyzed}/${sample.size}`, { description: "Vuelve a correr para continuar" });
@@ -544,11 +586,16 @@ function Phase1DiagnosticPanel() {
         <Button variant="hero" onClick={buildSample} disabled={buildingSample || analyzing || loadingExisting}>
           {buildingSample ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Armando…</> : <>1. Armar muestra nueva (150)</>}
         </Button>
-        <Button variant="outline" onClick={runAnalysisLoop} disabled={!sample || analyzing || loadingExisting || complete}>
+        <Button variant="outline" onClick={runAnalysisLoop} disabled={!sample || analyzing || loadingExisting || phase2Unlocked}>
           {analyzing
             ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Analizando lote {currentBatch?.index}/{currentBatch?.total}…</>
-            : complete ? <>Muestra completa ✓</> : <>2. Correr / continuar análisis v3.0</>}
+            : phase2Unlocked ? <>Muestra completa ✓</> : <>2. Correr / continuar análisis v3.0</>}
         </Button>
+        {(failed > 0 || Object.keys(failedAttempts).length > 0) && !analyzing && (
+          <Button variant="ghost" onClick={resetFailedState}>
+            Reset fallidos → pending
+          </Button>
+        )}
       </div>
 
       {sample && (
@@ -561,7 +608,7 @@ function Phase1DiagnosticPanel() {
             </div>
             <div className="h-2 rounded-full bg-background overflow-hidden">
               <div
-                className={`h-full transition-all ${complete ? "bg-emerald-500" : "bg-accent"}`}
+                className={`h-full transition-all ${phase2Unlocked ? "bg-emerald-500" : status === "failed" ? "bg-destructive" : "bg-accent"}`}
                 style={{ width: `${percent}%` }}
               />
             </div>
@@ -573,8 +620,8 @@ function Phase1DiagnosticPanel() {
               {currentBatch && (
                 <Badge variant="outline">current_batch: {currentBatch.index}/{currentBatch.total}</Badge>
               )}
-              <Badge variant="outline">
-                status: {complete ? "completed" : analyzing ? "running" : failed > 0 && pending === 0 ? "failed" : "idle"}
+              <Badge variant={status === "completed" ? "secondary" : status === "failed" ? "destructive" : "outline"}>
+                status: {status}
               </Badge>
             </div>
           </div>
@@ -623,15 +670,31 @@ function Phase1DiagnosticPanel() {
         </div>
       )}
 
-      {complete && (
+      {phase2Unlocked && (
         <div className="mt-4 rounded-2xl border border-emerald-500/40 bg-emerald-500/5 p-4 text-sm">
           <p>
             <strong>{processed}/{sampleSize}</strong> analizadas con <code>music_family</code>, <code>primary_subgenre</code>,{" "}
             <code>artist_context</code> y <code>house_profile</code> cuando aplique.
-            {failed > 0 && <> · <strong>{failed}</strong> fallidas (revisar antes de aprobar Fase 2)</>}
           </p>
           <p className="text-xs text-muted-foreground mt-1">
-            Fase 2 (clustering endurecido) ya puede correr sobre esta muestra.
+            Fase 2 (clustering endurecido) desbloqueada.
+          </p>
+        </div>
+      )}
+      {status === "partially_completed" && (
+        <div className="mt-4 rounded-2xl border border-amber-500/40 bg-amber-500/5 p-4 text-sm">
+          <p>
+            <strong>{processed}/{sampleSize}</strong> analizadas · <strong>{failed}</strong> fallidas.
+          </p>
+          <p className="text-xs text-muted-foreground mt-1">
+            Fase 2 sigue <strong>bloqueada</strong>. Resetea los fallidos y reintenta, o arma una muestra nueva.
+          </p>
+        </div>
+      )}
+      {status === "failed" && (
+        <div className="mt-4 rounded-2xl border border-destructive/40 bg-destructive/5 p-4 text-sm">
+          <p>
+            <strong>0/{sampleSize}</strong> analizadas · <strong>{failed}</strong> fallidas. Fallo compartido probable — revisa el error de arriba.
           </p>
         </div>
       )}
