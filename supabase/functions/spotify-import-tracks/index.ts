@@ -1355,7 +1355,7 @@ Deno.serve(async (req) => {
     // Step 2: Saved Albums
     if (syncScope === "all" || syncScope === "albums") {
       step = "sync_saved_albums";
-      const albumResult = await syncSavedAlbums(adminClient, user.id, accessToken, isFullSync, existingAlbumIds);
+      const albumResult = await syncSavedAlbums(adminClient, user.id, accessToken, isFullSync, existingAlbumIds, syncRunId);
       result.albums_total = albumResult.total;
       result.albums_added = albumResult.added;
       result.albums_removed = albumResult.removed;
@@ -1370,7 +1370,7 @@ Deno.serve(async (req) => {
     let playlistTracksFailed = 0;
     if (syncScope === "all" || syncScope === "playlists") {
       step = "sync_playlists";
-      const plResult = await syncPlaylists(adminClient, user.id, accessToken, spotifyUserId, existingSnapshots, targetPlaylistId);
+      const plResult = await syncPlaylists(adminClient, user.id, accessToken, spotifyUserId, existingSnapshots, targetPlaylistId, syncRunId);
       result.playlists_total = plResult.total;
       result.playlists_changed = plResult.changed;
       result.playlists_removed = plResult.removed;
