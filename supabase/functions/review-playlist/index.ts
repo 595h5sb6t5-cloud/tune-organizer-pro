@@ -213,7 +213,7 @@ Deno.serve(async (req) => {
     }
 
 
-    return new Response(JSON.stringify({ review, applied }), {
+    return new Response(JSON.stringify({ review, applied, disbanded }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
