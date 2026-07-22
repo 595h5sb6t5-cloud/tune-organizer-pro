@@ -448,7 +448,7 @@ export function useSpotifyLibrary() {
       await runStage("ai_analysis", "Análisis de audio Spotify", "analysis", async (update) => {
         update("Analizando audio…");
         const analysisRes = await invokeFunction("spotify-import-tracks", {
-          scope: "all",
+          scope: "analysis",
           skip_core: false,
           ...(forceFullSync ? { force_full: true } : {}),
         });
