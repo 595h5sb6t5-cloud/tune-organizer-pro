@@ -437,9 +437,9 @@ Deno.serve(async (req) => {
       return json({ done: true, analyzed: 0, remaining: 0, total: totalCount ?? 0, cache_hits: cache_hits_total, message: "All up to date" });
     }
 
-    // Respect plan cap
+    // Respect plan cap (bypassed in diagnostic mode so a paid test isn't blocked by the free tier count)
     let effectiveBatchSize = batchSize;
-    if (!isUnlimited) {
+    if (!isUnlimited && !diagnosticMode) {
       const { count: alreadyCount } = await adm
         .from("ai_track_analysis")
         .select("id", { head: true, count: "exact" })
