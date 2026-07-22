@@ -356,8 +356,10 @@ Deno.serve(async (req) => {
     const concurrency: number = Math.min(Math.max(body.concurrency ?? 5, 1), 15);
     const force = body.force === true;
     const profile = body.profile === true;
+    const benchmarkLabel: string | undefined = body.benchmark_label;
     const restrictIds: string[] | undefined = Array.isArray(body.spotify_track_ids) && body.spotify_track_ids.length
       ? body.spotify_track_ids.filter((x: any) => typeof x === "string") : undefined;
+    const restrictSet = restrictIds ? new Set(restrictIds) : null;
     const diagnosticMode: boolean = body.diagnostic === true || !!restrictIds;
 
 
