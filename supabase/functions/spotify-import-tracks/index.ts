@@ -142,25 +142,35 @@ async function delay(ms: number) {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function spotifyGet(url: string, token: string, attempt = 0) {
+async function spotifyGet(url: string, token: string) {
   const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-  if (res.status === 429 && attempt < 1) {
-    const retryAfter = Number(res.headers.get("Retry-After"));
-    const retryMs = Number.isFinite(retryAfter) && retryAfter > 0
-      ? Math.min(retryAfter * 1000, 5_000)
-      : 2_000;
-    console.warn("[spotify-import-tracks] Spotify rate limit hit, retrying", { attempt: attempt + 1, retryMs, url });
-    await delay(retryMs);
-    return spotifyGet(url, token, attempt + 1);
-  }
   if (res.status === 429) {
-    throw new SpotifyImportError("spotify_rate_limited", "Spotify rate limited, try again shortly", 429, { url });
+    const retryAfter = Number(res.headers.get("Retry-After") ?? res.headers.get("retry-after") ?? "180");
+    throw new SpotifyImportError("spotify_rate_limited", "Spotify rate limited, try again shortly", 429, {
+      url,
+      retry_after_seconds: Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : 180,
+    });
   }
   if (!res.ok) {
     const body = parseJsonText(await res.text());
     throw new SpotifyImportError("spotify_api", `Spotify API error: ${res.status}`, res.status, { body, url });
   }
   return await res.json();
+}
+
+async function updateSyncStageProgress(
+  adminClient: any,
+  syncRunId: string,
+  stageKey: string,
+  patch: Record<string, unknown>,
+) {
+  if (!syncRunId) return;
+  const { error } = await adminClient
+    .from("sync_run_stages")
+    .update({ ...patch, status: "running" })
+    .eq("sync_run_id", syncRunId)
+    .eq("stage_key", stageKey);
+  if (error) console.warn("[spotify-import-tracks] stage progress update failed", { stageKey, error: error.message });
 }
 
 function getSpotifyErrorMessage(body: unknown) {
@@ -355,6 +365,18 @@ async function syncLikedSongs(
     }
 
     offset += 50;
+    if (offset === 50 || offset % 250 === 0 || offset >= total) {
+      await updateSyncStageProgress(adminClient, syncRunId, "liked_songs", {
+        items_found: Number.isFinite(total) ? total : spotifyLikedIds.size,
+        items_processed: Math.min(offset, Number.isFinite(total) ? total : offset),
+        meta: {
+          spotify_total_raw: Number.isFinite(total) ? total : null,
+          visible_collected: spotifyLikedIds.size,
+          hidden_or_unavailable: hiddenOrUnavailable,
+          mode: isFullSync ? "full" : "incremental",
+        },
+      });
+    }
     if (offset % 500 === 0) {
       console.log(`[spotify-import-tracks] liked songs: ${offset}/${total}, visible: ${spotifyLikedIds.size}, hidden: ${hiddenOrUnavailable}`);
     }
@@ -436,7 +458,7 @@ async function syncLikedSongs(
  * SAVED ALBUMS — full bidirectional sync with album tracks.
  */
 async function syncSavedAlbums(
-  adminClient: any, userId: string, token: string, isFullSync: boolean, existingAlbumIds: Set<string>
+  adminClient: any, userId: string, token: string, isFullSync: boolean, existingAlbumIds: Set<string>, syncRunId: string
 ): Promise<{ added: number; removed: number; total: number; tracksImported: number }> {
   const spotifyAlbums: any[] = [];
   const spotifyAlbumIds = new Set<string>();
@@ -480,6 +502,13 @@ async function syncSavedAlbums(
       }
 
       offset += 50;
+      if (offset === 50 || offset % 200 === 0 || offset >= total) {
+        await updateSyncStageProgress(adminClient, syncRunId, "saved_albums", {
+          items_found: Number.isFinite(total) ? total : spotifyAlbums.length,
+          items_processed: Math.min(offset, Number.isFinite(total) ? total : offset),
+          meta: { collected: spotifyAlbums.length, mode: isFullSync ? "full" : "incremental" },
+        });
+      }
       if (offset % 200 === 0) {
         console.log(`[spotify-import-tracks] saved albums: ${offset}/${total}, collected: ${spotifyAlbums.length}`);
       }
@@ -594,6 +623,15 @@ async function syncSavedAlbums(
           );
         }
         totalTracksImported += trackRows.length;
+        await updateSyncStageProgress(adminClient, syncRunId, "saved_albums", {
+          items_found: spotifyAlbums.length,
+          items_processed: spotifyAlbums.length,
+          meta: {
+            collected: spotifyAlbums.length,
+            album_tracks_imported: totalTracksImported,
+            mode: isFullSync ? "full" : "incremental",
+          },
+        });
       } catch (e) {
         console.warn(`[spotify-import-tracks] Failed to import tracks for album ${album.album_name}:`, e);
       }
@@ -623,6 +661,7 @@ async function syncPlaylists(
   adminClient: any, userId: string, token: string, spotifyUserId: string,
   existingSnapshots: Map<string, string>,
   targetPlaylistDbId?: string,
+  syncRunId = "",
 ): Promise<{ total: number; changed: number; removed: number; tracksSynced: number; playlistsRemaining: number; warning: string | null }> {
   const playlists: PlaylistMeta[] = [];
   let offset = 0;
@@ -692,6 +731,13 @@ async function syncPlaylists(
         });
       }
       offset += 50;
+      if (offset === 50 || offset % 200 === 0 || offset >= totalPl) {
+        await updateSyncStageProgress(adminClient, syncRunId, "playlists", {
+          items_found: Number.isFinite(totalPl) ? totalPl : playlists.length,
+          items_processed: Math.min(offset, Number.isFinite(totalPl) ? totalPl : offset),
+          meta: { playlists_collected: playlists.length },
+        });
+      }
       console.log(`[spotify-import-tracks] playlists: ${offset}/${totalPl}, collected: ${playlists.length}`);
       if (items.length === 0) break;
     }
@@ -922,6 +968,16 @@ async function syncPlaylists(
 
       totalTracks += finalCount;
       importedTracksPlaylistsCount++;
+      await updateSyncStageProgress(adminClient, syncRunId, "playlists", {
+        items_found: playlists.length,
+        items_processed: playlists.length,
+        meta: {
+          playlists_to_check: toSync.length,
+          playlist_tracks_synced: totalTracks,
+          playlists_restricted: restrictedCount,
+          playlists_failed: failedPlaylists.length,
+        },
+      });
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : String(e);
       const status = e instanceof SpotifyImportError ? e.status : 0;
@@ -943,6 +999,16 @@ async function syncPlaylists(
           .update({ tracks_import_status: "failed", tracks_import_error: errMsg })
           .eq("id", dbId);
       }
+      await updateSyncStageProgress(adminClient, syncRunId, "playlists", {
+        items_found: playlists.length,
+        items_processed: playlists.length,
+        meta: {
+          playlists_to_check: toSync.length,
+          playlist_tracks_synced: totalTracks,
+          playlists_restricted: restrictedCount,
+          playlists_failed: failedPlaylists.length,
+        },
+      });
     }
   }
 
@@ -1289,7 +1355,7 @@ Deno.serve(async (req) => {
     // Step 2: Saved Albums
     if (syncScope === "all" || syncScope === "albums") {
       step = "sync_saved_albums";
-      const albumResult = await syncSavedAlbums(adminClient, user.id, accessToken, isFullSync, existingAlbumIds);
+      const albumResult = await syncSavedAlbums(adminClient, user.id, accessToken, isFullSync, existingAlbumIds, syncRunId);
       result.albums_total = albumResult.total;
       result.albums_added = albumResult.added;
       result.albums_removed = albumResult.removed;
@@ -1304,7 +1370,7 @@ Deno.serve(async (req) => {
     let playlistTracksFailed = 0;
     if (syncScope === "all" || syncScope === "playlists") {
       step = "sync_playlists";
-      const plResult = await syncPlaylists(adminClient, user.id, accessToken, spotifyUserId, existingSnapshots, targetPlaylistId);
+      const plResult = await syncPlaylists(adminClient, user.id, accessToken, spotifyUserId, existingSnapshots, targetPlaylistId, syncRunId);
       result.playlists_total = plResult.total;
       result.playlists_changed = plResult.changed;
       result.playlists_removed = plResult.removed;
@@ -1427,7 +1493,7 @@ Deno.serve(async (req) => {
         message: rateLimitMessage,
         step: e.step,
         spotify_status: e.status,
-        retry_after_seconds: 180,
+        retry_after_seconds: Number(e.details.retry_after_seconds ?? 180),
       });
     }
 

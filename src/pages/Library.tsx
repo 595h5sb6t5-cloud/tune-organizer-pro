@@ -140,7 +140,7 @@ const LibraryPage = () => {
                 <div key={s.stage} className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs transition-all ${s.status === "active" ? "bg-accent/10 text-foreground font-medium" : s.status === "done" ? "bg-accent/5 text-foreground" : s.status === "error" ? "bg-destructive/10 text-destructive" : "text-muted-foreground/60"}`}>
                   <StageIcon status={s.status} />
                   <span className="truncate">{s.label}</span>
-                  {s.detail && s.status === "done" && <span className="text-muted-foreground ml-auto text-[10px] shrink-0">{s.detail}</span>}
+                  {s.detail && (s.status === "done" || s.status === "active") && <span className="text-muted-foreground ml-auto text-[10px] shrink-0">{s.detail}</span>}
                 </div>
               ))}
             </div>

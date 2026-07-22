@@ -10,7 +10,7 @@ import { useSpotifyLibrary } from "@/hooks/use-spotify-library";
 const PAGE_SIZE = 50;
 
 const LikedSongs = () => {
-  const { likedSongs, likedCount } = useSpotifyLibrary();
+  const { likedSongs, likedCount } = useSpotifyLibrary({ loadAllLikedSongs: true });
   const [search, setSearch] = useState("");
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
 
