@@ -181,10 +181,11 @@ async function runLoop(
     if (data.profile?.avg_ms_per_track != null) meta.avg_ms_per_track = data.profile.avg_ms_per_track;
 
     const analyzedNow = data.analyzed ?? 0;
+    meta.freshly_analyzed += analyzedNow;
     totalItems = data.total ?? totalItems;
 
-    // Real coverage from DB (source of truth) — avoids double-counting cache
-    // hits when the analyzer re-reads the same page across batches.
+    // Real coverage from DB (source of truth) — avoids double-counting when
+    // analyzer re-reads the same page across batches.
     const { count: coveredCount } = await adm
       .from("ai_track_analysis")
       .select("id", { count: "exact", head: true })
@@ -193,9 +194,8 @@ async function runLoop(
       .eq("prompt_version", "v2.1-2026-11")
       .eq("schema_version", "v2.0");
     processedTotal = coveredCount ?? processedTotal;
-    meta.cache_hits = Math.max(0, processedTotal - analyzedNow * meta.batches_completed >= 0 ? (processedTotal - (analyzedNow * meta.batches_completed)) : 0);
-    // Simpler: cache_hits = total covered - freshly analyzed this run. Track fresh across the whole run:
-    // (recomputed below)
+    // cache_hits = coverage that already existed BEFORE we did anything fresh this run.
+    meta.cache_hits = Math.max(0, processedTotal - meta.freshly_analyzed);
 
     // ETA: average across the last few batches
     const recent = batchDurationsMs.slice(-5);
