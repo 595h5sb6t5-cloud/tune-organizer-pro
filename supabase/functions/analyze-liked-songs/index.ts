@@ -183,7 +183,7 @@ Dimensions:
 15. intimacy_scale — intimate / personal / social / arena / epic
 16. tension_level — very relaxed / relaxed / moderate / tense / intense
 
-CRITICAL: Do NOT factor language into ANY of these dimensions. A Spanish song and an English song with the same sonic qualities must get the same tags.
+Language IS relevant for grouping. Detect it accurately (english / spanish / portuguese / italian / french / instrumental / other). Tag by sonic qualities normally; language is a separate axis used later by the clusterer.
 Be SPECIFIC and CREATIVE with your descriptions. Generic tags are useless.`;
 
 const TAG_TOOL = {
