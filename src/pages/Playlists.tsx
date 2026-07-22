@@ -54,7 +54,7 @@ const Playlists = () => {
           </div>
         </div>
 
-        <Generator onCreated={(id) => { void refresh(); setSelected(id); }} />
+        <ClusterSampleTest onPromoted={(id) => { void refresh(); setSelected(id); }} />
 
         <div className="mt-10">
           <h2 className="font-heading text-xl mb-4">Tus playlists generadas</h2>
