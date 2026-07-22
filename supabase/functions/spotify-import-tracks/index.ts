@@ -458,7 +458,7 @@ async function syncLikedSongs(
  * SAVED ALBUMS — full bidirectional sync with album tracks.
  */
 async function syncSavedAlbums(
-  adminClient: any, userId: string, token: string, isFullSync: boolean, existingAlbumIds: Set<string>
+  adminClient: any, userId: string, token: string, isFullSync: boolean, existingAlbumIds: Set<string>, syncRunId: string
 ): Promise<{ added: number; removed: number; total: number; tracksImported: number }> {
   const spotifyAlbums: any[] = [];
   const spotifyAlbumIds = new Set<string>();
@@ -502,6 +502,13 @@ async function syncSavedAlbums(
       }
 
       offset += 50;
+      if (offset === 50 || offset % 200 === 0 || offset >= total) {
+        await updateSyncStageProgress(adminClient, syncRunId, "saved_albums", {
+          items_found: Number.isFinite(total) ? total : spotifyAlbums.length,
+          items_processed: Math.min(offset, Number.isFinite(total) ? total : offset),
+          meta: { collected: spotifyAlbums.length, mode: isFullSync ? "full" : "incremental" },
+        });
+      }
       if (offset % 200 === 0) {
         console.log(`[spotify-import-tracks] saved albums: ${offset}/${total}, collected: ${spotifyAlbums.length}`);
       }
@@ -616,6 +623,15 @@ async function syncSavedAlbums(
           );
         }
         totalTracksImported += trackRows.length;
+        await updateSyncStageProgress(adminClient, syncRunId, "saved_albums", {
+          items_found: spotifyAlbums.length,
+          items_processed: spotifyAlbums.length,
+          meta: {
+            collected: spotifyAlbums.length,
+            album_tracks_imported: totalTracksImported,
+            mode: isFullSync ? "full" : "incremental",
+          },
+        });
       } catch (e) {
         console.warn(`[spotify-import-tracks] Failed to import tracks for album ${album.album_name}:`, e);
       }
