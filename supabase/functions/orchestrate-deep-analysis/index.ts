@@ -91,8 +91,8 @@ async function runLoop(
     .select("id", { count: "exact", head: true })
     .eq("user_id", userId)
     .eq("analysis_version", "v2")
-    .eq("prompt_version", "v2.1-2026-11")
-    .eq("schema_version", "v2.0");
+    .eq("prompt_version", "v2.2-2026-11-lang")
+    .eq("schema_version", "v2.1");
 
   const meta: JobMeta = {
     cache_hits: priorMeta.cache_hits ?? (baselineCount ?? 0),
@@ -191,8 +191,8 @@ async function runLoop(
       .select("id", { count: "exact", head: true })
       .eq("user_id", userId)
       .eq("analysis_version", "v2")
-      .eq("prompt_version", "v2.1-2026-11")
-      .eq("schema_version", "v2.0");
+      .eq("prompt_version", "v2.2-2026-11-lang")
+      .eq("schema_version", "v2.1");
     processedTotal = coveredCount ?? processedTotal;
     // cache_hits = coverage that already existed BEFORE we did anything fresh this run.
     meta.cache_hits = Math.max(0, processedTotal - meta.freshly_analyzed);
