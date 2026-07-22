@@ -676,8 +676,12 @@ export type Database = {
           album_name: string | null
           artist_name: string
           created_at: string
+          deactivated_at: string | null
           id: string
           image_url: string | null
+          is_active: boolean
+          is_available: boolean
+          last_seen_sync_run_id: string | null
           release_date: string | null
           spotify_track_id: string
           track_name: string
@@ -688,8 +692,12 @@ export type Database = {
           album_name?: string | null
           artist_name: string
           created_at?: string
+          deactivated_at?: string | null
           id?: string
           image_url?: string | null
+          is_active?: boolean
+          is_available?: boolean
+          last_seen_sync_run_id?: string | null
           release_date?: string | null
           spotify_track_id: string
           track_name: string
@@ -700,8 +708,12 @@ export type Database = {
           album_name?: string | null
           artist_name?: string
           created_at?: string
+          deactivated_at?: string | null
           id?: string
           image_url?: string | null
+          is_active?: boolean
+          is_available?: boolean
+          last_seen_sync_run_id?: string | null
           release_date?: string | null
           spotify_track_id?: string
           track_name?: string
@@ -847,6 +859,7 @@ export type Database = {
           audio_time_signature: number | null
           audio_valence: number | null
           created_at: string
+          deactivated_at: string | null
           energy: string | null
           era: string | null
           genre_tags: string[] | null
@@ -854,6 +867,9 @@ export type Database = {
           id: string
           image_url: string | null
           intimacy_scale: string | null
+          is_active: boolean
+          is_available: boolean
+          last_seen_sync_run_id: string | null
           listening_context: string | null
           mood: string | null
           production_style: string | null
@@ -888,6 +904,7 @@ export type Database = {
           audio_time_signature?: number | null
           audio_valence?: number | null
           created_at?: string
+          deactivated_at?: string | null
           energy?: string | null
           era?: string | null
           genre_tags?: string[] | null
@@ -895,6 +912,9 @@ export type Database = {
           id?: string
           image_url?: string | null
           intimacy_scale?: string | null
+          is_active?: boolean
+          is_available?: boolean
+          last_seen_sync_run_id?: string | null
           listening_context?: string | null
           mood?: string | null
           production_style?: string | null
@@ -929,6 +949,7 @@ export type Database = {
           audio_time_signature?: number | null
           audio_valence?: number | null
           created_at?: string
+          deactivated_at?: string | null
           energy?: string | null
           era?: string | null
           genre_tags?: string[] | null
@@ -936,6 +957,9 @@ export type Database = {
           id?: string
           image_url?: string | null
           intimacy_scale?: string | null
+          is_active?: boolean
+          is_available?: boolean
+          last_seen_sync_run_id?: string | null
           listening_context?: string | null
           mood?: string | null
           production_style?: string | null
@@ -1846,6 +1870,131 @@ export type Database = {
         }
         Relationships: []
       }
+      sync_run_stages: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          cursor_value: string | null
+          error_message: string | null
+          id: string
+          items_created: number
+          items_found: number
+          items_processed: number
+          items_removed_or_deactivated: number
+          items_updated: number
+          label: string
+          meta: Json
+          order_index: number
+          retry_count: number
+          stage_key: string
+          started_at: string | null
+          status: string
+          sync_run_id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          cursor_value?: string | null
+          error_message?: string | null
+          id?: string
+          items_created?: number
+          items_found?: number
+          items_processed?: number
+          items_removed_or_deactivated?: number
+          items_updated?: number
+          label: string
+          meta?: Json
+          order_index?: number
+          retry_count?: number
+          stage_key: string
+          started_at?: string | null
+          status?: string
+          sync_run_id: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          cursor_value?: string | null
+          error_message?: string | null
+          id?: string
+          items_created?: number
+          items_found?: number
+          items_processed?: number
+          items_removed_or_deactivated?: number
+          items_updated?: number
+          label?: string
+          meta?: Json
+          order_index?: number
+          retry_count?: number
+          stage_key?: string
+          started_at?: string | null
+          status?: string
+          sync_run_id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sync_run_stages_sync_run_id_fkey"
+            columns: ["sync_run_id"]
+            isOneToOne: false
+            referencedRelation: "sync_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sync_runs: {
+        Row: {
+          active_stage: string | null
+          completed_at: string | null
+          created_at: string
+          error_message: string | null
+          id: string
+          locked_until: string | null
+          retry_count: number
+          run_type: string
+          started_at: string
+          status: string
+          summary: Json
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          active_stage?: string | null
+          completed_at?: string | null
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          locked_until?: string | null
+          retry_count?: number
+          run_type: string
+          started_at?: string
+          status?: string
+          summary?: Json
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          active_stage?: string | null
+          completed_at?: string | null
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          locked_until?: string | null
+          retry_count?: number
+          run_type?: string
+          started_at?: string
+          status?: string
+          summary?: Json
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       tracks: {
         Row: {
           album_id: string | null
@@ -2237,7 +2386,15 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      reconcile_liked_songs: {
+        Args: {
+          _full_reconcile?: boolean
+          _sync_run_id: string
+          _tracks: Json
+          _user_id: string
+        }
+        Returns: Json
+      }
     }
     Enums: {
       [_ in never]: never

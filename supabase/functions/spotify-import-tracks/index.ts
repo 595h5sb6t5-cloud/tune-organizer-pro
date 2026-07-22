@@ -298,6 +298,7 @@ async function syncLikedSongs(
   token: string,
   isFullSync: boolean,
   existingTrackIds: Set<string>,
+  syncRunId: string,
   userMarket?: string,
   lastSyncCutoff?: string | null,
 ): Promise<{ added: number; removed: number; total: number; spotify_total_raw: number; hidden_or_unavailable: number }> {
@@ -362,7 +363,9 @@ async function syncLikedSongs(
 
   const scannedFullLibrary = offset >= total;
 
-  // Only upsert NEW tracks to avoid rewriting 1600+ rows every sync.
+  // Only upsert NEW tracks on incremental sync to avoid rewriting 1600+ rows every sync.
+  // Full sync uses the transactional reconciliation function below so stale rows
+  // are deactivated only after the complete Spotify result set was received.
   const newTracks = spotifyLiked.filter((t) => !existingTrackIds.has(t.spotify_track_id));
   const addedCount = newTracks.filter((t) => {
     if (!cutoffMs) return true;
@@ -372,8 +375,43 @@ async function syncLikedSongs(
 
   console.log(`[spotify-import-tracks] liked songs done: scanned ${offset}, spotifyRawTotal ${total}, visible ${spotifyLikedIds.size}, hidden ${hiddenOrUnavailable}, new ${newTracks.length}`);
 
+  if (scannedFullLibrary) {
+    const { data: reconciliation, error: reconcileError } = await adminClient.rpc("reconcile_liked_songs", {
+      _user_id: userId,
+      _sync_run_id: syncRunId,
+      _tracks: spotifyLiked,
+      _full_reconcile: true,
+    });
+    if (reconcileError) {
+      throw new SpotifyImportError("reconcile_liked_songs", reconcileError.message, 500, {
+        db_code: reconcileError.code,
+        db_details: reconcileError.details,
+        db_hint: reconcileError.hint,
+      });
+    }
+
+    const created = Number(reconciliation?.created ?? addedCount);
+    const removed = Number(reconciliation?.removed_or_deactivated ?? 0);
+    const validTotal = Number(reconciliation?.valid_total ?? spotifyLikedIds.size);
+    console.info("[spotify-import-tracks] reconciled liked songs:", reconciliation);
+
+    return {
+      added: created,
+      removed,
+      total: validTotal,
+      spotify_total_raw: Number.isFinite(total) ? total : spotifyLikedIds.size,
+      hidden_or_unavailable: hiddenOrUnavailable,
+    };
+  }
+
   for (let i = 0; i < newTracks.length; i += 100) {
-    const batch = newTracks.slice(i, i + 100);
+    const batch = newTracks.slice(i, i + 100).map((track) => ({
+      ...track,
+      is_active: true,
+      is_available: true,
+      last_seen_sync_run_id: syncRunId,
+      deactivated_at: null,
+    }));
     await ensureDbWrite(
       adminClient.from("liked_songs").upsert(batch, { onConflict: "user_id,spotify_track_id" }),
       "upsert_liked_songs",
@@ -384,33 +422,9 @@ async function syncLikedSongs(
     );
   }
 
-  // Only reconcile deletions when we've actually walked the whole library.
-  let removedCount = 0;
-  if (scannedFullLibrary) {
-    const toRemove: string[] = [];
-    for (const existingId of existingTrackIds) {
-      if (!spotifyLikedIds.has(existingId)) toRemove.push(existingId);
-    }
-    if (toRemove.length > 0) {
-      for (let i = 0; i < toRemove.length; i += 100) {
-        const chunk = toRemove.slice(i, i + 100);
-        await ensureDbWrite(
-          adminClient.from("liked_songs").delete().eq("user_id", userId).in("spotify_track_id", chunk),
-          "delete_stale_liked_songs",
-        );
-        await ensureDbWrite(
-          adminClient.from("imported_tracks").delete().eq("user_id", userId).in("spotify_track_id", chunk),
-          "delete_stale_imported_tracks",
-        );
-      }
-      removedCount = toRemove.length;
-      console.info("[spotify-import-tracks] removed stale/hidden liked songs:", removedCount);
-    }
-  }
-
   return {
     added: addedCount,
-    removed: removedCount,
+    removed: 0,
     total: scannedFullLibrary ? spotifyLikedIds.size : existingTrackIds.size + newTracks.length - 0,
     spotify_total_raw: Number.isFinite(total) ? total : spotifyLikedIds.size,
     hidden_or_unavailable: hiddenOrUnavailable,
@@ -1197,7 +1211,7 @@ Deno.serve(async (req) => {
 
     // Load existing data for diffing
     const [trackRows, playlistRows, artistRows, albumRows] = await Promise.all([
-      fetchAllRows(() => adminClient.from("liked_songs").select("spotify_track_id").eq("user_id", user.id)),
+      fetchAllRows(() => adminClient.from("liked_songs").select("spotify_track_id").eq("user_id", user.id).eq("is_active", true).eq("is_available", true)),
       fetchAllRows(() => adminClient.from("spotify_playlists").select("spotify_playlist_id, snapshot_id").eq("user_id", user.id)),
       fetchAllRows(() => adminClient.from("spotify_followed_artists").select("spotify_artist_id").eq("user_id", user.id)),
       fetchAllRows(() => adminClient.from("spotify_saved_albums").select("spotify_album_id").eq("user_id", user.id)),
@@ -1224,6 +1238,7 @@ Deno.serve(async (req) => {
         accessToken,
         isFullSync,
         existingTrackIds,
+          crypto.randomUUID(),
         userMarket,
         connection.last_incremental_sync_at || connection.last_full_sync_at,
       );

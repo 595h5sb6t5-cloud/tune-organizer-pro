@@ -48,7 +48,8 @@ async function spotifyGet(token: string, url: string, attempt = 0): Promise<any>
     // then degrade to null so the function returns well under the 150s limit.
     if (attempt >= 1) {
       console.warn(`[spotify-sync-extras] 429 on ${url}, skipping after ${attempt + 1} attempts`);
-      return null;
+      const retryAfter = Number(r.headers.get("retry-after") ?? "180");
+      return { __rate_limited: true, retry_after_seconds: Number.isFinite(retryAfter) ? retryAfter : 180, url };
     }
     const retryAfter = Number(r.headers.get("retry-after") ?? "2");
     const waitMs = Math.min(5_000, Math.max(500, retryAfter * 1000));
@@ -138,6 +139,12 @@ Deno.serve(async (req) => {
 
     const svc = createClient(url, svcKey);
 
+    let scope: "all" | "profile" | "tops_recent" = "all";
+    try {
+      const body = await req.clone().json();
+      if (["profile", "tops_recent", "all"].includes(body?.scope)) scope = body.scope;
+    } catch { /* body optional */ }
+
     // Create sync job
     const { data: job } = await svc.from("sync_jobs").insert({
       user_id: user.id, job_type: "spotify_extras", status: "running",
@@ -154,8 +161,23 @@ Deno.serve(async (req) => {
       const token = await refreshSpotifyToken(svc, user.id);
 
       // 1. Profile
-      const profile = await spotifyGet(token, "https://api.spotify.com/v1/me");
-      if (profile) {
+      if (scope === "all" || scope === "profile") {
+        const profile = await spotifyGet(token, "https://api.spotify.com/v1/me");
+        if (profile?.__rate_limited) {
+          await updateJob({
+            status: "failed",
+            finished_at: new Date().toISOString(),
+            error_message: "Spotify rate limited profile sync",
+          });
+          return json({
+            success: false,
+            status: "rate_limited",
+            step: "spotify_profile",
+            retry_after_seconds: profile.retry_after_seconds,
+            message: "Spotify is temporarily rate limiting profile sync.",
+          });
+        }
+        if (profile) {
         await svc.from("app_users").upsert({
           user_id: user.id,
           spotify_user_id: profile.id,
@@ -167,12 +189,17 @@ Deno.serve(async (req) => {
           last_sync_at: new Date().toISOString(),
         }, { onConflict: "user_id" });
         result.profile = profile.id;
+        }
       }
 
       // 2. Top tracks (3 ranges)
       let topTrackCount = 0;
-      for (const range of ["short_term", "medium_term", "long_term"]) {
+      if (scope === "all" || scope === "tops_recent") for (const range of ["short_term", "medium_term", "long_term"]) {
         const data = await spotifyGet(token, `https://api.spotify.com/v1/me/top/tracks?limit=50&time_range=${range}`);
+        if (data?.__rate_limited) {
+          await updateJob({ status: "failed", finished_at: new Date().toISOString(), error_message: "Spotify rate limited top tracks" });
+          return json({ success: false, status: "rate_limited", step: "top_tracks", retry_after_seconds: data.retry_after_seconds, message: "Spotify is temporarily rate limiting top tracks." });
+        }
         const items = data?.items ?? [];
         if (items.length) {
           const trackMap = await upsertTracks(svc, items);
@@ -188,8 +215,12 @@ Deno.serve(async (req) => {
 
       // 3. Top artists (3 ranges)
       let topArtistCount = 0;
-      for (const range of ["short_term", "medium_term", "long_term"]) {
+      if (scope === "all" || scope === "tops_recent") for (const range of ["short_term", "medium_term", "long_term"]) {
         const data = await spotifyGet(token, `https://api.spotify.com/v1/me/top/artists?limit=50&time_range=${range}`);
+        if (data?.__rate_limited) {
+          await updateJob({ status: "failed", finished_at: new Date().toISOString(), error_message: "Spotify rate limited top artists" });
+          return json({ success: false, status: "rate_limited", step: "top_artists", retry_after_seconds: data.retry_after_seconds, message: "Spotify is temporarily rate limiting top artists." });
+        }
         const items = data?.items ?? [];
         if (items.length) {
           const artistMap = await upsertArtists(svc, items);
@@ -204,8 +235,13 @@ Deno.serve(async (req) => {
       result.top_artists = topArtistCount;
 
       // 4. Recent plays (last 50)
-      const recent = await spotifyGet(token, "https://api.spotify.com/v1/me/player/recently-played?limit=50");
-      if (recent?.items?.length) {
+      if (scope === "all" || scope === "tops_recent") {
+        const recent = await spotifyGet(token, "https://api.spotify.com/v1/me/player/recently-played?limit=50");
+        if (recent?.__rate_limited) {
+          await updateJob({ status: "failed", finished_at: new Date().toISOString(), error_message: "Spotify rate limited recent plays" });
+          return json({ success: false, status: "rate_limited", step: "recent_plays", retry_after_seconds: recent.retry_after_seconds, message: "Spotify is temporarily rate limiting recent plays." });
+        }
+        if (recent?.items?.length) {
         const tracks = recent.items.map((it: any) => it.track).filter(Boolean);
         const trackMap = await upsertTracks(svc, tracks);
         const rows = recent.items.map((it: any) => ({
@@ -216,8 +252,9 @@ Deno.serve(async (req) => {
         })).filter((r: any) => r.track_id);
         if (rows.length) await svc.from("user_recent_plays").upsert(rows, { onConflict: "user_id,track_id,played_at" });
         result.recent_plays = rows.length;
-      } else {
+        } else {
         result.recent_plays = 0;
+        }
       }
 
       await updateJob({
