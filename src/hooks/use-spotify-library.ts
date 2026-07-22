@@ -165,11 +165,6 @@ function stageDetail(row: any): string | undefined {
   return parts.length ? parts.join(" · ") : undefined;
 }
 
-function stageFullMessage(row: any): string | undefined {
-  if (!row?.error_message) return undefined;
-  return String(row.error_message);
-}
-
 function mapStages(rows: any[] | null | undefined): SyncStageState[] {
   if (!rows?.length) return INITIAL_STAGES;
   const byStage = new Map<string, any>();
@@ -187,6 +182,15 @@ function mapStages(rows: any[] | null | undefined): SyncStageState[] {
       detail: stageDetail(row),
     };
   });
+}
+
+function extractSyncError(run: any | null, stages: any[] | null | undefined): string | null {
+  if (run?.error_message) return String(run.error_message);
+  if (!stages?.length) return null;
+  for (const row of stages) {
+    if (row.error_message) return String(row.error_message);
+  }
+  return null;
 }
 
 function isActiveRun(run: any | null) {
