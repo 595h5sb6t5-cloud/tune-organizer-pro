@@ -1,133 +1,78 @@
-## Objetivo
+# AI Playlist Pipeline v3 — Cluster-first with strict quality gates
 
-Reducir tiempo del deep analysis sin bajar la calidad ni recortar dimensiones. Entregar al final métricas antes/después con 100 canciones y solo aprobar si la coherencia se mantiene.
+Detengo cualquier generación/exportación con el sistema actual y reescribo el pipeline con estas piezas.
 
-## Fase 0 — Diagnóstico y baseline
+## 1. Nueva Edge Function: `cluster-library`
 
-Antes de tocar nada, mido dónde se pierde el tiempo con un modo `profile_batch` nuevo en la edge function `analyze-liked-songs` que instrumenta una corrida real de 50 canciones con timers precisos por etapa:
+Reemplaza el flujo "concepto → buscar canciones". Ahora es: **agrupar primero, nombrar después**.
 
-- `t_db_read`: leer canciones + análisis previos
-- `t_prompt_build`: armar prompt
-- `t_openai`: llamada a OpenAI (con `usage.prompt_tokens`, `completion_tokens`, `reasoning_tokens`, y `x-request-id` para latencia real)
-- `t_validate`: parseo + validación de JSON
-- `t_db_write`: guardado
-- Concurrencia efectiva y tokens I/O/razonamiento por canción
+Entrada: `{ sample_size?: number, dry_run?: boolean }`.
 
-Se guarda una fila por corrida en una tabla `analysis_benchmarks` (con snapshot del modelo, versión de prompt, versión de esquema, muestra usada). Este es el baseline contra el que se compara todo lo demás.
+Pasos:
+1. Cargar todas las canciones con `ai_track_analysis v2.1` del usuario (con las 16 dimensiones sonoras).
+2. Construir vector de features **solo sonoros** con pesos:
+   - Alto: `groove_feel`, `production_style`, `beat_style`, `instrumentation`, `energy_score`, `melody_level`, `bass_level`, `drum_intensity`, `vocal_intensity`, `darkness`, `softness`, `dance_feel`, `song_variation`, `emotional_intensity`, `sound_texture`
+   - Contexto secundario (peso bajo): `main_genre`, `language`, década
+   - Filtro duro: `language` respeta la regla (inglés aislado; romances entre sí; instrumental neutro)
+3. Clustering por similitud coseno + umbral de distancia (no k-means fijo). Cada cluster se valida contra:
+   - `min_size = 12` (o 8-11 solo si `avg_compat ≥ 0.88`, `min_compat ≥ 0.80`)
+   - `avg_compat ≥ 0.82`
+   - `max_energy_diff`, `max_groove_diff`, `max_darkness_diff`, `max_production_diff`, `max_instrumentation_diff`, `max_vocal_diff`, `max_variation_diff` dentro de tolerancia
+4. Canciones que no entren en ningún cluster válido → `unassigned` (persistido).
+5. Clusters con < 8 canciones → guardados como `candidate_cluster` (no visibles, esperan más data).
 
-## Fase 1 — Versionado y cache de resultados
+## 2. Nueva Edge Function: `name-cluster`
 
-Crear en `ai_track_analysis`:
+Solo se llama **después** de que un cluster pasó todos los filtros. Recibe el cluster ya validado + resumen numérico y pide al modelo:
+- Nombre específico
+- Descripción sonora concreta (percusión, bajo, textura, voz, estructura) — rechaza descripciones genéricas
+- vibe, context
+- fit_score por canción respecto al centro
+- reason en lenguaje natural con **nombre de canción + artista**, nunca IDs
 
-- `prompt_version` (text)
-- `schema_version` (text)  
-- Índice único parcial `(user_id, spotify_track_id, analysis_version, prompt_version, schema_version)` para v2
+## 3. Revisor endurecido (`review-playlist`)
 
-Antes de mandar cada canción al modelo, buscar match exacto por `spotify_track_id + prompt_version + schema_version + model_used`. Si existe → se reutiliza, cero llamadas.
+- Umbral de aprobación: `coherence_score ≥ 0.85`, `avg_compat ≥ 0.82`, ninguna canción con `fit_score < 0.72`
+- **Nueva regla**: si `songs_to_remove.length / total > 0.25` → `rejected: true, action: "disband_cluster"`, devolver canciones a `unassigned`, no publicar playlist
+- Si tras remover queda `< min_size` válido → mismo trato: disolver
 
-Además exponer `prompt_cache_key` en la llamada a OpenAI (chat completions) con un hash estable del sistema, para que la parte fija del prompt use el caching de OpenAI (descuenta tokens de entrada repetidos).
+## 4. Cambios de datos
 
-## Fase 2 — Prompt system fijo + user compacto
+Nueva tabla `cluster_candidates` (candidatos y unassigned tracking):
 
-Hoy los ejemplos largos (Julio Iglesias, Mecano, Kanye, etc.) viajan en cada request. Reestructuro:
+```text
+id, user_id, status ('candidate'|'unassigned'|'promoted'|'rejected'),
+centroid jsonb, avg_compat numeric, min_compat numeric,
+size int, dimensions_summary jsonb, created_at, updated_at
+```
 
-- **System prompt v2 (fijo, cacheado):** todas las reglas curatoriales, ejemplos, definiciones de dimensiones, esquema resumido. Un solo texto grande estable → aprovecha `prompt_cache_key`.
-- **User prompt (mínimo):** solo `{ track_name, artist, album, features de Spotify, tags previos si existen }` de la canción actual + "Devuelve JSON según schema".
+Y `cluster_candidate_tracks(cluster_id, track_id, compat_to_centroid)`.
 
-Mismo contenido de análisis, menos tokens de entrada por llamada.
+`generated_playlists` gana: `avg_compat`, `min_compat`, `dimensions_summary jsonb`, `source_cluster_id`.
 
-## Fase 3 — Structured Outputs estricto
+## 5. UI
 
-Migrar de tool-calling con reparación manual a `response_format: { type: "json_schema", strict: true, schema: {...} }` con todos los tipos, rangos numéricos, enums cerrados. Beneficios:
+- Deshabilitar botón "Generate" del sistema viejo mientras exista pipeline v2.
+- Nueva sección "Sample Test" en Playlists: corre `cluster-library` con muestra de 150 y muestra tabla con:
+  - Cluster · size · avg_compat · min_compat · dimensiones dominantes · canción menos compatible · diferencia vs. los otros clusters
+  - Lista de unassigned
+- Solo cuando yo apruebe la muestra, se habilita "Run on full library".
+- En playlists ya publicadas, mostrar **nombre + artista + razón**, nunca IDs. Auditar `PlaylistDetail`/`PlaylistEditor` para eliminar cualquier ID visible.
 
-- Elimina reintentos por JSON malformado y la función `extractJson` de rescate
-- Elimina segundos intentos por campos faltantes
-- El modelo no gasta tokens en explicación/markdown
+## 6. Orden de ejecución (esta iteración)
 
-## Fase 4 — Paralelismo controlado por lotes
-
-Reemplazar el chain "chunk → chunk → chunk" secuencial por un worker que dentro de cada invocación procesa **N canciones en paralelo** con `Promise.allSettled` y un semáforo. Empiezo con `concurrency = 5`, configurable vía `sync_jobs.metadata.concurrency`.
-
-- Cada canción es una llamada individual (mejor structured output y cache per-track)
-- Semáforo evita superar rate limits
-- Al terminar el lote se guardan todos los resultados en un `upsert` masivo
-- El pipeline sigue siendo resumible: si falla una, se marca `pending`, no rompe el resto
-
-## Fase 5 — Triaje: análisis inicial rápido vs deep
-
-Añadir columna `analysis_stage`:
-- `quick`: derivado de Spotify audio features + tags v1 existentes (sin llamada al modelo)
-- `deep`: análisis v2 completo
-
-Reglas:
-1. Toda canción entra a `quick` (instantáneo, solo cálculo local basado en tempo/energy/valence/danceability + reglas)
-2. Solo se manda a `deep` si: nueva, sin análisis v2, `analysis_confidence < 0.7`, en frontera entre 2 clusters (distancia a segundo centroide < umbral), o marcada por el reviewer.
-
-Así reducimos el volumen real que va a OpenAI.
-
-## Fase 6 — Razonamiento adaptativo
-
-Con GPT-5.5 (chat completions) uso `reasoning_effort`:
-- `medium` por defecto
-- `high` solo cuando:
-  - features de Spotify contradictorias (ej. energy alto + valence bajo + acousticness alto)
-  - tags previos con géneros muy dispares
-  - segunda pasada tras reviewer marcó la canción como fuera de lugar
-  - clusterer no encuentra posición clara
-
-Se decide por reglas antes de llamar; el modo se guarda en `full_analysis.reasoning_mode` para auditoría.
-
-## Fase 7 — Reintentos por canción, no del pipeline
-
-- Cada canción tiene su propio try/catch con backoff exponencial (max 3 intentos: 500ms → 2s → 6s)
-- Si falla el intento 3 → se marca `status='failed'` con `error_message`; el pipeline continúa
-- El siguiente chunk hace pickup de las `failed` recientes automáticamente
-
-## Fase 8 — Muestra representativa primero
-
-Para que el usuario vea resultados rápido:
-
-1. Al iniciar deep analysis, seleccionar una muestra de ~100 canciones que cubra bien el espacio (top artists + variedad de energy/tempo/valence usando stratified sampling sobre las features de Spotify)
-2. Procesar esa muestra primero con concurrencia alta
-3. Al terminar, la UI ya puede mostrar **preview de playlists provisionales** (marcadas "análisis parcial")
-4. El resto corre en background y refina los clusters conforme llega
-
-## Fase 9 — UI de progreso real
-
-Extender `use-jobs` para exponer:
-- Estado semántico: `preparing_library | analyzing_songs | clustering | building_playlists | reviewing | done`
-- `done_count`, `total_count`, `pct`
-- ETA calculado con velocidad promedio de los últimos 20 resultados
-- Vista de preview de playlists parciales durante `analyzing_songs` (read-only, no export)
-
-## Fase 10 — Benchmark de 100 canciones
-
-Con el modo `profile_batch` corro dos veces sobre las mismas 100 canciones:
-- **Antes**: código actual (checkout de referencia)
-- **Después**: con todas las mejoras
-
-Entrego una tabla con:
-- Tiempo total y por canción
-- Número de llamadas a OpenAI
-- Tokens input / output / reasoning promedio y totales
-- % resultados reutilizados de cache
-- Errores de JSON
-- Reintentos
-- Coherencia de clusters comparada (score del reviewer sobre las playlists generadas post-análisis)
-
-**La mejora se aprueba solamente si**: tiempo baja y coherencia promedio del reviewer ≥ baseline.
+1. Migración: nuevas tablas + columnas.
+2. Escribir `cluster-library` (matemática de clustering + validaciones, sin IA).
+3. Escribir `name-cluster` (solo nombrar clusters aprobados).
+4. Endurecer `review-playlist` con la regla del 25% y disolución.
+5. UI: pantalla "Sample Test" en `/ai-playlists` + deshabilitar el generador viejo.
+6. Correr la muestra de 150 canciones y **enseñarte el reporte**. No re-etiqueto ni proceso la biblioteca completa hasta tu aprobación.
 
 ## Detalles técnicos
 
-- Archivos a modificar: `supabase/functions/analyze-liked-songs/index.ts`, `supabase/functions/analyze-tracks-deep/index.ts`, `src/hooks/use-jobs.tsx`, `src/hooks/use-deep-track-analysis.ts`
-- Nuevas migraciones: `analysis_benchmarks` table; columnas `prompt_version`, `schema_version`, `analysis_stage` en `ai_track_analysis`; índice único parcial
-- Modelo objetivo: `gpt-5.5` (default de Lovable AI Gateway) con `reasoning_effort` adaptativo — se decide via benchmark si conviene contra `gpt-5.4` como coste/latencia
-- Structured Outputs vía `response_format: json_schema` estricto
-- Prompt caching vía `prompt_cache_key` estable derivado del hash del system prompt + versión
+- Clustering en Deno con álgebra vectorial simple (sin dependencias pesadas). Similitud coseno sobre vector normalizado 15-dim.
+- Umbrales configurables en constantes al inicio del archivo para poder ajustar tras la muestra.
+- Todo idempotente: correr `cluster-library` recomputa candidatos sin duplicar.
+- Se preserva `generate-ai-playlist` en el código pero deshabilitado desde UI (por si quieres comparar).
 
-## Fuera de alcance de este cambio
-
-- Batch API de OpenAI (no encaja porque el usuario está esperando en pantalla)
-- Bajar dimensiones del schema
-- Cambiar el modelo a uno "más rápido" antes del benchmark
-- Tocar la calidad del reviewer final
+¿Apruebas este plan para empezar por la migración + `cluster-library` + pantalla de muestra?
