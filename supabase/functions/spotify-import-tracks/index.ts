@@ -188,15 +188,21 @@ type TrackRow = {
   added_at: string | null;
 };
 
-function extractTrack(item: any, userId: string, requirePlayable = false): TrackRow | null {
+function extractTrack(item: any, userId: string, userMarket = ""): TrackRow | null {
   const track = item?.track;
   if (!track || typeof track.id !== "string") return null;
   // Local files are not available through Spotify Web API playback/export.
   if (track.is_local === true) return null;
-  // When we request the user's market, Spotify marks tracks hidden from the
-  // user's visible Liked Songs list as is_playable=false. Exclude those so our
-  // library count matches the Spotify app, not the raw API saved-track total.
-  if (requirePlayable && track.is_playable === false) return null;
+  // Match the Spotify app's visible Liked Songs list, not the raw saved-track
+  // API total: exclude tracks Spotify marks unplayable and tracks unavailable
+  // in the user's market. Some unavailable tracks do not include is_playable=false,
+  // so available_markets is required for a trustworthy reconciliation.
+  if (userMarket) {
+    if (track.is_playable === false) return null;
+    if (Array.isArray(track.available_markets) && !track.available_markets.includes(userMarket)) {
+      return null;
+    }
+  }
   const artists = Array.isArray(track.artists) ? track.artists.map((a: any) => a?.name).filter(Boolean).join(", ") : "";
   const album = track.album;
   const images = album?.images || [];
@@ -301,7 +307,13 @@ async function syncLikedSongs(
   let total = Infinity;
   let hiddenOrUnavailable = 0;
   const cutoffMs = lastSyncCutoff ? new Date(lastSyncCutoff).getTime() : 0;
-  const requirePlayable = Boolean(userMarket);
+  if (!userMarket) {
+    throw new SpotifyImportError(
+      "spotify_market_required",
+      "Spotify market could not be verified, so liked songs were not changed.",
+      503,
+    );
+  }
 
   // Incremental fast-path: stop as soon as we've walked past the last sync
   // cutoff AND have seen a run of tracks we already have locally. Liked songs
@@ -321,7 +333,7 @@ async function syncLikedSongs(
 
     for (const item of items) {
       const hadTrack = !!item?.track?.id;
-      const t = extractTrack(item, userId, requirePlayable);
+      const t = extractTrack(item, userId, userMarket);
       if (!t) {
         if (hadTrack) hiddenOrUnavailable++;
         continue;
@@ -1178,6 +1190,9 @@ Deno.serve(async (req) => {
       }
     } catch (e) {
       console.warn("[spotify-import-tracks] /v1/me failed, continuing:", e);
+      if (e instanceof SpotifyImportError && e.status === 429 && (syncScope === "all" || syncScope === "liked")) {
+        throw e;
+      }
     }
 
     // Load existing data for diffing
