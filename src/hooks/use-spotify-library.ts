@@ -402,6 +402,14 @@ export function useSpotifyLibrary() {
         setStage("liked_songs", "done", `${added} new`);
         await refreshLiked();
       });
+      if (isSpotifyRateLimitedResult(combinedResult)) {
+        setSyncStages(prev => prev.map(s =>
+          s.status === "pending" ? { ...s, status: "skipped" as StageStatus, detail: "rate limited" } : s
+        ));
+        setLastSyncResult(combinedResult);
+        await loadSyncMeta();
+        return;
+      }
       if (abortRef.current) return;
 
       await runStage("sync_albums", "Sincronizando álbumes guardados", "albums", async (update) => {
