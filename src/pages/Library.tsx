@@ -98,7 +98,7 @@ const LibraryPage = () => {
     );
   }
 
-  const hasData = playlists.length > 0 || likedCount > 0 || followedArtists.length > 0 || albumCount > 0;
+  const hasData = likedCount > 0 || followedArtists.length > 0 || albumCount > 0;
   const hasAnySyncActivity = syncStages.some(s => s.status !== "pending");
 
   return (
@@ -111,7 +111,6 @@ const LibraryPage = () => {
             <p className="text-muted-foreground">
               {likedCount} liked songs
               {albumCount > 0 && ` · ${albumCount} albums`}
-              {playlists.length > 0 && ` · ${playlists.length} playlists`}
               {followedArtists.length > 0 && ` · ${followedArtists.length} artists`}
             </p>
           </div>
