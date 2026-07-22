@@ -69,23 +69,43 @@ const Playlists = () => {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {playlists.map((p) => (
-                <button
+                <div
                   key={p.id}
-                  onClick={() => setSelected(p.id)}
-                  className="text-left rounded-2xl border border-border/50 bg-card/50 p-5 hover:border-accent/50 transition-colors"
+                  className="relative rounded-2xl border border-border/50 bg-card/50 p-5 hover:border-accent/50 transition-colors"
                 >
-                  <div className="flex items-start justify-between gap-3 mb-2">
-                    <h3 className="font-heading text-lg leading-tight">{p.name}</h3>
-                    {p.is_exported_to_spotify ? (
-                      <Badge variant="outline" className="text-xs"><Check className="w-3 h-3 mr-1" />En Spotify</Badge>
-                    ) : (
-                      <Badge variant="secondary" className="text-xs">Draft</Badge>
-                    )}
-                  </div>
-                  {p.concept && <p className="text-xs uppercase tracking-wider text-accent mb-2">{p.concept}</p>}
-                  {p.description && <p className="text-sm text-muted-foreground line-clamp-2 mb-2">{p.description}</p>}
-                  <p className="text-xs text-muted-foreground"><Music className="w-3 h-3 inline mr-1" />{p.track_count} canciones</p>
-                </button>
+                  <button
+                    type="button"
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      if (!confirm(`¿Eliminar "${p.name}"? Esta acción no se puede deshacer.`)) return;
+                      const { error } = await supabase.from("generated_playlists").delete().eq("id", p.id);
+                      if (error) { toast.error("No se pudo eliminar", { description: error.message }); return; }
+                      toast.success("Playlist eliminada");
+                      void refresh();
+                    }}
+                    className="absolute top-3 right-3 p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors z-10"
+                    aria-label="Eliminar playlist"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelected(p.id)}
+                    className="text-left w-full"
+                  >
+                    <div className="flex items-start justify-between gap-3 mb-2 pr-8">
+                      <h3 className="font-heading text-lg leading-tight">{p.name}</h3>
+                      {p.is_exported_to_spotify ? (
+                        <Badge variant="outline" className="text-xs"><Check className="w-3 h-3 mr-1" />En Spotify</Badge>
+                      ) : (
+                        <Badge variant="secondary" className="text-xs">Draft</Badge>
+                      )}
+                    </div>
+                    {p.concept && <p className="text-xs uppercase tracking-wider text-accent mb-2">{p.concept}</p>}
+                    {p.description && <p className="text-sm text-muted-foreground line-clamp-2 mb-2">{p.description}</p>}
+                    <p className="text-xs text-muted-foreground"><Music className="w-3 h-3 inline mr-1" />{p.track_count} canciones</p>
+                  </button>
+                </div>
               ))}
             </div>
           )}
