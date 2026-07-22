@@ -20,6 +20,7 @@ export type Database = {
           analysis_confidence: number | null
           analysis_stage: string | null
           analysis_version: string | null
+          artist_context: Json | null
           artist_name: string | null
           avoid_pairing_with: string[]
           bass_level: number | null
@@ -37,8 +38,10 @@ export type Database = {
           energy_level: string | null
           energy_score: number | null
           full_analysis: Json | null
+          house_profile: Json | null
           id: string
           instrumentation_summary: string | null
+          is_house_related: boolean | null
           language: string | null
           last_error: string | null
           liked_song_id: string | null
@@ -47,9 +50,11 @@ export type Database = {
           melody_level: number | null
           model_used: string | null
           moods: string[]
+          music_family: string | null
           nostalgia: number | null
           playlist_fit: Json
           primary_genre: string | null
+          primary_subgenre: string | null
           prompt_version: string | null
           reasoning_mode: string | null
           retry_count: number
@@ -58,10 +63,12 @@ export type Database = {
           secondary_genres: string[]
           secondary_genres_v2: string[] | null
           secondary_moods_v2: string[] | null
+          secondary_subgenres: string[] | null
           softness: number | null
           song_variation: number | null
           sound_texture: string | null
           spotify_track_id: string | null
+          subgenre_confidence: number | null
           tempo_feel: string | null
           track_id: string
           track_name: string | null
@@ -77,6 +84,7 @@ export type Database = {
           analysis_confidence?: number | null
           analysis_stage?: string | null
           analysis_version?: string | null
+          artist_context?: Json | null
           artist_name?: string | null
           avoid_pairing_with?: string[]
           bass_level?: number | null
@@ -94,8 +102,10 @@ export type Database = {
           energy_level?: string | null
           energy_score?: number | null
           full_analysis?: Json | null
+          house_profile?: Json | null
           id?: string
           instrumentation_summary?: string | null
+          is_house_related?: boolean | null
           language?: string | null
           last_error?: string | null
           liked_song_id?: string | null
@@ -104,9 +114,11 @@ export type Database = {
           melody_level?: number | null
           model_used?: string | null
           moods?: string[]
+          music_family?: string | null
           nostalgia?: number | null
           playlist_fit?: Json
           primary_genre?: string | null
+          primary_subgenre?: string | null
           prompt_version?: string | null
           reasoning_mode?: string | null
           retry_count?: number
@@ -115,10 +127,12 @@ export type Database = {
           secondary_genres?: string[]
           secondary_genres_v2?: string[] | null
           secondary_moods_v2?: string[] | null
+          secondary_subgenres?: string[] | null
           softness?: number | null
           song_variation?: number | null
           sound_texture?: string | null
           spotify_track_id?: string | null
+          subgenre_confidence?: number | null
           tempo_feel?: string | null
           track_id: string
           track_name?: string | null
@@ -134,6 +148,7 @@ export type Database = {
           analysis_confidence?: number | null
           analysis_stage?: string | null
           analysis_version?: string | null
+          artist_context?: Json | null
           artist_name?: string | null
           avoid_pairing_with?: string[]
           bass_level?: number | null
@@ -151,8 +166,10 @@ export type Database = {
           energy_level?: string | null
           energy_score?: number | null
           full_analysis?: Json | null
+          house_profile?: Json | null
           id?: string
           instrumentation_summary?: string | null
+          is_house_related?: boolean | null
           language?: string | null
           last_error?: string | null
           liked_song_id?: string | null
@@ -161,9 +178,11 @@ export type Database = {
           melody_level?: number | null
           model_used?: string | null
           moods?: string[]
+          music_family?: string | null
           nostalgia?: number | null
           playlist_fit?: Json
           primary_genre?: string | null
+          primary_subgenre?: string | null
           prompt_version?: string | null
           reasoning_mode?: string | null
           retry_count?: number
@@ -172,10 +191,12 @@ export type Database = {
           secondary_genres?: string[]
           secondary_genres_v2?: string[] | null
           secondary_moods_v2?: string[] | null
+          secondary_subgenres?: string[] | null
           softness?: number | null
           song_variation?: number | null
           sound_texture?: string | null
           spotify_track_id?: string | null
+          subgenre_confidence?: number | null
           tempo_feel?: string | null
           track_id?: string
           track_name?: string | null
@@ -530,6 +551,39 @@ export type Database = {
           size?: number
           sonic_summary?: string | null
           status?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      diagnostic_samples: {
+        Row: {
+          created_at: string
+          id: string
+          label: string
+          selection_reasons: Json | null
+          size: number
+          spotify_track_ids: string[]
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          label: string
+          selection_reasons?: Json | null
+          size: number
+          spotify_track_ids: string[]
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          label?: string
+          selection_reasons?: Json | null
+          size?: number
+          spotify_track_ids?: string[]
           updated_at?: string
           user_id?: string
         }

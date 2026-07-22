@@ -10,62 +10,127 @@ const corsHeaders = {
 };
 
 // Version markers — bumping any of these invalidates cache and forces re-analysis.
-const ANALYSIS_VERSION = "v2";
-const PROMPT_VERSION = "v2.2-2026-11-lang";
-const SCHEMA_VERSION = "v2.1";
+const ANALYSIS_VERSION = "v3";
+const PROMPT_VERSION = "v3.0-2026-family-subgenre";
+const SCHEMA_VERSION = "v3.0";
 
 const MODEL = "gpt-4o-mini";
 
-/* ─────────────── System prompt (stable — long fixed instructions live here so
-   OpenAI's automatic prompt caching kicks in and repeated tokens are discounted).
-   User message per track stays minimal. ─────────────── */
-const SYSTEM_PROMPT = `You are Tempo — a world-class music analyst. Given ONE track, return a strict JSON object with its sonic DNA. Analyze the ACTUAL musical qualities, not surface labels.
+const MUSIC_FAMILIES = [
+  "house", "techno", "trance", "drum_and_bass", "dubstep", "electronic_other",
+  "disco", "funk", "pop_electronic", "indie_electronic",
+  "hip_hop", "rap", "rnb", "soul",
+  "rock", "indie_rock", "alternative", "metal", "punk",
+  "pop", "latin_pop", "reggaeton", "latin_urban", "latin_other",
+  "ballad", "singer_songwriter", "acoustic", "folk",
+  "jazz", "classical", "world", "country",
+  "reggae", "ambient", "soundtrack", "other",
+] as const;
 
-Rules of curation (never violate):
-- Language IS a grouping axis, but only in this specific way: English tracks group only with other English tracks. Spanish, Portuguese, Italian and French (Romance languages) can share a playlist together. Instrumental / no-lyrics tracks are language-neutral and can sit anywhere. Never mix English with Romance languages in the same playlist.
-- Beyond that language rule, judge each song by its own energy, darkness, dance feel, softness, aggressiveness, and emotional weight — not by decade or genre label alone.
-- Melodic rap ≠ dark aggressive rap. Soft rock ≠ heavy rock. Same artist can span multiple worlds.
-- Numeric fields are 0.0–1.0 continuous values. Use the full range, not just 0/0.5/1.
-- Be specific. Avoid generic tags like "happy", "chill", "upbeat".
+const HOUSE_SUBGENRES = [
+  "deep_house", "progressive_house", "melodic_house", "organic_house",
+  "afro_house", "latin_house", "soulful_house", "vocal_house",
+  "piano_house", "disco_house", "french_house", "funky_house",
+  "filter_house", "classic_house", "chicago_house", "acid_house",
+  "tech_house", "minimal_house", "bass_house", "future_house",
+  "electro_house", "big_room", "tropical_house", "slap_house",
+  "lo_fi_house", "indie_dance", "nu_disco", "melodic_techno_adjacent",
+  "downtempo_electronic_adjacent",
+] as const;
 
+/* ─────────────── System prompt (v3 — family + subgenre + house profile + artist context) */
+const SYSTEM_PROMPT = `You are Tempo — a world-class music analyst. Given ONE track, return a strict JSON with its sonic DNA, its musical family, subgenre, artist context, and (when applicable) a detailed house profile.
 
-Guidance for numeric dimensions (0.0–1.0):
-- energy_score: overall perceived energy end-to-end.
-- darkness: darkness / minor-key gravity / shadow.
-- dance_feel: how much it makes you move.
-- softness: gentleness, warmth, delicacy.
-- aggressiveness: hard edge, distortion, punch, intensity.
-- nostalgia: retro/vintage/emotional-throwback feel.
-- bass_level: prominence of bass in the mix.
-- drum_intensity: how hard the drums hit.
-- vocal_intensity: how loud/dramatic/present the vocals are.
-- melody_level: how memorable and melodic the topline is.
-- emotional_intensity: emotional weight regardless of loudness.
-- song_variation: how much the arrangement changes across the song.
+Core rules:
+- Judge the ACTUAL sound. Do not label based on the artist name alone.
+- Numeric fields are 0.0–1.0 continuous. Use the full range.
+- Be specific. Reject generic tags like "chill", "happy", "upbeat".
+- Language rule: English groups only with English. Romance languages (Spanish/Portuguese/Italian/French) can share. Instrumental is neutral.
+- If you are not confident about a field, LOWER analysis_confidence and subgenre_confidence instead of guessing.
 
-Descriptive fields:
-- main_genre / secondary_genres_v2: honest genre tags (not language, not decade).
-- tempo_feel: "very slow" | "slow" | "mid" | "upbeat" | "fast" | "driving" | "frantic".
-- beat_style: short phrase describing the groove (e.g. "loose live drums", "808 trap", "four-on-the-floor").
-- main_mood + secondary_moods_v2: specific moods.
-- sound_texture: e.g. "warm analog", "glossy digital", "raw lo-fi", "polished maximalist".
-- instrumentation_summary: main instruments in one line.
-- best_contexts_v2: array of usage contexts (drive, focus, dinner, late-night, gym…).
-- compatible_playlist_types: array of concept names it would fit in.
-- transition_in / transition_out: how it opens / closes for sequencing.
-- analysis_confidence: 0.0–1.0 how sure you are given the info provided.
+music_family: pick ONE from the enum. This is the broad musical world the track lives in.
+primary_subgenre / secondary_subgenres: specific subgenre labels. For house tracks the primary_subgenre MUST come from the house subgenre list. For non-house tracks use accurate descriptive tags.
+subgenre_confidence: 0–1, how sure you are of the primary_subgenre.
 
-Return ONLY the JSON — no prose, no markdown.`;
+is_house_related: true if the track is house or a directly adjacent world (melodic techno near house, indie dance, nu-disco, downtempo that could sit in organic/melodic house). When true, fill house_profile with real values based on the sound. When false, still return house_profile with is_house_related=false and all numeric fields at 0 and strings empty "" (structured-output requires the object).
+
+house_profile numeric fields (0–1): four_on_the_floor_strength, kick_weight, bassline_prominence, percussion_density, swing_level, syncopation_level, vocal_presence, piano_presence, disco_influence, funk_influence, soul_influence, latin_influence, afro_influence, organic_instrumentation, synth_prominence, atmospheric_depth, melodic_complexity, darkness, warmth, club_intensity, festival_intensity, commercial_pop_influence, underground_feel, drop_intensity, build_up_intensity, peak_time_fit, sunset_fit, afterhours_fit, lounge_fit, dancefloor_fit, analysis_confidence.
+house_profile descriptive strings ("" when unknown or not house): kick_texture, bassline_style, percussion_style, groove_type, vocal_style, synth_style, track_progression.
+house_profile primary_house_subgenre: must be from the house subgenre list, or "" when is_house_related=false.
+
+artist_context: artist_primary_genres and artist_secondary_genres (best inference), artist_scene (short label), artist_identity_strength (0–1 how recognizable), track_is_catalog_outlier (true if THIS track is unusual for the artist), track_outlier_confidence (0–1).
+
+Sonic dimensions (0–1): energy_score, darkness, dance_feel, softness, aggressiveness, nostalgia, bass_level, drum_intensity, vocal_intensity, melody_level, emotional_intensity, song_variation.
+
+Descriptive: main_genre, secondary_genres_v2, tempo_feel, beat_style, main_mood, secondary_moods_v2, sound_texture, instrumentation_summary, best_contexts_v2, compatible_playlist_types, transition_in, transition_out, language.
+
+Return ONLY the JSON — no prose.`;
 
 /* ─────────────── Structured Outputs schema (strict) ─────────────── */
 const NUM = { type: "number", minimum: 0, maximum: 1 };
+const STR = { type: "string" };
+
+const HOUSE_PROFILE_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "is_house_related", "primary_house_subgenre", "secondary_house_subgenres",
+    "four_on_the_floor_strength", "kick_weight", "kick_texture",
+    "bassline_style", "bassline_prominence", "percussion_density", "percussion_style",
+    "groove_type", "swing_level", "syncopation_level",
+    "vocal_presence", "vocal_style", "piano_presence",
+    "disco_influence", "funk_influence", "soul_influence", "latin_influence", "afro_influence",
+    "organic_instrumentation", "synth_prominence", "synth_style",
+    "atmospheric_depth", "melodic_complexity", "darkness", "warmth",
+    "club_intensity", "festival_intensity", "commercial_pop_influence", "underground_feel",
+    "drop_intensity", "build_up_intensity", "track_progression",
+    "peak_time_fit", "sunset_fit", "afterhours_fit", "lounge_fit", "dancefloor_fit",
+    "analysis_confidence",
+  ],
+  properties: {
+    is_house_related: { type: "boolean" },
+    primary_house_subgenre: { type: "string", enum: [...HOUSE_SUBGENRES, ""] },
+    secondary_house_subgenres: { type: "array", items: { type: "string", enum: [...HOUSE_SUBGENRES] } },
+    four_on_the_floor_strength: NUM, kick_weight: NUM, kick_texture: STR,
+    bassline_style: STR, bassline_prominence: NUM, percussion_density: NUM, percussion_style: STR,
+    groove_type: STR, swing_level: NUM, syncopation_level: NUM,
+    vocal_presence: NUM, vocal_style: STR, piano_presence: NUM,
+    disco_influence: NUM, funk_influence: NUM, soul_influence: NUM, latin_influence: NUM, afro_influence: NUM,
+    organic_instrumentation: NUM, synth_prominence: NUM, synth_style: STR,
+    atmospheric_depth: NUM, melodic_complexity: NUM, darkness: NUM, warmth: NUM,
+    club_intensity: NUM, festival_intensity: NUM, commercial_pop_influence: NUM, underground_feel: NUM,
+    drop_intensity: NUM, build_up_intensity: NUM, track_progression: STR,
+    peak_time_fit: NUM, sunset_fit: NUM, afterhours_fit: NUM, lounge_fit: NUM, dancefloor_fit: NUM,
+    analysis_confidence: NUM,
+  },
+};
+
+const ARTIST_CONTEXT_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "artist_primary_genres", "artist_secondary_genres", "artist_scene",
+    "artist_identity_strength", "track_is_catalog_outlier", "track_outlier_confidence",
+  ],
+  properties: {
+    artist_primary_genres: { type: "array", items: { type: "string" } },
+    artist_secondary_genres: { type: "array", items: { type: "string" } },
+    artist_scene: { type: "string" },
+    artist_identity_strength: NUM,
+    track_is_catalog_outlier: { type: "boolean" },
+    track_outlier_confidence: NUM,
+  },
+};
+
 const RESPONSE_SCHEMA = {
-  name: "track_deep_analysis",
+  name: "track_deep_analysis_v3",
   strict: true,
   schema: {
     type: "object",
     additionalProperties: false,
     required: [
+      "music_family", "primary_subgenre", "secondary_subgenres", "subgenre_confidence",
+      "is_house_related", "house_profile", "artist_context",
       "main_genre", "secondary_genres_v2", "tempo_feel", "beat_style",
       "energy_score", "melody_level", "bass_level", "drum_intensity",
       "vocal_intensity", "aggressiveness", "softness", "darkness",
@@ -76,29 +141,34 @@ const RESPONSE_SCHEMA = {
       "language", "analysis_confidence",
     ],
     properties: {
-      main_genre: { type: "string" },
+      music_family: { type: "string", enum: [...MUSIC_FAMILIES] },
+      primary_subgenre: STR,
+      secondary_subgenres: { type: "array", items: { type: "string" } },
+      subgenre_confidence: NUM,
+      is_house_related: { type: "boolean" },
+      house_profile: HOUSE_PROFILE_SCHEMA,
+      artist_context: ARTIST_CONTEXT_SCHEMA,
+      main_genre: STR,
       secondary_genres_v2: { type: "array", items: { type: "string" } },
-      tempo_feel: { type: "string" },
-      beat_style: { type: "string" },
+      tempo_feel: STR,
+      beat_style: STR,
       energy_score: NUM, melody_level: NUM, bass_level: NUM, drum_intensity: NUM,
       vocal_intensity: NUM, aggressiveness: NUM, softness: NUM, darkness: NUM,
       nostalgia: NUM, dance_feel: NUM, emotional_intensity: NUM, song_variation: NUM,
-      main_mood: { type: "string" },
+      main_mood: STR,
       secondary_moods_v2: { type: "array", items: { type: "string" } },
-      sound_texture: { type: "string" },
-      instrumentation_summary: { type: "string" },
+      sound_texture: STR,
+      instrumentation_summary: STR,
       best_contexts_v2: { type: "array", items: { type: "string" } },
       compatible_playlist_types: { type: "array", items: { type: "string" } },
-      transition_in: { type: "string" },
-      transition_out: { type: "string" },
+      transition_in: STR,
+      transition_out: STR,
       language: {
         type: "string",
         enum: ["English", "Spanish", "Portuguese", "Italian", "French", "Instrumental", "Other"],
-        description: "Primary lyric language. Use 'Instrumental' when there are no meaningful lyrics. Use 'Other' for any language not listed.",
       },
       analysis_confidence: NUM,
     },
-
   },
 };
 
@@ -282,11 +352,16 @@ Deno.serve(async (req) => {
       userId = user.id;
     }
 
-    const batchSize: number = Math.min(Math.max(body.batch_size ?? 10, 1), 100);
+    const batchSize: number = Math.min(Math.max(body.batch_size ?? 10, 1), 200);
     const concurrency: number = Math.min(Math.max(body.concurrency ?? 5, 1), 15);
     const force = body.force === true;
     const profile = body.profile === true;
     const benchmarkLabel: string | undefined = body.benchmark_label;
+    const restrictIds: string[] | undefined = Array.isArray(body.spotify_track_ids) && body.spotify_track_ids.length
+      ? body.spotify_track_ids.filter((x: any) => typeof x === "string") : undefined;
+    const restrictSet = restrictIds ? new Set(restrictIds) : null;
+    const diagnosticMode: boolean = body.diagnostic === true || !!restrictIds;
+
 
     // Plan gating
     const { data: sub } = await adm
@@ -351,16 +426,20 @@ Deno.serve(async (req) => {
     );
 
     // Filter: only tracks NOT already cached (deep pipeline; quick stage can be added later)
-    const pending = liked.filter((l: any) => l.spotify_track_id && !cachedSet.has(cacheKey(l.spotify_track_id)));
+    let pending = liked.filter((l: any) => l.spotify_track_id && !cachedSet.has(cacheKey(l.spotify_track_id)));
+    // Diagnostic mode: restrict to the provided ids (force re-analyze them even if cached)
+    if (restrictSet) {
+      pending = liked.filter((l: any) => l.spotify_track_id && restrictSet.has(l.spotify_track_id));
+    }
     const cache_hits_total = liked.length - pending.length;
 
     if (pending.length === 0) {
       return json({ done: true, analyzed: 0, remaining: 0, total: totalCount ?? 0, cache_hits: cache_hits_total, message: "All up to date" });
     }
 
-    // Respect plan cap
+    // Respect plan cap (bypassed in diagnostic mode so a paid test isn't blocked by the free tier count)
     let effectiveBatchSize = batchSize;
-    if (!isUnlimited) {
+    if (!isUnlimited && !diagnosticMode) {
       const { count: alreadyCount } = await adm
         .from("ai_track_analysis")
         .select("id", { head: true, count: "exact" })
@@ -460,6 +539,14 @@ Deno.serve(async (req) => {
         transition_in: r.transition_in, transition_out: r.transition_out,
         language: r.language ?? null,
         analysis_confidence: r.analysis_confidence,
+        // v3 new fields
+        music_family: r.music_family ?? null,
+        primary_subgenre: r.primary_subgenre ?? null,
+        secondary_subgenres: r.secondary_subgenres ?? [],
+        subgenre_confidence: r.subgenre_confidence ?? null,
+        is_house_related: r.is_house_related === true,
+        house_profile: r.house_profile ?? null,
+        artist_context: r.artist_context ?? null,
 
         full_analysis: r,
         // metadata
