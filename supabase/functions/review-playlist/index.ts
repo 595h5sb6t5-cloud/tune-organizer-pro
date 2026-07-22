@@ -20,7 +20,7 @@ Revisa especialmente:
 - Una canción alegre no debe aparecer de golpe en un ambiente oscuro.
 - Rap melódico no se mezcla sin razón con rap agresivo y seco.
 - Rock suave no se mezcla con rock pesado solo por ser rock.
-- Español no se agrupa solo por idioma.
+- El inglés va SOLO con el inglés. Español, portugués, italiano y francés pueden ir juntos (familia romance). Instrumentales son neutrales. Marca como problema cualquier mezcla inglés + romance en la misma playlist.
 - Antiguo no se agrupa solo por década.
 - Los cambios de energía deben ser suaves o intencionales.
 
