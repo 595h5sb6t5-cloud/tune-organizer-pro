@@ -176,6 +176,69 @@ export function useSpotifyLibrary() {
     }
   }, [user, spotifyConnected]);
 
+  const getFunctionAuthHeaders = useCallback(async () => {
+    let { data: { session }, error } = await supabase.auth.getSession();
+    if (error) throw new Error("Tu sesión expiró. Vuelve a iniciar sesión y presiona Sync otra vez.");
+
+    const expiresAt = session?.expires_at ? session.expires_at * 1000 : 0;
+    if (session && expiresAt > 0 && expiresAt < Date.now() + 60_000) {
+      const refreshed = await supabase.auth.refreshSession();
+      session = refreshed.data.session;
+      if (refreshed.error) throw new Error("Tu sesión expiró. Vuelve a iniciar sesión y presiona Sync otra vez.");
+    }
+
+    if (!session?.access_token) {
+      throw new Error("Tu sesión expiró. Vuelve a iniciar sesión y presiona Sync otra vez.");
+    }
+
+    return { Authorization: `Bearer ${session.access_token}` };
+  }, []);
+
+  const readFunctionError = useCallback(async (error: any, data: any) => {
+    let payload = data;
+    const response = error?.context;
+
+    if (!payload && response && typeof response.clone === "function") {
+      try {
+        const text = await response.clone().text();
+        payload = text ? JSON.parse(text) : null;
+      } catch {
+        payload = null;
+      }
+    }
+
+    const step = typeof payload?.step === "string" ? payload.step : undefined;
+    const status = typeof payload?.status === "number" ? payload.status : response?.status;
+    const rawMessage = String(payload?.error || error?.message || "No pudimos sincronizar.");
+
+    if (
+      status === 401 &&
+      (step === "auth_validation" || step === "user_session" || /Invalid session|Unauthorized|Missing Authorization/i.test(rawMessage))
+    ) {
+      return "Tu sesión expiró. Vuelve a iniciar sesión y presiona Sync otra vez.";
+    }
+
+    if (step === "refresh_token" || /Spotify authorization expired/i.test(rawMessage)) {
+      return "La autorización de Spotify expiró. Reconecta Spotify en Settings y vuelve a sincronizar.";
+    }
+
+    return step ? `${rawMessage} · paso: ${step}` : rawMessage;
+  }, []);
+
+  const invokeFunction = useCallback(async <T extends Record<string, any>>(name: string, body: Record<string, any> = {}) => {
+    const headers = await getFunctionAuthHeaders();
+    const res = await supabase.functions.invoke(name, { body, headers });
+
+    if (res.error) {
+      throw new Error(await readFunctionError(res.error, res.data));
+    }
+    if ((res.data as any)?.error) {
+      throw new Error(await readFunctionError(null, res.data));
+    }
+
+    return (res.data ?? {}) as T;
+  }, [getFunctionAuthHeaders, readFunctionError]);
+
   const refreshLiked = useCallback(async () => {
     if (!user) return;
     // Get count
@@ -248,11 +311,8 @@ export function useSpotifyLibrary() {
   const invokeSync = useCallback(async (scope: string, forceFullSync: boolean) => {
     const body: Record<string, any> = { scope };
     if (forceFullSync) body.force_full = true;
-    const res = await supabase.functions.invoke("spotify-import-tracks", { body });
-    if (res.error) throw new Error(res.error.message);
-    if (res.data?.error) throw new Error(res.data.error);
-    return res.data as Record<string, any>;
-  }, []);
+    return invokeFunction("spotify-import-tracks", body);
+  }, [invokeFunction]);
 
   const abortRef = useRef(false);
 
@@ -308,8 +368,7 @@ export function useSpotifyLibrary() {
     try {
       await runStage("spotify_import", "Leyendo perfil de Spotify", "profile", async (update) => {
         update("Leyendo tu perfil…");
-        const ext = await supabase.functions.invoke("spotify-sync-extras", { body: {} });
-        if (ext.error || ext.data?.error) throw new Error(ext.error?.message || ext.data?.error);
+        await invokeFunction("spotify-sync-extras", {});
         setStage("profile", "done", "ready");
       }, { silentFail: true });
       if (abortRef.current) return;
@@ -381,18 +440,19 @@ export function useSpotifyLibrary() {
 
       await runStage("spotify_import", "Top tracks y reproducciones recientes", "tops", async (update) => {
         update("Cargando tops…");
-        const tops = await supabase.functions.invoke("spotify-sync-extras", { body: {} });
-        const t = tops.data ?? {};
+        const t = await invokeFunction("spotify-sync-extras", {});
         update(`${t.top_tracks ?? 0} tops · ${t.recent_plays ?? 0} recientes`);
         setStage("tops", "done", `${t.top_tracks ?? 0} tops · ${t.recent_plays ?? 0} recent`);
       }, { silentFail: true });
 
       await runStage("ai_analysis", "Análisis de audio Spotify", "analysis", async (update) => {
         update("Analizando audio…");
-        const analysisRes = await supabase.functions.invoke("spotify-import-tracks", {
-          body: { scope: "all", skip_core: false, ...(forceFullSync ? { force_full: true } : {}) },
+        const analysisRes = await invokeFunction("spotify-import-tracks", {
+          scope: "all",
+          skip_core: false,
+          ...(forceFullSync ? { force_full: true } : {}),
         });
-        const featureCount = analysisRes.data?.audio_features ?? 0;
+        const featureCount = analysisRes.audio_features ?? 0;
         update(featureCount > 0 ? `${featureCount} tracks analizados` : "Al día");
         setStage("analysis", "done", featureCount > 0 ? `${featureCount} tracks` : "up to date");
       }, { silentFail: true });
@@ -409,7 +469,7 @@ export function useSpotifyLibrary() {
     } finally {
       setSyncing(false);
     }
-  }, [syncing, user, spotifyConnected, invokeSync, refreshLiked, refreshAlbums, refreshPlaylists, refreshArtists, loadSyncMeta, setStage, jobsApi]);
+  }, [syncing, user, spotifyConnected, invokeSync, invokeFunction, refreshLiked, refreshAlbums, refreshPlaylists, refreshArtists, loadSyncMeta, setStage, jobsApi]);
 
   useEffect(() => {
     void refresh();
