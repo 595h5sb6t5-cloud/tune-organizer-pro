@@ -142,25 +142,35 @@ async function delay(ms: number) {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function spotifyGet(url: string, token: string, attempt = 0) {
+async function spotifyGet(url: string, token: string) {
   const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-  if (res.status === 429 && attempt < 1) {
-    const retryAfter = Number(res.headers.get("Retry-After"));
-    const retryMs = Number.isFinite(retryAfter) && retryAfter > 0
-      ? Math.min(retryAfter * 1000, 5_000)
-      : 2_000;
-    console.warn("[spotify-import-tracks] Spotify rate limit hit, retrying", { attempt: attempt + 1, retryMs, url });
-    await delay(retryMs);
-    return spotifyGet(url, token, attempt + 1);
-  }
   if (res.status === 429) {
-    throw new SpotifyImportError("spotify_rate_limited", "Spotify rate limited, try again shortly", 429, { url });
+    const retryAfter = Number(res.headers.get("Retry-After") ?? res.headers.get("retry-after") ?? "180");
+    throw new SpotifyImportError("spotify_rate_limited", "Spotify rate limited, try again shortly", 429, {
+      url,
+      retry_after_seconds: Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : 180,
+    });
   }
   if (!res.ok) {
     const body = parseJsonText(await res.text());
     throw new SpotifyImportError("spotify_api", `Spotify API error: ${res.status}`, res.status, { body, url });
   }
   return await res.json();
+}
+
+async function updateSyncStageProgress(
+  adminClient: any,
+  syncRunId: string,
+  stageKey: string,
+  patch: Record<string, unknown>,
+) {
+  if (!syncRunId) return;
+  const { error } = await adminClient
+    .from("sync_run_stages")
+    .update({ ...patch, status: "running" })
+    .eq("sync_run_id", syncRunId)
+    .eq("stage_key", stageKey);
+  if (error) console.warn("[spotify-import-tracks] stage progress update failed", { stageKey, error: error.message });
 }
 
 function getSpotifyErrorMessage(body: unknown) {
