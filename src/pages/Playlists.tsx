@@ -15,6 +15,8 @@ import { useGeneratedPlaylists, useGeneratedPlaylistDetail } from "@/hooks/use-g
 import { supabase } from "@/integrations/supabase/client";
 import { useJobs } from "@/hooks/use-jobs";
 import { toast } from "sonner";
+import ValidateContextButton from "@/components/app/ValidateContextButton";
+
 
 // Old concept-first generator kept in code for reference; UI uses ClusterSampleTest.
 
