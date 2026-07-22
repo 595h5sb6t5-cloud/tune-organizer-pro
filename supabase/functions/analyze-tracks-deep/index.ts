@@ -262,10 +262,19 @@ Deno.serve(async (req) => {
 
     const userClient = createClient(supabaseUrl, anon, { global: { headers: { Authorization: auth } } });
     const adm = createClient(supabaseUrl, svc);
-    const { data: { user }, error: userErr } = await userClient.auth.getUser();
-    if (userErr || !user) return json({ error: "unauthorized" }, 401);
 
     const body = await req.json().catch(() => ({}));
+    // Service-role callers (orchestrator background loop) must supply user_id explicitly.
+    const isServiceCaller = auth === `Bearer ${svc}`;
+    let userId: string;
+    if (isServiceCaller && body.user_id) {
+      userId = body.user_id;
+    } else {
+      const { data: { user }, error: userErr } = await userClient.auth.getUser();
+      if (userErr || !user) return json({ error: "unauthorized" }, 401);
+      userId = user.id;
+    }
+
     const batchSize: number = Math.min(Math.max(body.batch_size ?? 10, 1), 100);
     const concurrency: number = Math.min(Math.max(body.concurrency ?? 5, 1), 15);
     const force = body.force === true;
@@ -276,7 +285,7 @@ Deno.serve(async (req) => {
     const { data: sub } = await adm
       .from("user_subscription")
       .select("plan, song_analysis_limit")
-      .eq("user_id", user.id)
+      .eq("user_id", userId)
       .maybeSingle();
     const planLimit: number = sub?.song_analysis_limit ?? 100;
     const isUnlimited = planLimit === -1;
