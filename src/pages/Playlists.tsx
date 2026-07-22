@@ -658,18 +658,24 @@ type Phase2Row = {
 };
 
 function Phase2ReportPanel() {
+  const { user } = useAuth();
   const [row, setRow] = useState<Phase2Row | null>(null);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
+  const [sampleAnalyzed, setSampleAnalyzed] = useState<number>(0);
 
   const fetchLatest = async () => {
     const { data } = await supabase
       .from("diagnostic_samples")
-      .select("id, label, size, created_at, phase2_status, phase2_block_reason, phase2_started_at, phase2_finished_at, phase2_progress, phase2_report")
+      .select("id, label, size, spotify_track_ids, created_at, phase2_status, phase2_block_reason, phase2_started_at, phase2_finished_at, phase2_progress, phase2_report")
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
     setRow((data as any) ?? null);
+    if (data && user) {
+      const done = await countAnalyzedInSample(user.id, (data.spotify_track_ids as string[]) ?? []);
+      setSampleAnalyzed(done.size);
+    }
     setLoading(false);
   };
 
@@ -677,9 +683,17 @@ function Phase2ReportPanel() {
     void fetchLatest();
     const iv = setInterval(fetchLatest, 6000);
     return () => clearInterval(iv);
-  }, []);
+  }, [user?.id]);
+
+  const sampleComplete = row ? sampleAnalyzed >= row.size : false;
 
   const triggerGuard = async () => {
+    if (!sampleComplete) {
+      toast.error("Fase 2 bloqueada", {
+        description: `La muestra aún no está completa (${sampleAnalyzed}/${row?.size}). Termina Fase 1 primero.`,
+      });
+      return;
+    }
     setRunning(true);
     try {
       const { data, error } = await supabase.functions.invoke("phase2-guard", { body: {} });
