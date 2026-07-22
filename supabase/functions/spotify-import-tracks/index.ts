@@ -1362,6 +1362,8 @@ Deno.serve(async (req) => {
     return json(result);
   } catch (e) {
     const errorMessage = e instanceof Error ? e.message : "Spotify import failed.";
+    const isSpotifyRateLimit = e instanceof SpotifyImportError && e.status === 429;
+    const rateLimitMessage = "Spotify is temporarily rate limiting sync. Your existing library was kept unchanged — try again in a few minutes.";
     try {
       const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
       const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -1374,12 +1376,26 @@ Deno.serve(async (req) => {
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
           await adminClient.from("spotify_connections").update({
-            sync_status: "error",
-            sync_error: errorMessage,
+            sync_status: isSpotifyRateLimit ? "idle" : "error",
+            sync_error: isSpotifyRateLimit ? rateLimitMessage : errorMessage,
           }).eq("user_id", user.id);
         }
       }
     } catch { /* best effort */ }
+
+    if (isSpotifyRateLimit) {
+      console.warn("[spotify-import-tracks] Spotify rate limited; returning retryable partial status", e.details);
+      return json({
+        success: false,
+        status: "rate_limited",
+        partial_success: true,
+        retryable: true,
+        message: rateLimitMessage,
+        step: e.step,
+        spotify_status: e.status,
+        retry_after_seconds: 180,
+      });
+    }
 
     if (e instanceof SpotifyImportError) return fail(e.step, e.message, e.status, e.details);
     return fail(step, errorMessage, 500);
