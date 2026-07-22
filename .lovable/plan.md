@@ -1,78 +1,101 @@
-# AI Playlist Pipeline v3 — Cluster-first with strict quality gates
+# Fase 2 — Clustering Endurecido (Auto-disparo sobre muestra de 150)
 
-Detengo cualquier generación/exportación con el sistema actual y reescribo el pipeline con estas piezas.
+## Objetivo
+Cuando el análisis v3.0 termine sobre las 1,625 canciones, se dispara automáticamente el clustering endurecido, **pero solo sobre las 150 canciones de la muestra diagnóstica**. Ninguna playlist real se toca, nada se exporta a Spotify, y el proceso se detiene al terminar para que revises el reporte.
 
-## 1. Nueva Edge Function: `cluster-library`
+## Cómo se dispara solo
 
-Reemplaza el flujo "concepto → buscar canciones". Ahora es: **agrupar primero, nombrar después**.
+Tres piezas coordinadas:
 
-Entrada: `{ sample_size?: number, dry_run?: boolean }`.
+1. **Watcher en `analyze-tracks-deep`**: cuando un batch termina y detecta `remaining === 0`, hace `EdgeRuntime.waitUntil(fetch('phase2-guard'))` (fire-and-forget).
+2. **`phase2-guard` (nuevo)**: valida el estado global antes de arrancar Fase 2. Si algo falla, registra el motivo y no arranca.
+3. **`cluster-hardened` (nuevo)**: el motor real. Solo corre si `phase2-guard` da luz verde.
 
-Pasos:
-1. Cargar todas las canciones con `ai_track_analysis v2.1` del usuario (con las 16 dimensiones sonoras).
-2. Construir vector de features **solo sonoros** con pesos:
-   - Alto: `groove_feel`, `production_style`, `beat_style`, `instrumentation`, `energy_score`, `melody_level`, `bass_level`, `drum_intensity`, `vocal_intensity`, `darkness`, `softness`, `dance_feel`, `song_variation`, `emotional_intensity`, `sound_texture`
-   - Contexto secundario (peso bajo): `main_genre`, `language`, década
-   - Filtro duro: `language` respeta la regla (inglés aislado; romances entre sí; instrumental neutro)
-3. Clustering por similitud coseno + umbral de distancia (no k-means fijo). Cada cluster se valida contra:
-   - `min_size = 12` (o 8-11 solo si `avg_compat ≥ 0.88`, `min_compat ≥ 0.80`)
-   - `avg_compat ≥ 0.82`
-   - `max_energy_diff`, `max_groove_diff`, `max_darkness_diff`, `max_production_diff`, `max_instrumentation_diff`, `max_vocal_diff`, `max_variation_diff` dentro de tolerancia
-4. Canciones que no entren en ningún cluster válido → `unassigned` (persistido).
-5. Clusters con < 8 canciones → guardados como `candidate_cluster` (no visibles, esperan más data).
+## Guard de pre-requisitos (bloqueos duros)
 
-## 2. Nueva Edge Function: `name-cluster`
+`phase2-guard` chequea sobre las **150 canciones de la muestra activa**:
+- 100% tiene fila en `ai_track_analysis` con `analysis_version = 'v2.2-2026-11-lang'` o superior
+- 100% tiene `music_family`, `primary_subgenre`, `artist_context` no nulos
+- Todas las canciones marcadas `is_house_related = true` tienen `house_profile` completo (kick, bassline, groove, subgenre)
+- Cero filas con `error_message` reciente en `analyze-tracks-deep`
+- No hay job Fase 2 previo en estado `running` para esta muestra
 
-Solo se llama **después** de que un cluster pasó todos los filtros. Recibe el cluster ya validado + resumen numérico y pide al modelo:
-- Nombre específico
-- Descripción sonora concreta (percusión, bajo, textura, voz, estructura) — rechaza descripciones genéricas
-- vibe, context
-- fit_score por canción respecto al centro
-- reason en lenguaje natural con **nombre de canción + artista**, nunca IDs
+Si falla cualquiera → escribe a `diagnostic_samples.phase2_status = 'blocked'` con detalle y no arranca. Verás el motivo en la UI.
 
-## 3. Revisor endurecido (`review-playlist`)
+## Lógica del clustering endurecido
 
-- Umbral de aprobación: `coherence_score ≥ 0.85`, `avg_compat ≥ 0.82`, ninguna canción con `fit_score < 0.72`
-- **Nueva regla**: si `songs_to_remove.length / total > 0.25` → `rejected: true, action: "disband_cluster"`, devolver canciones a `unassigned`, no publicar playlist
-- Si tras remover queda `< min_size` válido → mismo trato: disolver
+Sobre las 150 canciones que pasaron el guard:
 
-## 4. Cambios de datos
+**Bloque 1 — Segmentación previa**
+- Separar por `music_family` (electronic, hip-hop, rock, pop, latin, etc.)
+- Dentro de electronic, separar house de no-house
+- Dentro de house, separar por `house_profile.subgenre` (deep, melodic, afro, tech, progressive, indie-dance)
 
-Nueva tabla `cluster_candidates` (candidatos y unassigned tracking):
+**Bloque 2 — Hard gates por familia**
+- House: `groove ≥ 0.78`, `kick_weight ≥ 0.74`, `bass_weight ≥ 0.74`, mismo `subgenre` o vecino permitido
+- Hip-hop / rock / pop: gate estándar de sonido + `scene_distance ≤ 0.35`
+- Si una canción no pasa el gate de su familia → `unassigned_tracks` con motivo
 
-```text
-id, user_id, status ('candidate'|'unassigned'|'promoted'|'rejected'),
-centroid jsonb, avg_compat numeric, min_compat numeric,
-size int, dimensions_summary jsonb, created_at, updated_at
-```
+**Bloque 3 — Scores por par de canciones (dentro del mismo bucket)**
+- `sonic_fit` (energy, groove, darkness, textures, tempo)
+- `subgenre_fit` (mismo subgénero = 1.0, vecino = 0.7, lejano = 0.0)
+- `artist_context_fit` (escena, era, coherencia de identidad de artista)
+- `scene_distance` (0 = misma escena, 1 = escenas incompatibles)
+- `skip_risk` (probabilidad de que el usuario skipee la transición)
+- `transition_fit`
 
-Y `cluster_candidate_tracks(cluster_id, track_id, compat_to_centroid)`.
+**Bloque 4 — Penalizaciones**
+- `artist_context_penalty` cuando dos artistas rompen coherencia (Kanye + Elton John dispara penalty alto aunque `sonic_fit` sea bueno)
+- Regla `artist_surprise`: solo se permite si `sonic_fit ≥ 0.90`, `transition_fit ≥ 0.88`, `artist_context_fit ≥ 0.75`
 
-`generated_playlists` gana: `avg_compat`, `min_compat`, `dimensions_summary jsonb`, `source_cluster_id`.
+**Bloque 5 — Formación de clusters**
+- Greedy por semilla + expansión con umbrales: `avg_final_fit ≥ 0.84`, `min_final_fit ≥ 0.74`
+- Mínimo 10 canciones para promover, ideal 15-50
+- Si un cluster no llega a 10 → todas las canciones vuelven a `unassigned_tracks`
+- Nunca "playlist de relleno"
 
-## 5. UI
+**Bloque 6 — Casos problemáticos etiquetados**
+- Detectar y marcar explícitamente: Kanye + Elton, RÜFÜS mal ubicado, house genérico mezclado con subgéneros incompatibles
+- Guardar en el reporte con score-by-score de qué hard gate falló
 
-- Deshabilitar botón "Generate" del sistema viejo mientras exista pipeline v2.
-- Nueva sección "Sample Test" en Playlists: corre `cluster-library` con muestra de 150 y muestra tabla con:
-  - Cluster · size · avg_compat · min_compat · dimensiones dominantes · canción menos compatible · diferencia vs. los otros clusters
-  - Lista de unassigned
-- Solo cuando yo apruebe la muestra, se habilita "Run on full library".
-- En playlists ya publicadas, mostrar **nombre + artista + razón**, nunca IDs. Auditar `PlaylistDetail`/`PlaylistEditor` para eliminar cualquier ID visible.
+## Escritura de resultados (sin tocar producción)
 
-## 6. Orden de ejecución (esta iteración)
+Nada se escribe a `generated_playlists`. En su lugar:
+- `cluster_candidates` con `sample_id` de la muestra y `phase = 'v3-hardened'`
+- `cluster_candidate_tracks` con scores completos por canción
+- `unassigned_tracks` con motivo
+- `diagnostic_samples.phase2_report` (JSONB) con el reporte comparativo completo
 
-1. Migración: nuevas tablas + columnas.
-2. Escribir `cluster-library` (matemática de clustering + validaciones, sin IA).
-3. Escribir `name-cluster` (solo nombrar clusters aprobados).
-4. Endurecer `review-playlist` con la regla del 25% y disolución.
-5. UI: pantalla "Sample Test" en `/ai-playlists` + deshabilitar el generador viejo.
-6. Correr la muestra de 150 canciones y **enseñarte el reporte**. No re-etiqueto ni proceso la biblioteca completa hasta tu aprobación.
+## Reporte que verás cuando termine
+
+Panel nuevo en `/ai-playlists` bajo "Fase 1 · Diagnóstico":
+1. **Clusters creados** — nombre, tamaño, `avg_final_fit`, subgénero dominante
+2. **Canciones por cluster** — nombre + artista + scores individuales
+3. **Rechazadas / sin asignar** — con motivo (`failed_house_gate`, `artist_context_penalty`, `no_cluster_reached_min`)
+4. **Movidas** vs. el resultado v2 anterior
+5. **Casos problemáticos** — Kanye + Elton, RÜFÜS: qué hard gates pasaron / fallaron, con números
+6. **Diff v2 vs v3** — cuántos clusters, tamaño promedio, dispersión de subgéneros
+
+## Restricciones absolutas
+- No corre sobre las 1,625 — solo sobre las 150 de la muestra
+- No crea filas en `generated_playlists`
+- No llama a `spotify-export-playlist`
+- No borra ni modifica playlists actuales
+- Al terminar, `diagnostic_samples.phase2_status = 'completed_awaiting_review'` y el watcher no vuelve a disparar hasta que apruebes rollout
 
 ## Detalles técnicos
 
-- Clustering en Deno con álgebra vectorial simple (sin dependencias pesadas). Similitud coseno sobre vector normalizado 15-dim.
-- Umbrales configurables en constantes al inicio del archivo para poder ajustar tras la muestra.
-- Todo idempotente: correr `cluster-library` recomputa candidatos sin duplicar.
-- Se preserva `generate-ai-playlist` en el código pero deshabilitado desde UI (por si quieres comparar).
+**Archivos nuevos**
+- `supabase/functions/phase2-guard/index.ts`
+- `supabase/functions/cluster-hardened/index.ts`
+- Migración: columnas `phase2_status`, `phase2_started_at`, `phase2_report` en `diagnostic_samples`; columna `phase` en `cluster_candidates`
 
-¿Apruebas este plan para empezar por la migración + `cluster-library` + pantalla de muestra?
+**Archivos modificados**
+- `supabase/functions/analyze-tracks-deep/index.ts`: al detectar `remaining === 0`, hace `EdgeRuntime.waitUntil(fetch(phase2-guard))` solo si existe una muestra activa con `phase2_status = 'pending_analysis'`
+- `src/pages/Playlists.tsx`: nuevo panel "Fase 2 · Reporte" que lee `diagnostic_samples.phase2_report`
+
+**Auto-chain resumible**
+`cluster-hardened` procesa en chunks (segmentar → gates → scores → clusters). Persiste estado parcial en `diagnostic_samples.phase2_progress` y se auto-encadena con `waitUntil` si excede 100s, igual que hace el análisis deep hoy.
+
+**Idempotencia**
+Si `phase2-guard` corre dos veces (race con el watcher), la segunda ejecución ve `phase2_status = 'running'` y sale sin hacer nada.

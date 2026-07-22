@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   Sparkles, Loader2, Music, Plus, Wand2, ExternalLink, ArrowLeft, ArrowUp, ArrowDown,
@@ -57,6 +57,10 @@ const Playlists = () => {
         </div>
 
         <Phase1DiagnosticPanel />
+
+        <div className="h-6" />
+
+        <Phase2ReportPanel />
 
         <div className="h-6" />
 
@@ -444,6 +448,247 @@ function Phase1DiagnosticPanel() {
     </div>
   );
 }
+
+
+type Phase2Row = {
+  id: string;
+  label: string;
+  size: number;
+  created_at: string;
+  phase2_status: string;
+  phase2_block_reason: string | null;
+  phase2_started_at: string | null;
+  phase2_finished_at: string | null;
+  phase2_progress: any;
+  phase2_report: any;
+};
+
+function Phase2ReportPanel() {
+  const [row, setRow] = useState<Phase2Row | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [running, setRunning] = useState(false);
+
+  const fetchLatest = async () => {
+    const { data } = await supabase
+      .from("diagnostic_samples")
+      .select("id, label, size, created_at, phase2_status, phase2_block_reason, phase2_started_at, phase2_finished_at, phase2_progress, phase2_report")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    setRow((data as any) ?? null);
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    void fetchLatest();
+    const iv = setInterval(fetchLatest, 6000);
+    return () => clearInterval(iv);
+  }, []);
+
+  const triggerGuard = async () => {
+    setRunning(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("phase2-guard", { body: {} });
+      if (error) throw new Error(error.message);
+      if (data?.blocked) {
+        toast.error("Fase 2 bloqueada", { description: JSON.stringify(data.blocked).slice(0, 200) });
+      } else if (data?.skipped) {
+        toast.info("Sin cambios", { description: data.skipped });
+      } else {
+        toast.success("Fase 2 disparada");
+      }
+      await fetchLatest();
+    } catch (e: any) {
+      toast.error("No se pudo disparar Fase 2", { description: e.message });
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="rounded-3xl border border-border/40 bg-card/40 p-6 text-sm text-muted-foreground">
+        <Loader2 className="inline w-4 h-4 mr-2 animate-spin" />Cargando estado de Fase 2…
+      </div>
+    );
+  }
+  if (!row) {
+    return (
+      <div className="rounded-3xl border border-border/40 bg-card/40 p-6 text-sm text-muted-foreground">
+        Arma primero una muestra en el panel de Fase 1 para que Fase 2 pueda evaluarse.
+      </div>
+    );
+  }
+
+  const status = row.phase2_status;
+  const report = row.phase2_report;
+
+  const statusColor = {
+    pending_analysis: "text-muted-foreground",
+    blocked: "text-destructive",
+    running: "text-amber-500",
+    completed_awaiting_review: "text-emerald-500",
+    approved_for_rollout: "text-emerald-600",
+    failed: "text-destructive",
+  }[status] ?? "text-muted-foreground";
+
+  return (
+    <div className="rounded-3xl border border-purple-500/40 bg-purple-500/5 p-6 md:p-8">
+      <div className="flex items-center gap-2 mb-2">
+        <Wand2 className="w-4 h-4 text-purple-400" />
+        <p className="text-xs uppercase tracking-[0.2em] text-purple-400">Fase 2 · Clustering endurecido</p>
+      </div>
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-3">
+        <div>
+          <h2 className="font-heading text-2xl mb-1">Reporte sobre la muestra</h2>
+          <p className="text-sm text-muted-foreground">
+            Muestra <code>{row.label}</code> · {row.size} canciones · estado: <span className={statusColor}>{status}</span>
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => void fetchLatest()}>
+            <RefreshCw className="w-3 h-3 mr-2" />Actualizar
+          </Button>
+          <Button variant="outline" size="sm" onClick={triggerGuard} disabled={running || status === "running"}>
+            {running ? <Loader2 className="w-3 h-3 mr-2 animate-spin" /> : <Sparkles className="w-3 h-3 mr-2" />}
+            Disparar Fase 2 ahora
+          </Button>
+        </div>
+      </div>
+
+      {status === "pending_analysis" && (
+        <div className="rounded-2xl border border-border/40 bg-background/40 p-4 text-sm text-muted-foreground">
+          Fase 2 se disparará sola cuando el análisis v3.0 termine sobre toda tu biblioteca. Si ya crees que terminó, pulsa <em>Disparar Fase 2 ahora</em>.
+        </div>
+      )}
+      {status === "blocked" && (
+        <div className="rounded-2xl border border-destructive/40 bg-destructive/5 p-4 text-sm">
+          <p className="font-medium mb-1 text-destructive">Bloqueado — faltan datos v3</p>
+          <pre className="whitespace-pre-wrap text-xs text-muted-foreground overflow-x-auto">{row.phase2_block_reason}</pre>
+        </div>
+      )}
+      {status === "running" && (
+        <div className="rounded-2xl border border-amber-500/40 bg-amber-500/5 p-4 text-sm">
+          <Loader2 className="inline w-4 h-4 mr-2 animate-spin" />Corriendo clustering endurecido…
+        </div>
+      )}
+      {status === "failed" && (
+        <div className="rounded-2xl border border-destructive/40 bg-destructive/5 p-4 text-sm">
+          <p className="font-medium mb-1 text-destructive">Falló</p>
+          <pre className="whitespace-pre-wrap text-xs text-muted-foreground">{row.phase2_block_reason}</pre>
+        </div>
+      )}
+
+      {report && (status === "completed_awaiting_review" || status === "approved_for_rollout") && (
+        <Phase2ReportBody report={report} />
+      )}
+    </div>
+  );
+}
+
+function Phase2ReportBody({ report }: { report: any }) {
+  return (
+    <div className="space-y-4 mt-2">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <Stat label="Clusters promovidos" value={report.clusters_promoted?.length ?? 0} />
+        <Stat label="Clusters rechazados" value={report.clusters_rejected?.length ?? 0} />
+        <Stat label="Sin asignar" value={report.unassigned?.length ?? 0} />
+        <Stat label="Casos problemáticos" value={report.problem_cases?.length ?? 0} />
+      </div>
+
+      {report.diff_vs_previous && (
+        <div className="rounded-2xl border border-border/40 bg-background/40 p-4 text-xs">
+          <p className="uppercase tracking-[0.2em] text-muted-foreground mb-2">Diff v2 vs v3</p>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <Stat label="Clusters antes" value={report.diff_vs_previous.previous_cluster_count} />
+            <Stat label="Tamaño promedio antes" value={report.diff_vs_previous.previous_avg_size} />
+            <Stat label="Clusters ahora" value={report.diff_vs_previous.new_cluster_count} />
+            <Stat label="Fit promedio ahora" value={report.diff_vs_previous.new_avg_fit} />
+          </div>
+        </div>
+      )}
+
+      {report.problem_cases?.length > 0 && (
+        <details open className="rounded-2xl border border-amber-500/40 bg-amber-500/5 p-4">
+          <summary className="cursor-pointer text-sm font-medium text-amber-500">Casos problemáticos ({report.problem_cases.length})</summary>
+          <ul className="mt-3 space-y-3 text-xs">
+            {report.problem_cases.map((c: any, i: number) => (
+              <li key={i} className="border-l-2 border-amber-500/50 pl-3">
+                <p className="font-medium">{c.case}</p>
+                <pre className="whitespace-pre-wrap text-muted-foreground">{JSON.stringify(c, null, 2)}</pre>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+
+      <details open className="rounded-2xl border border-border/40 bg-background/40 p-4">
+        <summary className="cursor-pointer text-sm font-medium">Clusters promovidos ({report.clusters_promoted?.length ?? 0})</summary>
+        <div className="mt-3 space-y-4">
+          {report.clusters_promoted?.map((c: any, i: number) => (
+            <div key={i} className="rounded-xl border border-border/40 p-3">
+              <div className="flex flex-wrap items-center gap-2 mb-2">
+                <p className="font-medium">{c.name}</p>
+                <Badge variant="secondary">{c.size} canciones</Badge>
+                <Badge variant="outline">bucket: {c.bucket}</Badge>
+                <Badge variant="outline">avg fit {c.avg_final_fit}</Badge>
+                <Badge variant="outline">min fit {c.min_final_fit}</Badge>
+                {c.dominant_subgenre && <Badge variant="outline">{c.dominant_subgenre}</Badge>}
+              </div>
+              <ul className="text-xs space-y-1 max-h-64 overflow-y-auto pr-2">
+                {c.tracks?.map((t: any, j: number) => (
+                  <li key={j} className="flex justify-between gap-3">
+                    <span className="truncate">{t.name} — <span className="text-muted-foreground">{t.artist}</span></span>
+                    <span className="text-muted-foreground shrink-0 tabular-nums">
+                      fit {t.final_fit} · sonic {t.sonic} · ctx {t.artist_context} · pen {t.artist_penalty}
+                      {t.surprise ? " · ★surprise" : ""}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+      </details>
+
+      {report.clusters_rejected?.length > 0 && (
+        <details className="rounded-2xl border border-border/40 bg-background/40 p-4">
+          <summary className="cursor-pointer text-sm font-medium">Clusters rechazados ({report.clusters_rejected.length})</summary>
+          <ul className="mt-3 space-y-2 text-xs">
+            {report.clusters_rejected.map((c: any, i: number) => (
+              <li key={i} className="flex justify-between gap-3 border-b border-border/30 pb-1">
+                <span>{c.seed} <span className="text-muted-foreground">· bucket {c.bucket}</span></span>
+                <span className="text-muted-foreground shrink-0">size {c.size} · {c.reason}</span>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+
+      {report.unassigned?.length > 0 && (
+        <details className="rounded-2xl border border-border/40 bg-background/40 p-4">
+          <summary className="cursor-pointer text-sm font-medium">Canciones sin asignar ({report.unassigned.length})</summary>
+          <ul className="mt-3 space-y-1 text-xs max-h-80 overflow-y-auto pr-2">
+            {report.unassigned.map((u: any, i: number) => (
+              <li key={i} className="flex justify-between gap-3">
+                <span className="truncate">{u.name} — <span className="text-muted-foreground">{u.artist}</span></span>
+                <span className="text-muted-foreground shrink-0">{u.reason}</span>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+
+      <details className="rounded-2xl border border-border/40 bg-background/40 p-4">
+        <summary className="cursor-pointer text-sm font-medium">Buckets iniciales</summary>
+        <pre className="mt-2 text-xs text-muted-foreground overflow-x-auto">{JSON.stringify(report.buckets, null, 2)}</pre>
+      </details>
+    </div>
+  );
+}
+
+
+
 
 
 function PlaylistDetail({ playlistId, onBack }: { playlistId: string; onBack: () => void }) {

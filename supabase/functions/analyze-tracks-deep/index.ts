@@ -306,6 +306,21 @@ async function analyzeOneTrack(
   return { ok: false, error: lastErr, retries: MAX_ATTEMPTS, ms_openai: msOpenai, reasoning_mode, json_errors };
 }
 
+/* ─────────────── Fire-and-forget: notify phase2-guard when analysis completes. */
+function firePhase2Guard(supabaseUrl: string, svc: string, userId: string) {
+  try {
+    // @ts-ignore Deno EdgeRuntime global
+    const wu = typeof EdgeRuntime !== "undefined" ? EdgeRuntime.waitUntil : (p: Promise<any>) => p;
+    wu(
+      fetch(`${supabaseUrl}/functions/v1/phase2-guard`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${svc}` },
+        body: JSON.stringify({ user_id: userId, trigger: "analyze-tracks-deep" }),
+      }).catch(() => {}),
+    );
+  } catch (_) { /* best-effort */ }
+}
+
 /* ─────────────── Simple concurrency semaphore. ─────────────── */
 async function runWithConcurrency<T, R>(
   items: T[],
@@ -434,6 +449,7 @@ Deno.serve(async (req) => {
     const cache_hits_total = liked.length - pending.length;
 
     if (pending.length === 0) {
+      firePhase2Guard(supabaseUrl, svc, userId);
       return json({ done: true, analyzed: 0, remaining: 0, total: totalCount ?? 0, cache_hits: cache_hits_total, message: "All up to date" });
     }
 
@@ -612,6 +628,9 @@ Deno.serve(async (req) => {
         per_track_ms: perTrackMs.map((n) => Math.round(n)),
       });
     }
+
+    const finalRemaining = Math.max(0, pending.length - analyses.length);
+    if (finalRemaining === 0) firePhase2Guard(supabaseUrl, svc, userId);
 
     return json({
       done: (ok + cache_hits_total) >= (totalCount ?? 0) || pending.length <= analyses.length,
