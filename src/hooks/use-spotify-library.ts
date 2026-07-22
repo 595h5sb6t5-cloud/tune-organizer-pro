@@ -319,8 +319,13 @@ export function useSpotifyLibrary() {
         const likedRes = await invokeSync("liked", forceFullSync);
         Object.assign(combinedResult, likedRes);
         const added = likedRes.liked_songs_added ?? 0;
-        update(`Importadas ${added} canciones nuevas`, added, likedRes.total_liked ?? added);
-        setStage("liked_songs", "done", `${added} new`);
+        const removed = likedRes.liked_songs_removed ?? 0;
+        const total = likedRes.liked_songs_total ?? added;
+        const message = removed > 0
+          ? `${added} nuevas · ${removed} removidas · ${total} liked songs`
+          : `${added} nuevas · ${total} liked songs`;
+        update(message, total, total);
+        setStage("liked_songs", "done", `${added} new · ${total} total`);
         await refreshLiked();
       });
       if (abortRef.current) return;
