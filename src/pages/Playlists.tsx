@@ -321,6 +321,130 @@ function Stat({ label, value }: { label: string; value: number | string }) {
   );
 }
 
+function Phase1DiagnosticPanel() {
+  const [buildingSample, setBuildingSample] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [sample, setSample] = useState<null | {
+    sample_id: string; label: string; size: number; library_size: number;
+    spotify_track_ids: string[];
+    reasons_summary: Record<string, number>;
+    preview: { spotify_track_id: string; name: string | null; artist: string | null; reason: string }[];
+  }>(null);
+  const [analysisResult, setAnalysisResult] = useState<null | {
+    analyzed: number; failed: number; remaining: number; batch_size: number;
+  }>(null);
+  const jobsApi = useJobs();
+
+  const buildSample = async () => {
+    setBuildingSample(true);
+    setAnalysisResult(null);
+    try {
+      const { data, error } = await supabase.functions.invoke("select-diagnostic-sample", { body: { size: 150 } });
+      if (error) throw new Error(error.message);
+      if (data?.error) throw new Error(data.error);
+      setSample(data);
+      toast.success("Muestra lista", { description: `${data.size} canciones de ${data.library_size}` });
+    } catch (e: any) {
+      toast.error("No se pudo armar la muestra", { description: e.message });
+    } finally {
+      setBuildingSample(false);
+    }
+  };
+
+  const analyzeSample = async () => {
+    if (!sample) return;
+    setAnalyzing(true);
+    const jobId = jobsApi.startJob({
+      type: "playlist_generation",
+      label: `Analizando muestra Fase 1 (${sample.size} canciones)`,
+      message: "Corriendo análisis v3.0 con familia, subgénero y house_profile…",
+      retry: () => { void analyzeSample(); },
+    });
+    try {
+      // Run in one batch — 150 tracks with concurrency=8 takes ~1-2 min.
+      const { data, error } = await supabase.functions.invoke("analyze-tracks-deep", {
+        body: {
+          spotify_track_ids: sample.spotify_track_ids,
+          batch_size: sample.size,
+          concurrency: 8,
+          diagnostic: true,
+          force: true,
+        },
+      });
+      if (error) throw new Error(error.message);
+      if (data?.error) throw new Error(data.error);
+      setAnalysisResult({
+        analyzed: data.analyzed ?? 0,
+        failed: data.failed ?? 0,
+        remaining: data.remaining ?? 0,
+        batch_size: data.batch_size ?? 0,
+      });
+      jobsApi.completeJob(jobId, `${data.analyzed} analizadas · ${data.failed} fallidas`);
+      toast.success("Análisis v3.0 completado", { description: `${data.analyzed} canciones con familia + subgénero + house_profile` });
+    } catch (e: any) {
+      jobsApi.failJob(jobId, e.message);
+      toast.error("Análisis falló", { description: e.message });
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  return (
+    <div className="rounded-3xl border border-accent/40 bg-accent/5 p-6 md:p-8 mb-2">
+      <div className="flex items-center gap-2 mb-2">
+        <ShieldCheck className="w-4 h-4 text-accent" />
+        <p className="text-xs uppercase tracking-[0.2em] text-accent">Fase 1 · Diagnóstico</p>
+      </div>
+      <h2 className="font-heading text-2xl mb-2">Muestra de 150 canciones (v3.0 — familia + subgénero + house_profile)</h2>
+      <p className="text-sm text-muted-foreground mb-4">
+        Arma una muestra diseñada para romper el sistema (House de varios subgéneros, RÜFÜS DU SOL, Kanye + Elton John, artistas de identidad fuerte, cruces de género),
+        y córrele el nuevo análisis profundo. Los datos que salgan de aquí son los que Fase 2 usará para el clustering endurecido.
+      </p>
+
+      <div className="flex flex-wrap gap-2 mb-4">
+        <Button variant="hero" onClick={buildSample} disabled={buildingSample || analyzing}>
+          {buildingSample ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Armando…</> : <>1. Armar muestra (150)</>}
+        </Button>
+        <Button variant="outline" onClick={analyzeSample} disabled={!sample || analyzing}>
+          {analyzing ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Analizando…</> : <>2. Correr análisis v3.0</>}
+        </Button>
+      </div>
+
+      {sample && (
+        <div className="rounded-2xl border border-border/50 bg-background/50 p-4 space-y-3">
+          <div className="flex flex-wrap gap-2 text-xs">
+            <Badge variant="secondary">{sample.size} canciones · biblioteca {sample.library_size}</Badge>
+            {Object.entries(sample.reasons_summary).map(([k, v]) => (
+              <Badge key={k} variant="outline">{k}: {v}</Badge>
+            ))}
+          </div>
+          <details>
+            <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">Ver preview (30 canciones)</summary>
+            <ul className="mt-2 space-y-1 max-h-56 overflow-y-auto pr-2 text-xs">
+              {sample.preview.map((t) => (
+                <li key={t.spotify_track_id} className="flex justify-between gap-2">
+                  <span className="truncate">{t.name} — <span className="text-muted-foreground">{t.artist}</span></span>
+                  <span className="text-muted-foreground shrink-0">{t.reason}</span>
+                </li>
+              ))}
+            </ul>
+          </details>
+        </div>
+      )}
+
+      {analysisResult && (
+        <div className="mt-4 rounded-2xl border border-emerald-500/40 bg-emerald-500/5 p-4 text-sm">
+          <p><strong>{analysisResult.analyzed}</strong> canciones analizadas con schema v3.0 · <strong>{analysisResult.failed}</strong> fallidas · pendientes: {analysisResult.remaining}</p>
+          <p className="text-xs text-muted-foreground mt-1">
+            Cada canción ahora tiene: <code>music_family</code>, <code>primary_subgenre</code>, <code>house_profile</code> (cuando aplique) y <code>artist_context</code>.
+            Siguiente paso (Fase 2): correr el clustering endurecido sobre esta muestra y comparar contra el resultado actual.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 
 function PlaylistDetail({ playlistId, onBack }: { playlistId: string; onBack: () => void }) {
   const { playlist, tracks, loading, removeTrack, move, updateMeta, refresh } = useGeneratedPlaylistDetail(playlistId);
