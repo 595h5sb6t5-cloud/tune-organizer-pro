@@ -27,7 +27,8 @@ function json(body: unknown, status = 200) {
 }
 
 interface JobMeta {
-  cache_hits: number;
+  cache_hits: number;         // = coverage_before_run
+  freshly_analyzed: number;   // accumulator of tracks analyzed this run
   failed_count: number;
   retry_count: number;
   batches_completed: number;
