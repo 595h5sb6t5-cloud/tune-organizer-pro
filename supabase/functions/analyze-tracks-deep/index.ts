@@ -614,6 +614,9 @@ Deno.serve(async (req) => {
       });
     }
 
+    const finalRemaining = Math.max(0, pending.length - analyses.length);
+    if (finalRemaining === 0) firePhase2Guard(supabaseUrl, svc, userId);
+
     return json({
       done: (ok + cache_hits_total) >= (totalCount ?? 0) || pending.length <= analyses.length,
       analyzed: ok,
