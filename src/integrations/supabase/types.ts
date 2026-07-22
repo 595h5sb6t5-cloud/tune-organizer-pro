@@ -1702,6 +1702,8 @@ export type Database = {
           id: string
           items_processed: number
           job_type: string
+          meta: Json
+          stage: string | null
           started_at: string | null
           status: string
           total_items: number
@@ -1715,6 +1717,8 @@ export type Database = {
           id?: string
           items_processed?: number
           job_type: string
+          meta?: Json
+          stage?: string | null
           started_at?: string | null
           status?: string
           total_items?: number
@@ -1728,6 +1732,8 @@ export type Database = {
           id?: string
           items_processed?: number
           job_type?: string
+          meta?: Json
+          stage?: string | null
           started_at?: string | null
           status?: string
           total_items?: number

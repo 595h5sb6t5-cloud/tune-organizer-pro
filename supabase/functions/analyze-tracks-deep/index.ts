@@ -262,10 +262,19 @@ Deno.serve(async (req) => {
 
     const userClient = createClient(supabaseUrl, anon, { global: { headers: { Authorization: auth } } });
     const adm = createClient(supabaseUrl, svc);
-    const { data: { user }, error: userErr } = await userClient.auth.getUser();
-    if (userErr || !user) return json({ error: "unauthorized" }, 401);
 
     const body = await req.json().catch(() => ({}));
+    // Service-role callers (orchestrator background loop) must supply user_id explicitly.
+    const isServiceCaller = auth === `Bearer ${svc}`;
+    let userId: string;
+    if (isServiceCaller && body.user_id) {
+      userId = body.user_id;
+    } else {
+      const { data: { user }, error: userErr } = await userClient.auth.getUser();
+      if (userErr || !user) return json({ error: "unauthorized" }, 401);
+      userId = user.id;
+    }
+
     const batchSize: number = Math.min(Math.max(body.batch_size ?? 10, 1), 100);
     const concurrency: number = Math.min(Math.max(body.concurrency ?? 5, 1), 15);
     const force = body.force === true;
@@ -276,20 +285,31 @@ Deno.serve(async (req) => {
     const { data: sub } = await adm
       .from("user_subscription")
       .select("plan, song_analysis_limit")
-      .eq("user_id", user.id)
+      .eq("user_id", userId)
       .maybeSingle();
     const planLimit: number = sub?.song_analysis_limit ?? 100;
     const isUnlimited = planLimit === -1;
 
     // ── Stage: DB read ──
+    // Paginate liked_songs so we cover the whole library, not just the top page.
+    // Only unanalyzed tracks reach the OpenAI stage; already-cached ones are
+    // filtered out below.
     const tDbRead0 = performance.now();
-    const fetchLimit = isUnlimited ? Math.max(batchSize * 3, 200) : Math.min(planLimit + 100, 2000);
-    const { data: liked } = await adm
-      .from("liked_songs")
-      .select("id, spotify_track_id, track_name, artist_name, album_name, audio_tempo, audio_energy, audio_valence, audio_danceability, audio_acousticness, audio_instrumentalness, audio_speechiness, genre_tags, mood")
-      .eq("user_id", user.id)
-      .order("added_at", { ascending: false })
-      .limit(fetchLimit);
+    const PAGE_SIZE = 1000;
+    const HARD_CAP = isUnlimited ? 10000 : Math.min(planLimit + 500, 5000);
+    const liked: any[] = [];
+    for (let offset = 0; offset < HARD_CAP; offset += PAGE_SIZE) {
+      const upper = Math.min(offset + PAGE_SIZE, HARD_CAP) - 1;
+      const { data: page } = await adm
+        .from("liked_songs")
+        .select("id, spotify_track_id, track_name, artist_name, album_name, audio_tempo, audio_energy, audio_valence, audio_danceability, audio_acousticness, audio_instrumentalness, audio_speechiness, genre_tags, mood")
+        .eq("user_id", userId)
+        .order("added_at", { ascending: false })
+        .range(offset, upper);
+      if (!page || page.length === 0) break;
+      liked.push(...page);
+      if (page.length < PAGE_SIZE) break;
+    }
 
     if (!liked || liked.length === 0) {
       return json({ done: true, analyzed: 0, remaining: 0, total: 0, message: "No liked songs" });
@@ -298,14 +318,22 @@ Deno.serve(async (req) => {
     const { count: totalCount } = await adm
       .from("liked_songs")
       .select("id", { count: "exact", head: true })
-      .eq("user_id", user.id);
+      .eq("user_id", userId);
 
-    // Existing v2 analysis for this user (cache lookup key)
-    const { data: existing } = await adm
-      .from("ai_track_analysis")
-      .select("spotify_track_id, prompt_version, schema_version, model_used")
-      .eq("user_id", user.id)
-      .eq("analysis_version", ANALYSIS_VERSION);
+    // Existing v2 analysis for this user (cache lookup key). Paginate to bypass
+    // the 1000-row default limit for libraries with many prior analyses.
+    const existing: any[] = [];
+    for (let offset = 0; offset < 20000; offset += 1000) {
+      const { data: page } = await adm
+        .from("ai_track_analysis")
+        .select("spotify_track_id, prompt_version, schema_version, model_used")
+        .eq("user_id", userId)
+        .eq("analysis_version", ANALYSIS_VERSION)
+        .range(offset, offset + 999);
+      if (!page || page.length === 0) break;
+      existing.push(...page);
+      if (page.length < 1000) break;
+    }
 
     const cacheKey = (id: string) => `${id}::${PROMPT_VERSION}::${SCHEMA_VERSION}::${MODEL}`;
     const cachedSet = new Set<string>(
@@ -329,7 +357,7 @@ Deno.serve(async (req) => {
       const { count: alreadyCount } = await adm
         .from("ai_track_analysis")
         .select("id", { head: true, count: "exact" })
-        .eq("user_id", user.id);
+        .eq("user_id", userId);
       const remainingQuota = Math.max(0, planLimit - (alreadyCount ?? 0));
       effectiveBatchSize = Math.min(batchSize, remainingQuota);
       if (effectiveBatchSize === 0) {
@@ -342,7 +370,7 @@ Deno.serve(async (req) => {
 
     // Load followed artists to enrich context (in parallel with tracks lookup)
     const [{ data: followed }, { data: existingTracks }] = await Promise.all([
-      adm.from("spotify_followed_artists").select("artist_name").eq("user_id", user.id),
+      adm.from("spotify_followed_artists").select("artist_name").eq("user_id", userId),
       adm.from("tracks").select("id, spotify_track_id").in("spotify_track_id", spotifyIds),
     ]);
     const followedSet = new Set<string>((followed ?? []).map((f: any) => f.artist_name?.toLowerCase()));
@@ -401,7 +429,7 @@ Deno.serve(async (req) => {
       if (!a.ok || !a.result || !trackId) { failed++; continue; }
       const r = a.result;
       rows.push({
-        user_id: user.id,
+        user_id: userId,
         track_id: trackId,
         liked_song_id: a.song.id,
         spotify_track_id: a.song.spotify_track_id,
@@ -460,7 +488,7 @@ Deno.serve(async (req) => {
     // Optional: persist benchmark row
     if (profile && benchmarkLabel) {
       await adm.from("analysis_benchmarks").insert({
-        user_id: user.id,
+        user_id: userId,
         label: benchmarkLabel,
         model_used: MODEL,
         prompt_version: PROMPT_VERSION,
