@@ -36,6 +36,7 @@ export interface DeepAnalysisJob {
   itemsProcessed: number;
   totalItems: number;
   cacheHits: number;
+  freshlyAnalyzed: number;
   failedCount: number;
   retryCount: number;
   batchesCompleted: number;
@@ -57,6 +58,7 @@ function rowToJob(row: any): DeepAnalysisJob {
     itemsProcessed: row.items_processed ?? 0,
     totalItems: row.total_items ?? 0,
     cacheHits: Number(meta.cache_hits ?? 0),
+    freshlyAnalyzed: Number(meta.freshly_analyzed ?? 0),
     failedCount: Number(meta.failed_count ?? 0),
     retryCount: Number(meta.retry_count ?? 0),
     batchesCompleted: Number(meta.batches_completed ?? 0),
