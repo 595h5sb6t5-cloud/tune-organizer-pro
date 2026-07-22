@@ -16,69 +16,166 @@ export type Database = {
     Tables: {
       ai_track_analysis: {
         Row: {
+          aggressiveness: number | null
+          analysis_confidence: number | null
           analysis_version: string | null
+          artist_name: string | null
           avoid_pairing_with: string[]
+          bass_level: number | null
+          beat_style: string | null
           best_contexts: string[]
+          best_contexts_v2: string[] | null
           compatibility_notes: string | null
+          compatible_playlist_types: string[] | null
           confidence_score: number | null
           created_at: string
+          dance_feel: number | null
+          darkness: number | null
+          drum_intensity: number | null
+          emotional_intensity: number | null
           energy_level: string | null
+          energy_score: number | null
+          full_analysis: Json | null
           id: string
+          instrumentation_summary: string | null
           language: string | null
+          liked_song_id: string | null
+          main_genre: string | null
+          main_mood: string | null
+          melody_level: number | null
           model_used: string | null
           moods: string[]
+          nostalgia: number | null
           playlist_fit: Json
           primary_genre: string | null
           rhythm_type: string | null
           secondary_genres: string[]
+          secondary_genres_v2: string[] | null
+          secondary_moods_v2: string[] | null
+          softness: number | null
+          song_variation: number | null
+          sound_texture: string | null
+          spotify_track_id: string | null
+          tempo_feel: string | null
           track_id: string
+          track_name: string | null
+          transition_in: string | null
+          transition_out: string | null
           updated_at: string
           user_id: string
           vibe_tags: string[]
+          vocal_intensity: number | null
         }
         Insert: {
+          aggressiveness?: number | null
+          analysis_confidence?: number | null
           analysis_version?: string | null
+          artist_name?: string | null
           avoid_pairing_with?: string[]
+          bass_level?: number | null
+          beat_style?: string | null
           best_contexts?: string[]
+          best_contexts_v2?: string[] | null
           compatibility_notes?: string | null
+          compatible_playlist_types?: string[] | null
           confidence_score?: number | null
           created_at?: string
+          dance_feel?: number | null
+          darkness?: number | null
+          drum_intensity?: number | null
+          emotional_intensity?: number | null
           energy_level?: string | null
+          energy_score?: number | null
+          full_analysis?: Json | null
           id?: string
+          instrumentation_summary?: string | null
           language?: string | null
+          liked_song_id?: string | null
+          main_genre?: string | null
+          main_mood?: string | null
+          melody_level?: number | null
           model_used?: string | null
           moods?: string[]
+          nostalgia?: number | null
           playlist_fit?: Json
           primary_genre?: string | null
           rhythm_type?: string | null
           secondary_genres?: string[]
+          secondary_genres_v2?: string[] | null
+          secondary_moods_v2?: string[] | null
+          softness?: number | null
+          song_variation?: number | null
+          sound_texture?: string | null
+          spotify_track_id?: string | null
+          tempo_feel?: string | null
           track_id: string
+          track_name?: string | null
+          transition_in?: string | null
+          transition_out?: string | null
           updated_at?: string
           user_id: string
           vibe_tags?: string[]
+          vocal_intensity?: number | null
         }
         Update: {
+          aggressiveness?: number | null
+          analysis_confidence?: number | null
           analysis_version?: string | null
+          artist_name?: string | null
           avoid_pairing_with?: string[]
+          bass_level?: number | null
+          beat_style?: string | null
           best_contexts?: string[]
+          best_contexts_v2?: string[] | null
           compatibility_notes?: string | null
+          compatible_playlist_types?: string[] | null
           confidence_score?: number | null
           created_at?: string
+          dance_feel?: number | null
+          darkness?: number | null
+          drum_intensity?: number | null
+          emotional_intensity?: number | null
           energy_level?: string | null
+          energy_score?: number | null
+          full_analysis?: Json | null
           id?: string
+          instrumentation_summary?: string | null
           language?: string | null
+          liked_song_id?: string | null
+          main_genre?: string | null
+          main_mood?: string | null
+          melody_level?: number | null
           model_used?: string | null
           moods?: string[]
+          nostalgia?: number | null
           playlist_fit?: Json
           primary_genre?: string | null
           rhythm_type?: string | null
           secondary_genres?: string[]
+          secondary_genres_v2?: string[] | null
+          secondary_moods_v2?: string[] | null
+          softness?: number | null
+          song_variation?: number | null
+          sound_texture?: string | null
+          spotify_track_id?: string | null
+          tempo_feel?: string | null
           track_id?: string
+          track_name?: string | null
+          transition_in?: string | null
+          transition_out?: string | null
           updated_at?: string
           user_id?: string
           vibe_tags?: string[]
+          vocal_intensity?: number | null
         }
         Relationships: [
+          {
+            foreignKeyName: "ai_track_analysis_liked_song_id_fkey"
+            columns: ["liked_song_id"]
+            isOneToOne: false
+            referencedRelation: "liked_songs"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "ai_track_analysis_track_id_fkey"
             columns: ["track_id"]
