@@ -214,6 +214,7 @@ export function useSpotifyLibrary(options: UseSpotifyLibraryOptions = {}) {
   const [lastSyncResult, setLastSyncResult] = useState<Record<string, any> | null>(null);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [lastRunStatus, setLastRunStatus] = useState<string | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
   const pollingRef = useRef<number | null>(null);
   const [syncMeta, setSyncMeta] = useState<SyncMetadata>({
     syncStatus: "idle",
