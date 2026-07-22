@@ -3,13 +3,14 @@ import { Link, useNavigate } from "react-router-dom";
 import {
   Sparkles, ArrowRight, ArrowLeft, Library, Brain, Flame, Snowflake,
   Music2, Globe2, Users, Eye, Wand2, Plus, Pencil, SkipForward, Loader2,
+  AlertCircle, CheckCircle2, RefreshCw, Timer,
 } from "lucide-react";
 import AppLayout from "@/components/app/AppLayout";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
 import { useMusicDna, type PlaylistConcept } from "@/hooks/use-music-dna";
 import { useSpotifyLibrary } from "@/hooks/use-spotify-library";
-import { useDeepTrackAnalysis } from "@/hooks/use-deep-track-analysis";
+import { useDeepAnalysisProgress, STAGE_LABEL } from "@/hooks/use-deep-analysis-progress";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
