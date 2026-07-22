@@ -799,8 +799,8 @@ function Phase2ReportPanel() {
       .maybeSingle();
     setRow((data as any) ?? null);
     if (data && user) {
-      const done = await countAnalyzedInSample(user.id, (data.spotify_track_ids as string[]) ?? []);
-      setSampleAnalyzed(done.size);
+      const b = await getSampleBreakdown(user.id, (data.spotify_track_ids as string[]) ?? []);
+      setSampleAnalyzed(b.valid.size);
     }
     setLoading(false);
   };
