@@ -752,12 +752,21 @@ function Phase2ReportPanel() {
           <p className="text-sm text-muted-foreground">
             Muestra <code>{row.label}</code> · {row.size} canciones · estado: <span className={statusColor}>{status}</span>
           </p>
+          <p className="text-xs text-muted-foreground mt-1">
+            Muestra analizada: <span className={sampleComplete ? "text-emerald-500" : "text-amber-500"}>{sampleAnalyzed} / {row.size}</span>
+            {!sampleComplete && <> · Fase 2 bloqueada hasta 150/150</>}
+          </p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={() => void fetchLatest()}>
             <RefreshCw className="w-3 h-3 mr-2" />Actualizar
           </Button>
-          <Button variant="outline" size="sm" onClick={triggerGuard} disabled={running || status === "running"}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={triggerGuard}
+            disabled={running || status === "running" || !sampleComplete}
+          >
             {running ? <Loader2 className="w-3 h-3 mr-2 animate-spin" /> : <Sparkles className="w-3 h-3 mr-2" />}
             Disparar Fase 2 ahora
           </Button>
