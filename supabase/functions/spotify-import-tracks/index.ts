@@ -1190,6 +1190,9 @@ Deno.serve(async (req) => {
       }
     } catch (e) {
       console.warn("[spotify-import-tracks] /v1/me failed, continuing:", e);
+      if (e instanceof SpotifyImportError && e.status === 429 && (syncScope === "all" || syncScope === "liked")) {
+        throw e;
+      }
     }
 
     // Load existing data for diffing
