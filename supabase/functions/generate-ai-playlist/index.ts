@@ -118,60 +118,82 @@ Deno.serve(async (req) => {
       return parts.join(" ");
     }).join("\n");
 
-    const userPrompt = concept
-      ? `Build a coherent "${concept}" playlist of ~${targetSize} songs from this library:\n\n${catalog}`
-      : `Pick a specific, evocative concept that this library naturally supports (NOT generic), then build a coherent ~${targetSize}-song playlist:\n\n${catalog}`;
+    const rulesLine = `HARD RULES:
+- You MUST select AT LEAST 12 songs (target ~${targetSize}, min 12, max ${targetSize + 5}).
+- You MUST only use spotify_track_id values that appear VERBATIM in the CATALOG below (copy them exactly, no prefixes, no "spotify:track:").
+- If the exact concept isn't a perfect match, pick the closest tonal/energy neighbors from the catalog to fill the arc. Never return fewer than 12.`;
 
-    const aiRes = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${openaiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: MODEL,
-        messages: [
-          { role: "system", content: SYSTEM },
-          { role: "user", content: userPrompt },
-        ],
-        response_format: { type: "json_object" },
-      }),
-    });
+    const buildPrompt = (extra = "") => (concept
+      ? `${rulesLine}\n\nBuild a coherent "${concept}" playlist from this CATALOG.${extra}\n\nCATALOG:\n${catalog}`
+      : `${rulesLine}\n\nPick a specific, evocative concept this CATALOG naturally supports (NOT generic), then build the playlist.${extra}\n\nCATALOG:\n${catalog}`);
 
-    if (!aiRes.ok) {
-      const t = await aiRes.text();
-      console.error("OpenAI fail", aiRes.status, t.substring(0, 300));
-      return json({ error: `OpenAI ${aiRes.status}` }, 502);
-    }
+    const callAI = async (prompt: string) => {
+      const r = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${openaiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: MODEL,
+          messages: [{ role: "system", content: SYSTEM }, { role: "user", content: prompt }],
+          response_format: { type: "json_object" },
+        }),
+      });
+      if (!r.ok) {
+        const t = await r.text();
+        console.error("OpenAI fail", r.status, t.substring(0, 300));
+        throw new Error(`OpenAI ${r.status}`);
+      }
+      const d = await r.json();
+      try { return JSON.parse(d.choices?.[0]?.message?.content ?? "{}"); } catch { return {}; }
+    };
 
-    const aiData = await aiRes.json();
-    const content = aiData.choices?.[0]?.message?.content;
-    let parsed: any = {};
-    try { parsed = JSON.parse(content); } catch { return json({ error: "Bad AI JSON" }, 502); }
-
-    const name: string = (body.name || parsed.name || concept || "Untitled").toString().slice(0, 100);
-    const tracksRaw: any[] = Array.isArray(parsed.tracks) ? parsed.tracks : [];
-    if (tracksRaw.length === 0) return json({ error: "AI returned no tracks" }, 502);
-
-    // Map AI picks to actual liked songs (dedupe + validate, tolerate spotify: URIs)
-    const validIds = new Set(liked.map((l) => l.spotify_track_id));
     const norm = (v: unknown) => {
       const s = String(v ?? "").trim();
       const m = s.match(/([a-zA-Z0-9]{22})$/);
       return m ? m[1] : s;
     };
-    const seen = new Set<string>();
-    const picked = tracksRaw
-      .map((t) => ({ ...t, spotify_track_id: norm(t.spotify_track_id) }))
-      .filter((t) => t.spotify_track_id && validIds.has(t.spotify_track_id) && !seen.has(t.spotify_track_id) && (seen.add(t.spotify_track_id), true))
-      .sort((a, b) => (a.position ?? 999) - (b.position ?? 999));
+    const validIds = new Set(liked.map((l) => l.spotify_track_id));
 
-    if (picked.length < 5) {
-      const sample = tracksRaw.slice(0, 3).map((t) => t.spotify_track_id);
-      console.error("Not enough valid tracks. AI returned", tracksRaw.length, "matched", picked.length, "sample:", sample);
+    const pickFrom = (parsed: any) => {
+      const raw: any[] = Array.isArray(parsed.tracks) ? parsed.tracks : [];
+      const seen = new Set<string>();
+      return {
+        raw,
+        picked: raw
+          .map((t) => ({ ...t, spotify_track_id: norm(t.spotify_track_id) }))
+          .filter((t) => t.spotify_track_id && validIds.has(t.spotify_track_id) && !seen.has(t.spotify_track_id) && (seen.add(t.spotify_track_id), true))
+          .sort((a, b) => (a.position ?? 999) - (b.position ?? 999)),
+      };
+    };
+
+    let parsed: any;
+    try { parsed = await callAI(buildPrompt()); } catch (e: any) { return json({ error: e.message }, 502); }
+    let { raw: tracksRaw, picked } = pickFrom(parsed);
+
+    // Retry once if the model was too restrictive
+    if (picked.length < 8) {
+      console.log(`Retry: first pass matched ${picked.length}/${tracksRaw.length}. Asking again.`);
+      try {
+        const parsed2 = await callAI(buildPrompt(` The previous attempt returned too few tracks (${picked.length}). You MUST return at least 12 IDs copied verbatim from the CATALOG.`));
+        const second = pickFrom(parsed2);
+        if (second.picked.length > picked.length) {
+          parsed = { ...parsed2, name: parsed2.name || parsed.name, description: parsed2.description || parsed.description };
+          tracksRaw = second.raw;
+          picked = second.picked;
+        }
+      } catch (e) { console.error("retry failed", e); }
+    }
+
+    const name: string = (body.name || parsed.name || concept || "Untitled").toString().slice(0, 100);
+
+    if (picked.length < 3) {
+      console.error("Not enough valid tracks. AI returned", tracksRaw.length, "matched", picked.length);
       return json({
-        error: `AI selected ${picked.length} valid tracks from your library (need ≥5). Try again or provide a more specific concept.`,
+        error: `La IA no encontró suficientes canciones en tu biblioteca para "${concept ?? "este concepto"}". Prueba con un concepto más amplio.`,
         ai_returned: tracksRaw.length,
         matched: picked.length,
       }, 502);
     }
+
 
     // Insert generated_playlists
     const { data: pl, error: plErr } = await adm
