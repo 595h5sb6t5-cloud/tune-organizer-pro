@@ -306,8 +306,29 @@ async function syncLikedSongs(
     if (items.length === 0) break;
   }
 
-  const completedFullScan = !earlyStopped && offset >= total;
-    console.log(`[spotify-import-tracks] liked songs done: scanned ${offset}, spotifyTotal ${total}, importable ${spotifyLikedIds.size}, new ${spotifyLiked.length}, fullScan=${completedFullScan}`);
+  let completedFullScan = !earlyStopped && offset >= total;
+
+  // If we early-stopped but local count differs from Spotify's total, keep scanning
+  // just to collect IDs so we can reconcile removals. No new upserts needed here.
+  if (earlyStopped && existingTrackIds.size !== total) {
+    console.log(`[spotify-import-tracks] local(${existingTrackIds.size}) != spotify(${total}), continuing scan for reconciliation`);
+    while (offset < total) {
+      const data = await spotifyGet(`https://api.spotify.com/v1/me/tracks?limit=50&offset=${offset}${marketParam}`, token);
+      total = data.total ?? total;
+      const items = data.items || [];
+      for (const item of items) {
+        const t = extractTrack(item, userId);
+        if (!t) continue;
+        spotifyLikedIds.add(t.spotify_track_id);
+        if (!existingTrackIds.has(t.spotify_track_id)) spotifyLiked.push(t);
+      }
+      offset += 50;
+      if (items.length === 0) break;
+    }
+    completedFullScan = offset >= total;
+  }
+
+  console.log(`[spotify-import-tracks] liked songs done: scanned ${offset}, spotifyTotal ${total}, importable ${spotifyLikedIds.size}, new ${spotifyLiked.length}, fullScan=${completedFullScan}`);
 
   for (let i = 0; i < spotifyLiked.length; i += 100) {
     const batch = spotifyLiked.slice(i, i + 100);
@@ -316,8 +337,6 @@ async function syncLikedSongs(
   }
 
   let removedCount = 0;
-  // Reconcile removals whenever we completed a full pass over Spotify's liked songs,
-  // regardless of isFullSync. This prevents local drift (e.g. user unliked songs).
   if (completedFullScan) {
     const toRemove: string[] = [];
     for (const existingId of existingTrackIds) {
@@ -332,7 +351,7 @@ async function syncLikedSongs(
     }
   }
 
-    return { added: spotifyLiked.length, removed: removedCount, total: spotifyLikedIds.size || total };
+  return { added: spotifyLiked.length, removed: removedCount, total: spotifyLikedIds.size || total };
 }
 
 
