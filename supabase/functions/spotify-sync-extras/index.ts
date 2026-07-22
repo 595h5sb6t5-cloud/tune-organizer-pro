@@ -39,9 +39,22 @@ async function refreshSpotifyToken(supabase: any, userId: string): Promise<strin
   return tok.access_token;
 }
 
-async function spotifyGet(token: string, url: string) {
+async function spotifyGet(token: string, url: string, attempt = 0): Promise<any> {
   const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
   if (r.status === 403 || r.status === 404) return null; // scope/permission missing
+  if (r.status === 429) {
+    if (attempt >= 5) return null; // give up gracefully instead of failing the whole job
+    const retryAfter = Number(r.headers.get("retry-after") ?? "2");
+    const waitMs = Math.min(60_000, Math.max(1000, retryAfter * 1000)) * (attempt + 1);
+    console.warn(`[spotify-sync-extras] 429 on ${url}, waiting ${waitMs}ms (attempt ${attempt + 1})`);
+    await new Promise((res) => setTimeout(res, waitMs));
+    return spotifyGet(token, url, attempt + 1);
+  }
+  if (r.status >= 500) {
+    if (attempt >= 3) return null;
+    await new Promise((res) => setTimeout(res, 1000 * (attempt + 1)));
+    return spotifyGet(token, url, attempt + 1);
+  }
   if (!r.ok) throw new Error(`Spotify ${r.status}: ${await r.text()}`);
   return r.json();
 }
