@@ -122,6 +122,10 @@ const INITIAL_STAGES: SyncStageState[] = [
   { stage: "analysis", label: "Audio analysis", status: "pending" },
 ];
 
+function isSpotifyRateLimitedResult(result: Record<string, any> | null | undefined) {
+  return result?.status === "rate_limited" || result?.step === "spotify_rate_limited";
+}
+
 export function useSpotifyLibrary() {
   const { user, profile } = useAuth();
   const spotifyConnected = profile?.spotify_connected ?? false;
@@ -220,6 +224,10 @@ export function useSpotifyLibrary() {
 
     if (step === "refresh_token" || /Spotify authorization expired/i.test(rawMessage)) {
       return "La autorización de Spotify expiró. Reconecta Spotify en Settings y vuelve a sincronizar.";
+    }
+
+    if (status === 429 || step === "spotify_rate_limited" || /rate limited|too many requests/i.test(rawMessage)) {
+      return "Spotify está limitando temporalmente el sync. No se perdió nada; espera unos minutos y vuelve a intentar.";
     }
 
     return step ? `${rawMessage} · paso: ${step}` : rawMessage;
@@ -377,6 +385,13 @@ export function useSpotifyLibrary() {
         update("Importando liked songs…");
         const likedRes = await invokeSync("liked", forceFullSync);
         Object.assign(combinedResult, likedRes);
+        if (isSpotifyRateLimitedResult(likedRes)) {
+          const message = likedRes.message || "Spotify está limitando el sync. Intenta de nuevo en unos minutos.";
+          update(message);
+          setStage("liked_songs", "skipped", "rate limited");
+          await refreshLiked();
+          return;
+        }
         const added = likedRes.liked_songs_added ?? 0;
         const removed = likedRes.liked_songs_removed ?? 0;
         const total = likedRes.liked_songs_total ?? added;
@@ -393,6 +408,13 @@ export function useSpotifyLibrary() {
         update("Importando álbumes…");
         const albumRes = await invokeSync("albums", forceFullSync);
         Object.assign(combinedResult, albumRes);
+        if (isSpotifyRateLimitedResult(albumRes)) {
+          const message = albumRes.message || "Spotify está limitando álbumes por ahora.";
+          update(message);
+          setStage("albums", "skipped", "rate limited");
+          await refreshAlbums();
+          return;
+        }
         const added = albumRes.albums_added ?? 0;
         update(`+${added} álbumes`, added);
         setStage("albums", "done", `+${added}`);
@@ -409,6 +431,12 @@ export function useSpotifyLibrary() {
           update(`Procesando lote ${plBatchNum}…`);
           const plRes = await invokeSync("playlists", forceFullSync);
           Object.assign(combinedResult, plRes);
+          if (isSpotifyRateLimitedResult(plRes)) {
+            const message = plRes.message || "Spotify está limitando playlists por ahora.";
+            update(message);
+            setStage("playlists", "skipped", "rate limited");
+            break;
+          }
           totalPlaylistTracksSynced += plRes.playlist_tracks_synced ?? 0;
           playlistsRemaining = plRes.playlists_remaining ?? 0;
           const totalPL = (plRes.total_playlists ?? 0);
@@ -431,6 +459,13 @@ export function useSpotifyLibrary() {
         update("Importando artistas…");
         const artRes = await invokeSync("artists", forceFullSync);
         Object.assign(combinedResult, artRes);
+        if (isSpotifyRateLimitedResult(artRes)) {
+          const message = artRes.message || "Spotify está limitando artistas por ahora.";
+          update(message);
+          setStage("artists", "skipped", "rate limited");
+          await refreshArtists();
+          return;
+        }
         const added = artRes.artists_added ?? 0;
         update(`+${added} artistas`, added);
         setStage("artists", "done", `+${added}`);
@@ -452,6 +487,12 @@ export function useSpotifyLibrary() {
           skip_core: false,
           ...(forceFullSync ? { force_full: true } : {}),
         });
+        if (isSpotifyRateLimitedResult(analysisRes)) {
+          const message = analysisRes.message || "Spotify está limitando el análisis de audio por ahora.";
+          update(message);
+          setStage("analysis", "skipped", "rate limited");
+          return;
+        }
         const featureCount = analysisRes.audio_features ?? 0;
         update(featureCount > 0 ? `${featureCount} tracks analizados` : "Al día");
         setStage("analysis", "done", featureCount > 0 ? `${featureCount} tracks` : "up to date");
