@@ -175,6 +175,7 @@ type TrackRow = {
 function extractTrack(item: any, userId: string): TrackRow | null {
   const track = item?.track;
   if (!track || typeof track.id !== "string") return null;
+  if (track.is_local === true || track.is_playable === false) return null;
   const artists = Array.isArray(track.artists) ? track.artists.map((a: any) => a?.name).filter(Boolean).join(", ") : "";
   const album = track.album;
   const images = album?.images || [];
@@ -265,7 +266,7 @@ function shouldDoFullSync(connection: SpotifyConnectionRow, forceFullSync: boole
  * LIKED SONGS — full bidirectional sync.
  */
 async function syncLikedSongs(
-  adminClient: any, userId: string, token: string, isFullSync: boolean, existingTrackIds: Set<string>
+  adminClient: any, userId: string, token: string, isFullSync: boolean, existingTrackIds: Set<string>, userMarket?: string
 ): Promise<{ added: number; removed: number; total: number }> {
   const spotifyLiked: TrackRow[] = [];
   const spotifyLikedIds = new Set<string>();
@@ -274,9 +275,10 @@ async function syncLikedSongs(
   let consecutiveKnown = 0;
   let earlyStopped = false;
   const KNOWN_THRESHOLD = 100;
+  const marketParam = userMarket ? `&market=${encodeURIComponent(userMarket)}` : "";
 
   while (offset < total) {
-    const data = await spotifyGet(`https://api.spotify.com/v1/me/tracks?limit=50&offset=${offset}`, token);
+    const data = await spotifyGet(`https://api.spotify.com/v1/me/tracks?limit=50&offset=${offset}${marketParam}`, token);
     total = data.total ?? 0;
     const items = data.items || [];
 
@@ -305,7 +307,7 @@ async function syncLikedSongs(
   }
 
   const completedFullScan = !earlyStopped && offset >= total;
-  console.log(`[spotify-import-tracks] liked songs done: scanned ${offset}, total ${total}, new ${spotifyLiked.length}, fullScan=${completedFullScan}`);
+    console.log(`[spotify-import-tracks] liked songs done: scanned ${offset}, spotifyTotal ${total}, importable ${spotifyLikedIds.size}, new ${spotifyLiked.length}, fullScan=${completedFullScan}`);
 
   for (let i = 0; i < spotifyLiked.length; i += 100) {
     const batch = spotifyLiked.slice(i, i + 100);
@@ -330,7 +332,7 @@ async function syncLikedSongs(
     }
   }
 
-  return { added: spotifyLiked.length, removed: removedCount, total: spotifyLikedIds.size || total };
+    return { added: spotifyLiked.length, removed: removedCount, total: spotifyLikedIds.size || total };
 }
 
 
@@ -1096,9 +1098,11 @@ Deno.serve(async (req) => {
     }).eq("user_id", user.id);
 
     let spotifyUserId = "";
+    let userMarket = "";
     try {
       const profile = await spotifyGet("https://api.spotify.com/v1/me", accessToken);
       spotifyUserId = profile.id || "";
+      userMarket = typeof profile.country === "string" ? profile.country : "";
       if (spotifyUserId) {
         await adminClient.from("spotify_connections").update({ spotify_user_id: spotifyUserId }).eq("user_id", user.id);
       }
@@ -1129,7 +1133,7 @@ Deno.serve(async (req) => {
     // Step 1: Liked songs
     if (syncScope === "all" || syncScope === "liked") {
       step = "sync_liked_songs";
-      const likedResult = await syncLikedSongs(adminClient, user.id, accessToken, isFullSync, existingTrackIds);
+      const likedResult = await syncLikedSongs(adminClient, user.id, accessToken, isFullSync, existingTrackIds, userMarket);
       result.liked_songs_added = likedResult.added;
       result.liked_songs_removed = likedResult.removed;
       result.liked_songs_total = likedResult.total;
