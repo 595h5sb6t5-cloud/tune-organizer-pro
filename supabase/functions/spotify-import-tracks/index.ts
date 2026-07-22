@@ -199,7 +199,7 @@ function extractTrack(item: any, userId: string, userMarket = ""): TrackRow | nu
   // so available_markets is required for a trustworthy reconciliation.
   if (userMarket) {
     if (track.is_playable === false) return null;
-    if (Array.isArray(track.available_markets) && track.available_markets.length > 0 && !track.available_markets.includes(userMarket)) {
+    if (Array.isArray(track.available_markets) && !track.available_markets.includes(userMarket)) {
       return null;
     }
   }
