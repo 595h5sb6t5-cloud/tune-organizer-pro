@@ -661,6 +661,7 @@ async function syncPlaylists(
   adminClient: any, userId: string, token: string, spotifyUserId: string,
   existingSnapshots: Map<string, string>,
   targetPlaylistDbId?: string,
+  syncRunId = "",
 ): Promise<{ total: number; changed: number; removed: number; tracksSynced: number; playlistsRemaining: number; warning: string | null }> {
   const playlists: PlaylistMeta[] = [];
   let offset = 0;
@@ -730,6 +731,13 @@ async function syncPlaylists(
         });
       }
       offset += 50;
+      if (offset === 50 || offset % 200 === 0 || offset >= totalPl) {
+        await updateSyncStageProgress(adminClient, syncRunId, "playlists", {
+          items_found: Number.isFinite(totalPl) ? totalPl : playlists.length,
+          items_processed: Math.min(offset, Number.isFinite(totalPl) ? totalPl : offset),
+          meta: { playlists_collected: playlists.length },
+        });
+      }
       console.log(`[spotify-import-tracks] playlists: ${offset}/${totalPl}, collected: ${playlists.length}`);
       if (items.length === 0) break;
     }
@@ -960,6 +968,16 @@ async function syncPlaylists(
 
       totalTracks += finalCount;
       importedTracksPlaylistsCount++;
+      await updateSyncStageProgress(adminClient, syncRunId, "playlists", {
+        items_found: playlists.length,
+        items_processed: playlists.length,
+        meta: {
+          playlists_to_check: toSync.length,
+          playlist_tracks_synced: totalTracks,
+          playlists_restricted: restrictedCount,
+          playlists_failed: failedPlaylists.length,
+        },
+      });
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : String(e);
       const status = e instanceof SpotifyImportError ? e.status : 0;
@@ -981,6 +999,16 @@ async function syncPlaylists(
           .update({ tracks_import_status: "failed", tracks_import_error: errMsg })
           .eq("id", dbId);
       }
+      await updateSyncStageProgress(adminClient, syncRunId, "playlists", {
+        items_found: playlists.length,
+        items_processed: playlists.length,
+        meta: {
+          playlists_to_check: toSync.length,
+          playlist_tracks_synced: totalTracks,
+          playlists_restricted: restrictedCount,
+          playlists_failed: failedPlaylists.length,
+        },
+      });
     }
   }
 
