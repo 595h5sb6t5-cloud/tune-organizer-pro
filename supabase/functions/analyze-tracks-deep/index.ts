@@ -426,7 +426,11 @@ Deno.serve(async (req) => {
     );
 
     // Filter: only tracks NOT already cached (deep pipeline; quick stage can be added later)
-    const pending = liked.filter((l: any) => l.spotify_track_id && !cachedSet.has(cacheKey(l.spotify_track_id)));
+    let pending = liked.filter((l: any) => l.spotify_track_id && !cachedSet.has(cacheKey(l.spotify_track_id)));
+    // Diagnostic mode: restrict to the provided ids (force re-analyze them even if cached)
+    if (restrictSet) {
+      pending = liked.filter((l: any) => l.spotify_track_id && restrictSet.has(l.spotify_track_id));
+    }
     const cache_hits_total = liked.length - pending.length;
 
     if (pending.length === 0) {
