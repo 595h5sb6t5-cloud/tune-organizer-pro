@@ -84,6 +84,8 @@ const Playlists = () => {
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
+                  <ValidateContextButton playlistId={p.id} playlistName={p.name} />
+
                   <button
                     type="button"
                     onClick={() => setSelected(p.id)}
