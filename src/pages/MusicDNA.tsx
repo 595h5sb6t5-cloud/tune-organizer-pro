@@ -440,10 +440,11 @@ function LanguageStep({ dna }: { dna: ReturnType<typeof useMusicDna> }) {
         <div className="rounded-2xl border border-border/50 bg-card/50 p-8 flex items-start gap-4">
           <Globe2 className="w-6 h-6 text-accent shrink-0 mt-1" />
           <div>
-            <p className="font-medium mb-1">Análisis de idioma en proceso</p>
-            <p className="text-sm text-muted-foreground">Cuando el análisis IA termine de procesar tus canciones, verás aquí la mezcla de idiomas detectada.</p>
+            <p className="font-medium mb-1">Sin datos de idioma suficientes</p>
+            <p className="text-sm text-muted-foreground">El idioma es solo un dato de contexto y nunca se usa para agrupar playlists.</p>
           </div>
         </div>
+
       )}
     </StepShell>
   );
