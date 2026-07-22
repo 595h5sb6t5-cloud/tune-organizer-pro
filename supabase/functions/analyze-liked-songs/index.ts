@@ -1088,7 +1088,7 @@ Deno.serve(async (req) => {
               }
 
               const v = await callAI(API_KEY, "gpt-4o-mini", VALIDATE_SYS,
-                `Review these ${cls.length} playlists for quality. Flag language traps, incoherent groupings, bad names, and outliers.\n\n${sums.join("\n\n")}\n\nUse validate_playlists.`,
+                `Review these ${cls.length} playlists for quality. Flag language mixes (English mixed with Romance languages), incoherent groupings, bad names, and outliers.\n\n${sums.join("\n\n")}\n\nUse validate_playlists.`,
                 [VALIDATE_TOOL], { type: "function", function: { name: "validate_playlists" } }, 0.2, 4096);
 
               for (const act of v.actions || []) {
