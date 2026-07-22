@@ -130,21 +130,27 @@ const LibraryPage = () => {
         </div>
 
         {/* Sync progress banner */}
-        {(syncing || (allDone && hasAnySyncActivity)) && (
-          <div className="mb-6 p-4 rounded-xl bg-accent/5 border border-accent/15 space-y-2">
-            <div className="flex items-center gap-2 mb-3">
-              {syncing ? <Loader2 className="w-4 h-4 text-accent animate-spin" /> : <CheckCircle2 className="w-4 h-4 text-accent" />}
-              <span className="text-sm font-medium">{syncing ? "Syncing your Spotify library…" : "Sync complete"}</span>
+        {(syncing || syncError || (allDone && hasAnySyncActivity)) && (
+          <div className="mb-6 p-4 rounded-xl bg-accent/5 border border-accent/15 space-y-3">
+            <div className="flex items-center gap-2">
+              {syncing ? <Loader2 className="w-4 h-4 text-accent animate-spin" /> : syncError ? <AlertCircle className="w-4 h-4 text-destructive" /> : <CheckCircle2 className="w-4 h-4 text-accent" />}
+              <span className="text-sm font-medium">{syncing ? "Syncing your Spotify library…" : syncError ? "Sync needs attention" : "Sync complete"}</span>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
               {syncStages.map((s) => (
                 <div key={s.stage} className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs transition-all ${s.status === "active" ? "bg-accent/10 text-foreground font-medium" : s.status === "done" ? "bg-accent/5 text-foreground" : s.status === "error" ? "bg-destructive/10 text-destructive" : "text-muted-foreground/60"}`}>
                   <StageIcon status={s.status} />
                   <span className="truncate">{s.label}</span>
-                  {s.detail && (s.status === "done" || s.status === "active") && <span className="text-muted-foreground ml-auto text-[10px] shrink-0">{s.detail}</span>}
+                  {s.detail && (s.status === "done" || s.status === "active" || s.status === "error") && <span className="text-muted-foreground ml-auto text-[10px] shrink-0">{s.detail}</span>}
                 </div>
               ))}
             </div>
+            {syncError && (
+              <div className="flex items-start gap-3 p-3 rounded-lg bg-background/60 border border-border/50 text-sm text-muted-foreground">
+                <Info className="w-4 h-4 text-accent shrink-0 mt-0.5" />
+                <span className="leading-relaxed">{syncError}</span>
+              </div>
+            )}
           </div>
         )}
 
