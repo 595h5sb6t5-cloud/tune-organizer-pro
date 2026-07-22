@@ -277,7 +277,9 @@ async function syncLikedSongs(
   let consecutiveKnown = 0;
   let earlyStopped = false;
   const KNOWN_THRESHOLD = 100;
-  const marketParam = userMarket ? `&market=${encodeURIComponent(userMarket)}` : "";
+  // Do NOT pass market for liked songs — Spotify's own UI count doesn't apply market
+  // filtering, and using it makes tracks flicker in/out between syncs.
+  const marketParam = "";
 
   while (offset < total) {
     const data = await spotifyGet(`https://api.spotify.com/v1/me/tracks?limit=50&offset=${offset}${marketParam}`, token);
