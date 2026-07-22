@@ -260,10 +260,12 @@ async function runPipeline(supabaseUrl: string, anonKey: string, svc: any, auth:
     const profileOk = await runStage("profile", () => invokeFunction(supabaseUrl, anonKey, auth, "spotify-sync-extras", { scope: "profile" }), { optional: true });
     if (!profileOk) return;
 
-    const likedOk = await runStage("liked_songs", () => invokeFunction(supabaseUrl, anonKey, auth, "spotify-import-tracks", { scope: "liked", force_full: forceFull, sync_run_id: runId }), { optional: true });
+    // Liked songs is the core of the library — never silently skip it. On
+    // rate-limit the run pauses (waiting_rate_limit) so the user retries.
+    const likedOk = await runStage("liked_songs", () => invokeFunction(supabaseUrl, anonKey, auth, "spotify-import-tracks", { scope: "liked", force_full: forceFull, sync_run_id: runId }), { optional: false });
     if (!likedOk) return;
 
-    const albumsOk = await runStage("saved_albums", () => invokeFunction(supabaseUrl, anonKey, auth, "spotify-import-tracks", { scope: "albums", force_full: forceFull, sync_run_id: runId }), { optional: true });
+    const albumsOk = await runStage("saved_albums", () => invokeFunction(supabaseUrl, anonKey, auth, "spotify-import-tracks", { scope: "albums", force_full: forceFull, sync_run_id: runId }), { optional: false });
     if (!albumsOk) return;
 
     const playlistsOk = await runStage("playlists", async () => {
