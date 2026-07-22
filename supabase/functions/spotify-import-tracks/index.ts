@@ -251,6 +251,7 @@ async function syncLikedSongs(
   let offset = 0;
   let total = Infinity;
   let consecutiveKnown = 0;
+  let earlyStopped = false;
   const KNOWN_THRESHOLD = 100;
 
   while (offset < total) {
@@ -276,12 +277,14 @@ async function syncLikedSongs(
     }
     if (!isFullSync && consecutiveKnown >= KNOWN_THRESHOLD) {
       console.log("[spotify-import-tracks] incremental: stopping liked songs scan");
+      earlyStopped = true;
       break;
     }
     if (items.length === 0) break;
   }
 
-  console.log(`[spotify-import-tracks] liked songs done: scanned ${offset}, total ${total}, new ${spotifyLiked.length}`);
+  const completedFullScan = !earlyStopped && offset >= total;
+  console.log(`[spotify-import-tracks] liked songs done: scanned ${offset}, total ${total}, new ${spotifyLiked.length}, fullScan=${completedFullScan}`);
 
   for (let i = 0; i < spotifyLiked.length; i += 100) {
     const batch = spotifyLiked.slice(i, i + 100);
@@ -290,7 +293,9 @@ async function syncLikedSongs(
   }
 
   let removedCount = 0;
-  if (isFullSync && offset >= total) {
+  // Reconcile removals whenever we completed a full pass over Spotify's liked songs,
+  // regardless of isFullSync. This prevents local drift (e.g. user unliked songs).
+  if (completedFullScan) {
     const toRemove: string[] = [];
     for (const existingId of existingTrackIds) {
       if (!spotifyLikedIds.has(existingId)) toRemove.push(existingId);
@@ -304,8 +309,9 @@ async function syncLikedSongs(
     }
   }
 
-  return { added: spotifyLiked.length, removed: removedCount, total };
+  return { added: spotifyLiked.length, removed: removedCount, total: spotifyLikedIds.size || total };
 }
+
 
 /**
  * SAVED ALBUMS — full bidirectional sync with album tracks.
