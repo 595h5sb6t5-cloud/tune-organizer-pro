@@ -443,6 +443,98 @@ export type Database = {
         }
         Relationships: []
       }
+      cluster_candidate_tracks: {
+        Row: {
+          cluster_id: string
+          compat_to_centroid: number | null
+          created_at: string
+          id: string
+          position: number | null
+          spotify_track_id: string
+          user_id: string
+        }
+        Insert: {
+          cluster_id: string
+          compat_to_centroid?: number | null
+          created_at?: string
+          id?: string
+          position?: number | null
+          spotify_track_id: string
+          user_id: string
+        }
+        Update: {
+          cluster_id?: string
+          compat_to_centroid?: number | null
+          created_at?: string
+          id?: string
+          position?: number | null
+          spotify_track_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cluster_candidate_tracks_cluster_id_fkey"
+            columns: ["cluster_id"]
+            isOneToOne: false
+            referencedRelation: "cluster_candidates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      cluster_candidates: {
+        Row: {
+          avg_compat: number | null
+          centroid: Json | null
+          created_at: string
+          dominant_dimensions: Json | null
+          id: string
+          language_group: string | null
+          min_compat: number | null
+          promoted_playlist_id: string | null
+          rejection_reason: string | null
+          run_id: string | null
+          size: number
+          sonic_summary: string | null
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          avg_compat?: number | null
+          centroid?: Json | null
+          created_at?: string
+          dominant_dimensions?: Json | null
+          id?: string
+          language_group?: string | null
+          min_compat?: number | null
+          promoted_playlist_id?: string | null
+          rejection_reason?: string | null
+          run_id?: string | null
+          size?: number
+          sonic_summary?: string | null
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          avg_compat?: number | null
+          centroid?: Json | null
+          created_at?: string
+          dominant_dimensions?: Json | null
+          id?: string
+          language_group?: string | null
+          min_compat?: number | null
+          promoted_playlist_id?: string | null
+          rejection_reason?: string | null
+          run_id?: string | null
+          size?: number
+          sonic_summary?: string | null
+          status?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       generated_playlist_tracks: {
         Row: {
           added_by: string
@@ -496,12 +588,14 @@ export type Database = {
       }
       generated_playlists: {
         Row: {
+          avg_compat: number | null
           concept: string | null
           context: string | null
           cover_image_url: string | null
           created_at: string
           created_by_ai: boolean
           description: string | null
+          dimensions_summary: Json | null
           exported_at: string | null
           id: string
           intent_profile: Json | null
@@ -509,8 +603,10 @@ export type Database = {
           is_public: boolean
           last_export_error: string | null
           last_export_step: string | null
+          min_compat: number | null
           name: string
           snapshot_id: string | null
+          source_cluster_id: string | null
           spotify_playlist_id: string | null
           spotify_url: string | null
           status: string
@@ -519,12 +615,14 @@ export type Database = {
           vibe: string | null
         }
         Insert: {
+          avg_compat?: number | null
           concept?: string | null
           context?: string | null
           cover_image_url?: string | null
           created_at?: string
           created_by_ai?: boolean
           description?: string | null
+          dimensions_summary?: Json | null
           exported_at?: string | null
           id?: string
           intent_profile?: Json | null
@@ -532,8 +630,10 @@ export type Database = {
           is_public?: boolean
           last_export_error?: string | null
           last_export_step?: string | null
+          min_compat?: number | null
           name: string
           snapshot_id?: string | null
+          source_cluster_id?: string | null
           spotify_playlist_id?: string | null
           spotify_url?: string | null
           status?: string
@@ -542,12 +642,14 @@ export type Database = {
           vibe?: string | null
         }
         Update: {
+          avg_compat?: number | null
           concept?: string | null
           context?: string | null
           cover_image_url?: string | null
           created_at?: string
           created_by_ai?: boolean
           description?: string | null
+          dimensions_summary?: Json | null
           exported_at?: string | null
           id?: string
           intent_profile?: Json | null
@@ -555,8 +657,10 @@ export type Database = {
           is_public?: boolean
           last_export_error?: string | null
           last_export_step?: string | null
+          min_compat?: number | null
           name?: string
           snapshot_id?: string | null
+          source_cluster_id?: string | null
           spotify_playlist_id?: string | null
           spotify_url?: string | null
           status?: string
@@ -1800,6 +1904,36 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      unassigned_tracks: {
+        Row: {
+          created_at: string
+          id: string
+          last_run_id: string | null
+          reason: string | null
+          spotify_track_id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          last_run_id?: string | null
+          reason?: string | null
+          spotify_track_id: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          last_run_id?: string | null
+          reason?: string | null
+          spotify_track_id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
       }
       user_followed_artists: {
         Row: {
