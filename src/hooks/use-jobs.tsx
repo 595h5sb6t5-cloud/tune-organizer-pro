@@ -12,6 +12,7 @@ export type JobType =
   | "ai_analysis"
   | "playlist_generation"
   | "playlist_export"
+  | "playlist_review"
   | "recommendations";
 
 export interface JobState {
