@@ -139,7 +139,7 @@ type ClusterReport = {
 
 function ClusterSampleTest({ onPromoted }: { onPromoted: (id: string) => void }) {
   const [running, setRunning] = useState(false);
-  const [sampleSize, setSampleSize] = useState(150);
+  const [sampleSize, setSampleSize] = useState(200);
   const [report, setReport] = useState<null | {
     run_id: string; persisted: boolean; totals: any; thresholds: any;
     clusters: ClusterReport[]; unassigned: { spotify_track_id: string; name: string | null; artist: string | null; language: string | null }[];
@@ -202,7 +202,7 @@ function ClusterSampleTest({ onPromoted }: { onPromoted: (id: string) => void })
         <Input
           type="number"
           value={sampleSize}
-          onChange={(e) => setSampleSize(Math.min(500, Math.max(50, Number(e.target.value) || 150)))}
+          onChange={(e) => setSampleSize(Math.min(500, Math.max(50, Number(e.target.value) || 200)))}
           className="w-full md:w-32"
           disabled={running}
           min={50}

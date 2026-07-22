@@ -52,7 +52,7 @@ Deno.serve(async (req) => {
       .eq("cluster_id", cluster_id)
       .order("position", { ascending: true });
     const sids = (cts ?? []).map((t: any) => t.spotify_track_id);
-    if (sids.length < 8) return json({ error: "cluster too small" }, 400);
+    if (sids.length < 10) return json({ error: "cluster too small (min 10)" }, 400);
 
     // Fetch names
     const { data: liked } = await adm.from("liked_songs").select("spotify_track_id, track_name, artist_name").eq("user_id", user.id).in("spotify_track_id", sids);
