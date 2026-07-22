@@ -232,6 +232,27 @@ async function getAllUnfetchedAudioFeatureIds(adminClient: any, userId: string):
 
 // ─── Sync helpers ───
 
+async function fetchAllRows<T = Record<string, unknown>>(
+  queryFactory: () => any,
+  pageSize = 1000,
+): Promise<T[]> {
+  const rows: T[] = [];
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await queryFactory().range(from, from + pageSize - 1);
+    if (error) throw error;
+
+    const batch = (data || []) as T[];
+    rows.push(...batch);
+
+    if (batch.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return rows;
+}
+
 function shouldDoFullSync(connection: SpotifyConnectionRow, forceFullSync: boolean): boolean {
   if (forceFullSync) return true;
   if (!connection.last_full_sync_at) return true;
@@ -1086,20 +1107,20 @@ Deno.serve(async (req) => {
     }
 
     // Load existing data for diffing
-    const [trackRes, playlistRes, artistRes, albumRes] = await Promise.all([
-      adminClient.from("liked_songs").select("spotify_track_id").eq("user_id", user.id),
-      adminClient.from("spotify_playlists").select("spotify_playlist_id, snapshot_id").eq("user_id", user.id),
-      adminClient.from("spotify_followed_artists").select("spotify_artist_id").eq("user_id", user.id),
-      adminClient.from("spotify_saved_albums").select("spotify_album_id").eq("user_id", user.id),
+    const [trackRows, playlistRows, artistRows, albumRows] = await Promise.all([
+      fetchAllRows(() => adminClient.from("liked_songs").select("spotify_track_id").eq("user_id", user.id)),
+      fetchAllRows(() => adminClient.from("spotify_playlists").select("spotify_playlist_id, snapshot_id").eq("user_id", user.id)),
+      fetchAllRows(() => adminClient.from("spotify_followed_artists").select("spotify_artist_id").eq("user_id", user.id)),
+      fetchAllRows(() => adminClient.from("spotify_saved_albums").select("spotify_album_id").eq("user_id", user.id)),
     ]);
 
-    const existingTrackIds = new Set((trackRes.data || []).map((r: any) => r.spotify_track_id));
+    const existingTrackIds = new Set((trackRows || []).map((r: any) => r.spotify_track_id));
     const existingSnapshots = new Map<string, string>();
-    for (const p of playlistRes.data || []) {
+    for (const p of playlistRows || []) {
       if (p.snapshot_id) existingSnapshots.set(p.spotify_playlist_id, p.snapshot_id);
     }
-    const existingArtistIds = new Set((artistRes.data || []).map((r: any) => r.spotify_artist_id));
-    const existingAlbumIds = new Set((albumRes.data || []).map((r: any) => r.spotify_album_id));
+    const existingArtistIds = new Set((artistRows || []).map((r: any) => r.spotify_artist_id));
+    const existingAlbumIds = new Set((albumRows || []).map((r: any) => r.spotify_album_id));
 
     const now = new Date().toISOString();
     const result: Record<string, any> = { success: true, sync_mode: syncMode };
