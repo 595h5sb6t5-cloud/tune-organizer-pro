@@ -306,6 +306,21 @@ async function analyzeOneTrack(
   return { ok: false, error: lastErr, retries: MAX_ATTEMPTS, ms_openai: msOpenai, reasoning_mode, json_errors };
 }
 
+/* ─────────────── Fire-and-forget: notify phase2-guard when analysis completes. */
+function firePhase2Guard(supabaseUrl: string, svc: string, userId: string) {
+  try {
+    // @ts-ignore Deno EdgeRuntime global
+    const wu = typeof EdgeRuntime !== "undefined" ? EdgeRuntime.waitUntil : (p: Promise<any>) => p;
+    wu(
+      fetch(`${supabaseUrl}/functions/v1/phase2-guard`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${svc}` },
+        body: JSON.stringify({ user_id: userId, trigger: "analyze-tracks-deep" }),
+      }).catch(() => {}),
+    );
+  } catch (_) { /* best-effort */ }
+}
+
 /* ─────────────── Simple concurrency semaphore. ─────────────── */
 async function runWithConcurrency<T, R>(
   items: T[],
