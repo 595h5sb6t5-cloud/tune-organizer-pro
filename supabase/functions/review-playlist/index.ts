@@ -13,7 +13,7 @@ No debes agregar canciones nuevas.
 
 Analiza: ambiente general, energía, tempo, tipo de beat, instrumentos, melodía, tono, emoción, agresividad, suavidad, cambios entre canciones, orden de reproducción, coherencia del nombre y descripción, canciones fuera de lugar, canciones demasiado parecidas repetitivas, canciones que quedarían mejor en otra playlist.
 
-No apruebes solo porque comparten género. Una buena playlist tiene identidad clara: mismo ambiente aunque cambien artistas, años, idiomas o géneros.
+No apruebes solo porque comparten género. Una buena playlist tiene identidad clara: mismo ambiente, mismo grupo de idiomas, aunque cambien artistas, años o géneros.
 
 Revisa especialmente:
 - Una canción lenta no debe romper una sección intensa.
