@@ -203,6 +203,18 @@ async function runPipeline(supabaseUrl: string, anonKey: string, svc: any, auth:
         const result = await fn();
         if (isRateLimited(result)) {
           const wait = retryAfter(result);
+          if (opts.optional) {
+            await updateStage(svc, runId, stage, {
+              status: "skipped",
+              completed_at: new Date().toISOString(),
+              error_message: result.message ?? "Spotify rate limited this optional stage.",
+              retry_count: 1,
+              meta: { ...result, duration_ms: Date.now() - started, retry_after_seconds_capped: wait },
+            });
+            finalSummary[`${stage}_status`] = "skipped_rate_limited";
+            hasRestrictions = true;
+            return true;
+          }
           await updateRun(svc, runId, {
             status: "waiting_rate_limit",
             error_message: result.message ?? "Spotify is rate limiting this stage.",
@@ -245,7 +257,7 @@ async function runPipeline(supabaseUrl: string, anonKey: string, svc: any, auth:
       }
     };
 
-    const profileOk = await runStage("profile", () => invokeFunction(supabaseUrl, anonKey, auth, "spotify-sync-extras", { scope: "profile" }));
+    const profileOk = await runStage("profile", () => invokeFunction(supabaseUrl, anonKey, auth, "spotify-sync-extras", { scope: "profile" }), { optional: true });
     if (!profileOk) return;
 
     const likedOk = await runStage("liked_songs", () => invokeFunction(supabaseUrl, anonKey, auth, "spotify-import-tracks", { scope: "liked", force_full: forceFull, sync_run_id: runId }));
@@ -279,7 +291,7 @@ async function runPipeline(supabaseUrl: string, anonKey: string, svc: any, auth:
     const artistsOk = await runStage("followed_artists", () => invokeFunction(supabaseUrl, anonKey, auth, "spotify-import-tracks", { scope: "artists", force_full: forceFull, sync_run_id: runId }));
     if (!artistsOk) return;
 
-    const topsOk = await runStage("tops_recent", () => invokeFunction(supabaseUrl, anonKey, auth, "spotify-sync-extras", { scope: "tops_recent" }));
+    const topsOk = await runStage("tops_recent", () => invokeFunction(supabaseUrl, anonKey, auth, "spotify-sync-extras", { scope: "tops_recent" }), { optional: true });
     if (!topsOk) return;
 
     const analysisOk = await runStage("audio_analysis", async () => {
