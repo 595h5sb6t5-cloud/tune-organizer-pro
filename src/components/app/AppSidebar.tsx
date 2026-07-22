@@ -1,4 +1,4 @@
-import { Music2, LayoutDashboard, Library, Brain, Sparkles, Compass, Settings, LogOut } from "lucide-react";
+import { Music2, LayoutDashboard, Library, Brain, Sparkles, Settings, LogOut } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
@@ -8,7 +8,6 @@ const navItems = [
   { icon: Library, label: "Library", path: "/library" },
   { icon: Brain, label: "Music DNA", path: "/music-dna" },
   { icon: Sparkles, label: "AI Playlists", path: "/ai-playlists" },
-  { icon: Compass, label: "Discover", path: "/discover" },
   { icon: Settings, label: "Settings", path: "/settings" },
 ];
 

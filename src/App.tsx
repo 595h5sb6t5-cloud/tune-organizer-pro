@@ -17,7 +17,7 @@ import Playlists from "./pages/Playlists.tsx";
 import PlaylistDetail from "./pages/PlaylistDetail.tsx";
 import LikedSongs from "./pages/LikedSongs.tsx";
 import MusicDNA from "./pages/MusicDNA.tsx";
-import Discover from "./pages/Discover.tsx";
+
 import Settings from "./pages/Settings.tsx";
 import SpotifyCallback from "./pages/SpotifyCallback.tsx";
 import NotFound from "./pages/NotFound.tsx";
@@ -44,7 +44,7 @@ const App = () => (
                 <Route path="/ai-playlists" element={<Playlists />} />
                 <Route path="/playlists" element={<Navigate to="/ai-playlists" replace />} />
                 <Route path="/playlists/:id" element={<PlaylistDetail />} />
-                <Route path="/discover" element={<Discover />} />
+                <Route path="/discover" element={<Navigate to="/ai-playlists" replace />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="/spotify-callback" element={<SpotifyCallback />} />
                 <Route path="/sync" element={<Navigate to="/dashboard" replace />} />
