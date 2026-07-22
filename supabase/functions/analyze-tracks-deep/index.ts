@@ -458,7 +458,9 @@ Deno.serve(async (req) => {
         best_contexts_v2: r.best_contexts_v2 ?? [],
         compatible_playlist_types: r.compatible_playlist_types ?? [],
         transition_in: r.transition_in, transition_out: r.transition_out,
+        language: r.language ?? null,
         analysis_confidence: r.analysis_confidence,
+
         full_analysis: r,
         // metadata
         model_used: MODEL,
