@@ -433,22 +433,22 @@ function EnergyStep({ dna }: { dna: ReturnType<typeof useMusicDna> }) {
 
 function LanguageStep({ dna }: { dna: ReturnType<typeof useMusicDna> }) {
   return (
-    <StepShell eyebrow="Language Mix" title="Los idiomas en tu rotación." subtitle="El idioma es solo un dato de contexto. Nunca agrupamos playlists por idioma.">
+    <StepShell eyebrow="Language Mix" title="Los idiomas en tu rotación." subtitle="Estos son los idiomas que más aparecen en tu biblioteca.">
       {dna.languageMix.length > 0 ? (
         <BarList items={dna.languageMix} empty="" />
       ) : (
         <div className="rounded-2xl border border-border/50 bg-card/50 p-8 flex items-start gap-4">
           <Globe2 className="w-6 h-6 text-accent shrink-0 mt-1" />
           <div>
-            <p className="font-medium mb-1">Sin datos de idioma suficientes</p>
-            <p className="text-sm text-muted-foreground">El idioma es solo un dato de contexto y nunca se usa para agrupar playlists.</p>
+            <p className="font-medium mb-1">Aún no detectamos idiomas</p>
+            <p className="text-sm text-muted-foreground">Cuando termines de analizar tu biblioteca aparecerán aquí los idiomas que más escuchas.</p>
           </div>
         </div>
-
       )}
     </StepShell>
   );
 }
+
 
 function ArtistsStep({ dna }: { dna: ReturnType<typeof useMusicDna> }) {
   return (
