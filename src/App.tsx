@@ -17,7 +17,7 @@ import Playlists from "./pages/Playlists.tsx";
 import PlaylistDetail from "./pages/PlaylistDetail.tsx";
 import LikedSongs from "./pages/LikedSongs.tsx";
 import MusicDNA from "./pages/MusicDNA.tsx";
-import Discover from "./pages/Discover.tsx";
+
 import Settings from "./pages/Settings.tsx";
 import SpotifyCallback from "./pages/SpotifyCallback.tsx";
 import NotFound from "./pages/NotFound.tsx";
