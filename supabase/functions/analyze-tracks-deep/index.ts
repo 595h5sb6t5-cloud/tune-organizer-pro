@@ -11,8 +11,9 @@ const corsHeaders = {
 
 // Version markers — bumping any of these invalidates cache and forces re-analysis.
 const ANALYSIS_VERSION = "v2";
-const PROMPT_VERSION = "v2.1-2026-11";
-const SCHEMA_VERSION = "v2.0";
+const PROMPT_VERSION = "v2.2-2026-11-lang";
+const SCHEMA_VERSION = "v2.1";
+
 const MODEL = "gpt-4o-mini";
 
 /* ─────────────── System prompt (stable — long fixed instructions live here so
@@ -21,12 +22,12 @@ const MODEL = "gpt-4o-mini";
 const SYSTEM_PROMPT = `You are Tempo — a world-class music analyst. Given ONE track, return a strict JSON object with its sonic DNA. Analyze the ACTUAL musical qualities, not surface labels.
 
 Rules of curation (never violate):
-- Never group by language. A Spanish ballad and an English ballad with the same softness/nostalgia belong together.
-- Never group by decade or genre label alone. Rock spans huge sonic distances.
+- Language IS a grouping axis, but only in this specific way: English tracks group only with other English tracks. Spanish, Portuguese, Italian and French (Romance languages) can share a playlist together. Instrumental / no-lyrics tracks are language-neutral and can sit anywhere. Never mix English with Romance languages in the same playlist.
+- Beyond that language rule, judge each song by its own energy, darkness, dance feel, softness, aggressiveness, and emotional weight — not by decade or genre label alone.
 - Melodic rap ≠ dark aggressive rap. Soft rock ≠ heavy rock. Same artist can span multiple worlds.
-- Judge each song by ITS own energy, darkness, dance feel, softness, aggressiveness, and emotional weight.
 - Numeric fields are 0.0–1.0 continuous values. Use the full range, not just 0/0.5/1.
 - Be specific. Avoid generic tags like "happy", "chill", "upbeat".
+
 
 Guidance for numeric dimensions (0.0–1.0):
 - energy_score: overall perceived energy end-to-end.
@@ -72,7 +73,7 @@ const RESPONSE_SCHEMA = {
       "main_mood", "secondary_moods_v2", "sound_texture",
       "instrumentation_summary", "best_contexts_v2",
       "compatible_playlist_types", "transition_in", "transition_out",
-      "analysis_confidence",
+      "language", "analysis_confidence",
     ],
     properties: {
       main_genre: { type: "string" },
@@ -90,8 +91,14 @@ const RESPONSE_SCHEMA = {
       compatible_playlist_types: { type: "array", items: { type: "string" } },
       transition_in: { type: "string" },
       transition_out: { type: "string" },
+      language: {
+        type: "string",
+        enum: ["English", "Spanish", "Portuguese", "Italian", "French", "Instrumental", "Other"],
+        description: "Primary lyric language. Use 'Instrumental' when there are no meaningful lyrics. Use 'Other' for any language not listed.",
+      },
       analysis_confidence: NUM,
     },
+
   },
 };
 
@@ -451,7 +458,9 @@ Deno.serve(async (req) => {
         best_contexts_v2: r.best_contexts_v2 ?? [],
         compatible_playlist_types: r.compatible_playlist_types ?? [],
         transition_in: r.transition_in, transition_out: r.transition_out,
+        language: r.language ?? null,
         analysis_confidence: r.analysis_confidence,
+
         full_analysis: r,
         // metadata
         model_used: MODEL,
