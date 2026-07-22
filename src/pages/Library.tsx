@@ -98,7 +98,7 @@ const LibraryPage = () => {
     );
   }
 
-  const hasData = playlists.length > 0 || likedCount > 0 || followedArtists.length > 0 || albumCount > 0;
+  const hasData = likedCount > 0 || followedArtists.length > 0 || albumCount > 0;
   const hasAnySyncActivity = syncStages.some(s => s.status !== "pending");
 
   return (
@@ -111,7 +111,6 @@ const LibraryPage = () => {
             <p className="text-muted-foreground">
               {likedCount} liked songs
               {albumCount > 0 && ` · ${albumCount} albums`}
-              {playlists.length > 0 && ` · ${playlists.length} playlists`}
               {followedArtists.length > 0 && ` · ${followedArtists.length} artists`}
             </p>
           </div>
@@ -209,29 +208,9 @@ const LibraryPage = () => {
               </HorizontalRow>
             )}
 
-            {/* Playlists — horizontal scroll */}
-            {playlists.length > 0 && (
-              <HorizontalRow title="Playlists" icon={<ListMusic className="w-5 h-5 text-accent" />} count={playlists.length}>
-                {playlists.map((pl) => (
-                  <Link key={pl.id} to={`/playlists/${pl.id}`} className="shrink-0 w-44 snap-start group">
-                    <div className="aspect-square rounded-xl bg-secondary overflow-hidden mb-2 relative">
-                      {pl.image_url ? (
-                        <img src={pl.image_url} alt={pl.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" loading="lazy" />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center"><ListMusic className="w-10 h-10 text-muted-foreground" /></div>
-                      )}
-                      <div className="absolute top-1.5 right-1.5 flex flex-col gap-0.5 items-end">
-                        {pl.is_owned_by_user && <span className="px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-accent/90 text-accent-foreground">Yours</span>}
-                        {pl.is_collaborative && <span className="px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-primary/80 text-primary-foreground">Collab</span>}
-                        {!pl.is_owned_by_user && !pl.is_collaborative && <span className="px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-muted/80 text-muted-foreground">Saved</span>}
-                      </div>
-                    </div>
-                    <p className="text-sm font-medium truncate group-hover:text-accent transition-colors">{pl.name}</p>
-                    <p className="text-xs text-muted-foreground truncate">{pl.track_count} tracks{pl.owner_display_name && !pl.is_owned_by_user ? ` · ${pl.owner_display_name}` : ""}</p>
-                  </Link>
-                ))}
-              </HorizontalRow>
-            )}
+            {/* Saved playlists hidden: Spotify Development Mode blocks reading playlist tracks (403).
+                Liked Songs, Saved Albums and Followed Artists are used as AI material instead. */}
+
 
             {/* Followed Artists — horizontal scroll */}
             {followedArtists.length > 0 && (
