@@ -144,14 +144,17 @@ async function delay(ms: number) {
 
 async function spotifyGet(url: string, token: string, attempt = 0) {
   const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-  if (res.status === 429 && attempt < 5) {
+  if (res.status === 429 && attempt < 1) {
     const retryAfter = Number(res.headers.get("Retry-After"));
     const retryMs = Number.isFinite(retryAfter) && retryAfter > 0
-      ? Math.min(retryAfter * 1000, 15_000)
-      : Math.min(1000 * 2 ** attempt, 10_000);
+      ? Math.min(retryAfter * 1000, 5_000)
+      : 2_000;
     console.warn("[spotify-import-tracks] Spotify rate limit hit, retrying", { attempt: attempt + 1, retryMs, url });
     await delay(retryMs);
     return spotifyGet(url, token, attempt + 1);
+  }
+  if (res.status === 429) {
+    throw new SpotifyImportError("spotify_rate_limited", "Spotify rate limited, try again shortly", 429, { url });
   }
   if (!res.ok) {
     const body = parseJsonText(await res.text());
