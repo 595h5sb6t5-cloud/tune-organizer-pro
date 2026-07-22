@@ -71,6 +71,10 @@ export interface SyncMetadata {
   lastAlbumSyncAt: string | null;
 }
 
+type UseSpotifyLibraryOptions = {
+  loadAllLikedSongs?: boolean;
+};
+
 const INITIAL_STAGES: SyncStageState[] = [
   { stage: "profile", label: "Reading Spotify profile", status: "pending" },
   { stage: "liked_songs", label: "Liked songs", status: "pending" },
@@ -180,7 +184,8 @@ function isActiveRun(run: any | null) {
   return !!run && ["pending", "running", "waiting_rate_limit"].includes(String(run.status));
 }
 
-export function useSpotifyLibrary() {
+export function useSpotifyLibrary(options: UseSpotifyLibraryOptions = {}) {
+  const { loadAllLikedSongs = false } = options;
   const { user, profile } = useAuth();
   const spotifyConnected = profile?.spotify_connected ?? false;
 
@@ -262,16 +267,30 @@ export function useSpotifyLibrary() {
       .eq("is_active", true)
       .eq("is_available", true);
     setLikedCount(countRes.count ?? 0);
-    const all = await fetchAllRows<LikedSong>(
-      "liked_songs",
-      "id, spotify_track_id, track_name, artist_name, album_name, image_url, added_at",
-      user.id,
-      "added_at",
-      false,
-      (query) => query.eq("is_active", true).eq("is_available", true),
-    );
-    setLikedSongs(all);
-  }, [user]);
+    if (loadAllLikedSongs) {
+      const all = await fetchAllRows<LikedSong>(
+        "liked_songs",
+        "id, spotify_track_id, track_name, artist_name, album_name, image_url, added_at",
+        user.id,
+        "added_at",
+        false,
+        (query) => query.eq("is_active", true).eq("is_available", true),
+      );
+      setLikedSongs(all);
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("liked_songs")
+      .select("id, spotify_track_id, track_name, artist_name, album_name, image_url, added_at")
+      .eq("user_id", user.id)
+      .eq("is_active", true)
+      .eq("is_available", true)
+      .order("added_at", { ascending: false })
+      .limit(4);
+    if (error) throw error;
+    setLikedSongs((data || []) as LikedSong[]);
+  }, [user, loadAllLikedSongs]);
 
   const refreshPlaylists = useCallback(async () => {
     if (!user) return;
@@ -321,8 +340,8 @@ export function useSpotifyLibrary() {
       setAlbumCount(0);
       return;
     }
-    await Promise.all([refreshLiked(), refreshPlaylists(), refreshArtists(), refreshAlbums(), loadSyncMeta()]);
-  }, [user, spotifyConnected, refreshLiked, refreshPlaylists, refreshArtists, refreshAlbums, loadSyncMeta]);
+    await Promise.all([refreshLiked(), refreshArtists(), refreshAlbums(), loadSyncMeta()]);
+  }, [user, spotifyConnected, refreshLiked, refreshArtists, refreshAlbums, loadSyncMeta]);
 
   const loadRun = useCallback(async (runId?: string | null) => {
     if (!user || !spotifyConnected) return null;
