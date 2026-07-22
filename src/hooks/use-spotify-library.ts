@@ -146,12 +146,16 @@ function stageStatus(status: string): StageStatus {
 }
 
 function stageDetail(row: any): string | undefined {
-  if (row.error_message) return String(row.error_message);
+  const status = String(row.status || "pending");
+  if (row.error_message) {
+    if (status === "waiting_rate_limit" || String(row.error_message).toLowerCase().includes("rate limit")) return "Rate limited";
+    return "Failed";
+  }
   const processed = Number(row.items_processed ?? 0);
   const found = Number(row.items_found ?? 0);
   const created = Number(row.items_created ?? 0);
   const removed = Number(row.items_removed_or_deactivated ?? 0);
-  if (row.status === "running" && found > 0) return `${processed} / ${found}`;
+  if (status === "running" && found > 0) return `${processed} / ${found}`;
   const parts: string[] = [];
   if (processed > 0 || found > 0) parts.push(found > 0 ? `${processed}/${found}` : `${processed}`);
   if (created > 0) parts.push(`+${created}`);
@@ -159,6 +163,11 @@ function stageDetail(row: any): string | undefined {
   const pendingAi = Number(row.meta?.pending_ai_analysis ?? 0);
   if (pendingAi > 0) parts.push(`${pendingAi} pending AI`);
   return parts.length ? parts.join(" · ") : undefined;
+}
+
+function stageFullMessage(row: any): string | undefined {
+  if (!row?.error_message) return undefined;
+  return String(row.error_message);
 }
 
 function mapStages(rows: any[] | null | undefined): SyncStageState[] {
