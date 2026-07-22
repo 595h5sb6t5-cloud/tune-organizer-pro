@@ -73,7 +73,7 @@ const RESPONSE_SCHEMA = {
       "main_mood", "secondary_moods_v2", "sound_texture",
       "instrumentation_summary", "best_contexts_v2",
       "compatible_playlist_types", "transition_in", "transition_out",
-      "analysis_confidence",
+      "language", "analysis_confidence",
     ],
     properties: {
       main_genre: { type: "string" },
@@ -91,8 +91,14 @@ const RESPONSE_SCHEMA = {
       compatible_playlist_types: { type: "array", items: { type: "string" } },
       transition_in: { type: "string" },
       transition_out: { type: "string" },
+      language: {
+        type: "string",
+        enum: ["English", "Spanish", "Portuguese", "Italian", "French", "Instrumental", "Other"],
+        description: "Primary lyric language. Use 'Instrumental' when there are no meaningful lyrics. Use 'Other' for any language not listed.",
+      },
       analysis_confidence: NUM,
     },
+
   },
 };
 
