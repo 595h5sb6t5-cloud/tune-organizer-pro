@@ -13,16 +13,22 @@ No debes agregar canciones nuevas.
 
 Analiza: ambiente general, energía, tempo, tipo de beat, instrumentos, melodía, tono, emoción, agresividad, suavidad, cambios entre canciones, orden de reproducción, coherencia del nombre y descripción, canciones fuera de lugar, canciones demasiado parecidas repetitivas, canciones que quedarían mejor en otra playlist.
 
-No apruebes solo porque comparten género. Una buena playlist tiene identidad clara: mismo ambiente aunque cambien artistas, años, idiomas o géneros.
+No apruebes solo porque comparten género. Una buena playlist tiene identidad clara: mismo ambiente aunque cambien artistas, años o géneros.
+
+Regla de idioma (obligatoria):
+- Inglés se agrupa solo con inglés.
+- Español, portugués, italiano y francés (idiomas romances) pueden convivir en la misma playlist.
+- Instrumental es neutral y puede ir con cualquier grupo.
+- Nunca mezcles inglés con idiomas romances en la misma playlist. Si detectas esa mezcla, marca las canciones fuera de idioma como songs_to_remove o considera should_split.
 
 Revisa especialmente:
 - Una canción lenta no debe romper una sección intensa.
 - Una canción alegre no debe aparecer de golpe en un ambiente oscuro.
 - Rap melódico no se mezcla sin razón con rap agresivo y seco.
 - Rock suave no se mezcla con rock pesado solo por ser rock.
-- Español no se agrupa solo por idioma.
 - Antiguo no se agrupa solo por década.
 - Los cambios de energía deben ser suaves o intencionales.
+
 
 Si una canción no encaja, elimínala y explica por qué.
 Si el orden no funciona, cambia posiciones.
