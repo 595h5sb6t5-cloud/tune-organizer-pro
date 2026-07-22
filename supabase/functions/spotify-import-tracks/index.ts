@@ -1493,7 +1493,7 @@ Deno.serve(async (req) => {
         message: rateLimitMessage,
         step: e.step,
         spotify_status: e.status,
-        retry_after_seconds: 180,
+        retry_after_seconds: Number(e.details.retry_after_seconds ?? 180),
       });
     }
 
