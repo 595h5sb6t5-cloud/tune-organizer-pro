@@ -157,40 +157,61 @@ Deno.serve(async (req) => {
     try { review = JSON.parse(raw); } catch { review = { error: "Invalid JSON from model", raw }; }
 
     let applied: any = null;
-    if (apply && review && !review.error) {
-      const bySid = new Map(trackList.map((t) => [t.spotify_track_id, t]));
-      // Remove songs
+    let disbanded = false;
+    if (review && !review.error) {
+      const total = trackList.length;
       const removeSids: string[] = (review.songs_to_remove ?? []).map((r: any) => r.spotify_track_id).filter(Boolean);
-      const rowIdsToRemove = removeSids.map((s) => bySid.get(s)?.id).filter(Boolean) as string[];
-      if (rowIdsToRemove.length) {
-        await supabase.from("generated_playlist_tracks").delete().in("id", rowIdsToRemove);
-      }
+      const removeRatio = total > 0 ? removeSids.length / total : 0;
+      const remaining = total - removeSids.length;
 
-      // Reorder using final_playlist.tracks
-      const finalSids: string[] = review.final_playlist?.tracks ?? [];
-      const seen = new Set<string>();
-      const orderedSids = finalSids.filter((s) => bySid.has(s) && !removeSids.includes(s) && !seen.has(s) && seen.add(s));
-      // Append leftovers not mentioned
-      for (const t of trackList) {
-        if (!t.spotify_track_id) continue;
-        if (removeSids.includes(t.spotify_track_id)) continue;
-        if (!seen.has(t.spotify_track_id)) { orderedSids.push(t.spotify_track_id); seen.add(t.spotify_track_id); }
-      }
-      const updates = orderedSids.map((sid, idx) => ({ id: bySid.get(sid)!.id, position: idx + 1 }));
-      for (const u of updates) {
-        await supabase.from("generated_playlist_tracks").update({ position: u.position }).eq("id", u.id);
-      }
+      // Disband rule: if reviewer wants to remove >25% or leftover is under min, kill the playlist.
+      if (removeRatio > MAX_REMOVE_RATIO || remaining < MIN_KEEP) {
+        disbanded = true;
+        review.approved = false;
+        review.disband_recommended = true;
+        review.disband_reason = removeRatio > MAX_REMOVE_RATIO
+          ? `Reviewer flagged ${(removeRatio * 100).toFixed(0)}% of tracks — cluster too weak`
+          : `Only ${remaining} tracks would remain (min ${MIN_KEEP})`;
 
-      // Update name/description if provided
-      const newName = review.final_playlist?.playlist_name?.trim();
-      const newDesc = review.final_playlist?.description?.trim();
-      const patch: any = {};
-      if (newName && newName !== pl.name) patch.name = newName;
-      if (newDesc && newDesc !== pl.description) patch.description = newDesc;
-      if (Object.keys(patch).length) await supabase.from("generated_playlists").update(patch).eq("id", playlistId);
-
-      applied = { removed: rowIdsToRemove.length, reordered: updates.length, renamed: !!patch.name, redescribed: !!patch.description };
+        if (apply) {
+          // Return tracks to unassigned pool and delete the playlist
+          const rowsUn = trackList
+            .filter((t) => t.spotify_track_id)
+            .map((t) => ({ user_id: userId, spotify_track_id: t.spotify_track_id!, reason: "review_disbanded" }));
+          if (rowsUn.length) {
+            await supabase.from("unassigned_tracks").upsert(rowsUn, { onConflict: "user_id,spotify_track_id" });
+          }
+          await supabase.from("generated_playlists").delete().eq("id", playlistId);
+          applied = { disbanded: true, returned_to_unassigned: rowsUn.length };
+        }
+      } else if (apply) {
+        const bySid = new Map(trackList.map((t) => [t.spotify_track_id, t]));
+        const rowIdsToRemove = removeSids.map((s) => bySid.get(s)?.id).filter(Boolean) as string[];
+        if (rowIdsToRemove.length) {
+          await supabase.from("generated_playlist_tracks").delete().in("id", rowIdsToRemove);
+        }
+        const finalSids: string[] = review.final_playlist?.tracks ?? [];
+        const seen = new Set<string>();
+        const orderedSids = finalSids.filter((s) => bySid.has(s) && !removeSids.includes(s) && !seen.has(s) && seen.add(s));
+        for (const t of trackList) {
+          if (!t.spotify_track_id) continue;
+          if (removeSids.includes(t.spotify_track_id)) continue;
+          if (!seen.has(t.spotify_track_id)) { orderedSids.push(t.spotify_track_id); seen.add(t.spotify_track_id); }
+        }
+        const updates = orderedSids.map((sid, idx) => ({ id: bySid.get(sid)!.id, position: idx + 1 }));
+        for (const u of updates) {
+          await supabase.from("generated_playlist_tracks").update({ position: u.position }).eq("id", u.id);
+        }
+        const newName = review.final_playlist?.playlist_name?.trim();
+        const newDesc = review.final_playlist?.description?.trim();
+        const patch: any = {};
+        if (newName && newName !== pl.name) patch.name = newName;
+        if (newDesc && newDesc !== pl.description) patch.description = newDesc;
+        if (Object.keys(patch).length) await supabase.from("generated_playlists").update(patch).eq("id", playlistId);
+        applied = { removed: rowIdsToRemove.length, reordered: updates.length, renamed: !!patch.name, redescribed: !!patch.description };
+      }
     }
+
 
     return new Response(JSON.stringify({ review, applied }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
