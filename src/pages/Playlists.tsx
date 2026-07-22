@@ -374,7 +374,16 @@ function Phase1DiagnosticPanel() {
   const processed = analyzedIds.size;
   const failed = permanentlyFailed.size;
   const pending = Math.max(0, sampleSize - processed - failed);
-  const complete = sample != null && processed + failed >= sampleSize;
+  const complete = sample != null && sampleSize > 0 && processed >= sampleSize;
+  // State machine: pending | running | partially_completed | completed | failed
+  const status: "pending" | "running" | "partially_completed" | "completed" | "failed" =
+    !sample ? "pending"
+    : analyzing ? "running"
+    : processed >= sampleSize && failed === 0 ? "completed"
+    : processed === 0 && failed > 0 ? "failed"
+    : processed > 0 && processed + failed >= sampleSize ? "partially_completed"
+    : "pending";
+  const phase2Unlocked = status === "completed";
 
   // Load latest persisted sample on mount so refreshing the page doesn't lose progress.
   useEffect(() => {
