@@ -384,7 +384,7 @@ export function useSpotifyLibrary() {
           ? `${added} nuevas · ${removed} removidas · ${total} liked songs`
           : `${added} nuevas · ${total} liked songs`;
         update(message, total, total);
-        setStage("liked_songs", "done", `${added} new · ${total} total`);
+        setStage("liked_songs", "done", `${added} new`);
         await refreshLiked();
       });
       if (abortRef.current) return;
