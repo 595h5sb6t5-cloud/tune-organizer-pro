@@ -825,7 +825,14 @@ function Phase2ReportPanel() {
       const { data, error } = await supabase.functions.invoke("phase2-guard", { body: {} });
       if (error) throw new Error(error.message);
       if (data?.blocked) {
-        toast.error("Fase 2 bloqueada", { description: JSON.stringify(data.blocked).slice(0, 200) });
+        const b = data.blocked;
+        const parts: string[] = [];
+        if (b?.missing_analysis?.count) parts.push(`${b.missing_analysis.count} sin v3.0 válido`);
+        if (b?.missing_core_fields?.count) parts.push(`${b.missing_core_fields.count} sin campos core`);
+        if (b?.missing_house_profile?.count) parts.push(`${b.missing_house_profile.count} house sin profile`);
+        if (b?.errored?.count) parts.push(`${b.errored.count} con error`);
+        if (b?.already_running) parts.push("otro job ya corriendo");
+        toast.error("Fase 2 bloqueada", { description: parts.join(" · ") || "Revisa Fase 1" });
       } else if (data?.skipped) {
         toast.info("Sin cambios", { description: data.skipped });
       } else {
