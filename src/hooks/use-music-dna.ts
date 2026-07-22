@@ -21,6 +21,8 @@ interface AnalyzedTrack {
   energy: number | null;
   valence: number | null;
   tempo: number | null;
+  tempoFeel?: string | null;
+  danceFeel?: number | null;
   mood: string | null;
   energy_label: string | null;
   genres: string[];
@@ -70,6 +72,38 @@ function topN<T>(map: Map<string, number>, n: number): { name: string; count: nu
     .map(([name, count]) => ({ name, count, pct: Math.round((count / total) * 100) }));
 }
 
+function addWeighted(map: Map<string, number>, value: unknown, weight = 1) {
+  if (typeof value !== "string") return;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return;
+  map.set(normalized, (map.get(normalized) ?? 0) + weight);
+}
+
+function addArrayWeighted(map: Map<string, number>, values: unknown, weight = 1) {
+  if (!Array.isArray(values)) return;
+  for (const value of values) addWeighted(map, value, weight);
+}
+
+function brightnessFromAnalysis(row: any): number | null {
+  if (typeof row?.darkness === "number" || typeof row?.dance_feel === "number" || typeof row?.softness === "number") {
+    const darkness = typeof row.darkness === "number" ? row.darkness : 0.45;
+    const dance = typeof row.dance_feel === "number" ? row.dance_feel : 0.5;
+    const softness = typeof row.softness === "number" ? row.softness : 0.5;
+    return Math.max(0, Math.min(1, (1 - darkness) * 0.65 + dance * 0.25 + softness * 0.1));
+  }
+  return null;
+}
+
+function tempoFromFeel(value: unknown): number | null {
+  if (typeof value !== "string") return null;
+  const feel = value.toLowerCase();
+  if (feel.includes("slow")) return 78;
+  if (feel.includes("mid")) return 104;
+  if (feel.includes("upbeat")) return 126;
+  if (feel.includes("fast")) return 142;
+  return null;
+}
+
 export function useMusicDna(): MusicDna & { refresh: () => Promise<void> } {
   const { user } = useAuth();
   const [state, setState] = useState<MusicDna>({
@@ -106,7 +140,12 @@ export function useMusicDna(): MusicDna & { refresh: () => Promise<void> } {
       supabase.from("spotify_followed_artists").select("id", { count: "exact", head: true }).eq("user_id", user.id),
       supabase.from("spotify_saved_albums").select("id", { count: "exact", head: true }).eq("user_id", user.id),
       supabase.from("spotify_followed_artists").select("artist_name,image_url,genres,popularity").eq("user_id", user.id).order("popularity", { ascending: false }).limit(12),
-      supabase.from("ai_track_analysis").select("language,vibe_tags,moods,best_contexts").eq("user_id", user.id).limit(2000),
+      supabase
+        .from("ai_track_analysis")
+        .select("spotify_track_id,analysis_version,main_genre,secondary_genres_v2,primary_genre,secondary_genres,main_mood,secondary_moods_v2,moods,sound_texture,tempo_feel,beat_style,energy_score,dance_feel,darkness,softness,bass_level,drum_intensity,vocal_intensity,melody_level,emotional_intensity,best_contexts_v2,best_contexts,compatible_playlist_types,language")
+        .eq("user_id", user.id)
+        .order("updated_at", { ascending: false })
+        .limit(5000),
     ]);
 
     const moodMap = new Map<string, number>();
@@ -116,7 +155,10 @@ export function useMusicDna(): MusicDna & { refresh: () => Promise<void> } {
     const langMap = new Map<string, number>();
 
     let energySum = 0, valenceSum = 0, tempoSum = 0, audioCount = 0;
+    let analysisEnergySum = 0, analysisValenceSum = 0, analysisTempoSum = 0, analysisCount = 0, analysisTempoCount = 0;
+    let danceSum = 0, darknessSum = 0, softnessSum = 0, bassSum = 0, drumsSum = 0, emotionSum = 0;
     let calm = 0, energetic = 0;
+    const analysisBySpotifyId = new Map<string, any>();
 
     for (const t of liked) {
       if (typeof t.audio_energy === "number") {
@@ -142,25 +184,68 @@ export function useMusicDna(): MusicDna & { refresh: () => Promise<void> } {
     }
 
     for (const a of analysisRes.data ?? []) {
-      if (a.language) langMap.set(a.language, (langMap.get(a.language) ?? 0) + 1);
-      for (const v of (a.vibe_tags ?? []) as string[]) vibeMap.set(v, (vibeMap.get(v) ?? 0) + 1);
-      for (const m of (a.moods ?? []) as string[]) moodMap.set(m, (moodMap.get(m) ?? 0) + 1);
-      for (const c of (a.best_contexts ?? []) as string[]) ctxMap.set(c, (ctxMap.get(c) ?? 0) + 1);
+      const row = a as any;
+      if (row.spotify_track_id && (!analysisBySpotifyId.has(row.spotify_track_id) || row.analysis_version === "v2")) {
+        analysisBySpotifyId.set(row.spotify_track_id, row);
+      }
+
+      addWeighted(genreMap, row.main_genre, 2);
+      addArrayWeighted(genreMap, row.secondary_genres_v2, 1);
+      addWeighted(genreMap, row.primary_genre, 1);
+      addArrayWeighted(genreMap, row.secondary_genres, 1);
+
+      addWeighted(moodMap, row.main_mood, 2);
+      addArrayWeighted(moodMap, row.secondary_moods_v2, 1);
+      addArrayWeighted(moodMap, row.moods, 1);
+
+      addWeighted(vibeMap, row.sound_texture, 2);
+      addWeighted(vibeMap, row.tempo_feel, 1);
+      addWeighted(vibeMap, row.beat_style, 1);
+      addArrayWeighted(vibeMap, row.compatible_playlist_types, 1);
+
+      addArrayWeighted(ctxMap, row.best_contexts_v2, 1);
+      addArrayWeighted(ctxMap, row.best_contexts, 1);
+      if (row.language) langMap.set(row.language, (langMap.get(row.language) ?? 0) + 1);
+
+      if (typeof row.energy_score === "number") {
+        analysisEnergySum += row.energy_score;
+        analysisCount++;
+        if (row.energy_score < 0.5) calm++; else energetic++;
+      }
+      const brightness = brightnessFromAnalysis(row);
+      if (brightness != null) analysisValenceSum += brightness;
+      const inferredTempo = tempoFromFeel(row.tempo_feel);
+      if (inferredTempo != null) {
+        analysisTempoSum += inferredTempo;
+        analysisTempoCount++;
+      }
+      if (typeof row.dance_feel === "number") danceSum += row.dance_feel;
+      if (typeof row.darkness === "number") darknessSum += row.darkness;
+      if (typeof row.softness === "number") softnessSum += row.softness;
+      if (typeof row.bass_level === "number") bassSum += row.bass_level;
+      if (typeof row.drum_intensity === "number") drumsSum += row.drum_intensity;
+      if (typeof row.emotional_intensity === "number") emotionSum += row.emotional_intensity;
     }
 
-    const avgEnergy = audioCount ? energySum / audioCount : 0;
-    const avgValence = audioCount ? valenceSum / audioCount : 0;
-    const avgTempo = audioCount ? tempoSum / audioCount : 0;
+    const avgEnergy = analysisCount ? analysisEnergySum / analysisCount : audioCount ? energySum / audioCount : 0;
+    const avgValence = analysisCount ? analysisValenceSum / analysisCount : audioCount ? valenceSum / audioCount : 0;
+    const avgTempo = analysisTempoCount ? analysisTempoSum / analysisTempoCount : audioCount ? tempoSum / audioCount : 0;
     const totalCE = calm + energetic || 1;
 
     // Build analyzed track set for concept matching
     const analyzed: AnalyzedTrack[] = liked.map(t => ({
-      energy: typeof t.audio_energy === "number" ? t.audio_energy : null,
-      valence: typeof t.audio_valence === "number" ? t.audio_valence : null,
-      tempo: typeof t.audio_tempo === "number" ? t.audio_tempo : null,
-      mood: t.mood ?? null,
+      energy: typeof analysisBySpotifyId.get(t.spotify_track_id)?.energy_score === "number" ? analysisBySpotifyId.get(t.spotify_track_id).energy_score : typeof t.audio_energy === "number" ? t.audio_energy : null,
+      valence: brightnessFromAnalysis(analysisBySpotifyId.get(t.spotify_track_id)) ?? (typeof t.audio_valence === "number" ? t.audio_valence : null),
+      tempo: tempoFromFeel(analysisBySpotifyId.get(t.spotify_track_id)?.tempo_feel) ?? (typeof t.audio_tempo === "number" ? t.audio_tempo : null),
+      tempoFeel: analysisBySpotifyId.get(t.spotify_track_id)?.tempo_feel ?? null,
+      danceFeel: analysisBySpotifyId.get(t.spotify_track_id)?.dance_feel ?? null,
+      mood: analysisBySpotifyId.get(t.spotify_track_id)?.main_mood ?? t.mood ?? null,
       energy_label: t.energy ?? null,
-      genres: ((t.genre_tags ?? []) as string[]).map(g => g.toLowerCase()),
+      genres: [
+        ...((t.genre_tags ?? []) as string[]),
+        analysisBySpotifyId.get(t.spotify_track_id)?.main_genre,
+        ...((analysisBySpotifyId.get(t.spotify_track_id)?.secondary_genres_v2 ?? []) as string[]),
+      ].filter(Boolean).map(g => String(g).toLowerCase()),
     }));
 
     const suggestions = CONCEPTS.map(c => {
@@ -175,10 +260,21 @@ export function useMusicDna(): MusicDna & { refresh: () => Promise<void> } {
     const topMoodsArr = topN(moodMap, 6);
 
     const patterns: string[] = [];
+    const avgDance = analysisCount ? danceSum / analysisCount : 0;
+    const avgDarkness = analysisCount ? darknessSum / analysisCount : 0;
+    const avgSoftness = analysisCount ? softnessSum / analysisCount : 0;
+    const avgBass = analysisCount ? bassSum / analysisCount : 0;
+    const avgDrums = analysisCount ? drumsSum / analysisCount : 0;
+    const avgEmotion = analysisCount ? emotionSum / analysisCount : 0;
+
     if (avgEnergy > 0.65) patterns.push("Tu biblioteca se inclina hacia tracks de alta energía.");
     if (avgEnergy > 0 && avgEnergy < 0.4) patterns.push("Predominan canciones tranquilas e introspectivas.");
-    if (avgValence > 0.6) patterns.push("Tienes un sesgo claro hacia sonidos luminosos y positivos.");
-    if (avgValence > 0 && avgValence < 0.35) patterns.push("Hay una corriente melancólica recurrente en tus likes.");
+    if (avgValence > 0.6) patterns.push("Tienes un sesgo claro hacia sonidos luminosos y abiertos.");
+    if (avgDarkness > 0.55) patterns.push("Hay una corriente oscura y nocturna recurrente en tus likes.");
+    if (avgSoftness > 0.62) patterns.push("Tu biblioteca favorece texturas suaves y envolventes.");
+    if (avgBass > 0.62 || avgDrums > 0.62) patterns.push("El groove pesa mucho: bajo y percusión aparecen como señales fuertes.");
+    if (avgDance > 0.65) patterns.push("Tu música tiende a moverse: hay un pulso bailable constante.");
+    if (avgEmotion > 0.65) patterns.push("Buscas canciones con carga emocional marcada, no solo canciones de fondo.");
     if (avgTempo > 120) patterns.push("Tempo promedio alto: te mueves con ritmos rápidos.");
     if (topGenresArr.length && topGenresArr[0].pct > 25) patterns.push(`${topGenresArr[0].name} es tu ancla principal.`);
     if (calm > energetic * 1.5) patterns.push("Buscas refugio: priorizas música tranquila sobre la enérgica.");
@@ -191,7 +287,7 @@ export function useMusicDna(): MusicDna & { refresh: () => Promise<void> } {
         playlists: plCount ?? 0,
         artists: artistsCount ?? 0,
         albums: albumsCount ?? 0,
-        analyzed: audioCount,
+        analyzed: analysisCount || audioCount,
       },
       avgEnergy, avgValence, avgTempo,
       calmVsEnergetic: { calm: Math.round((calm / totalCE) * 100), energetic: Math.round((energetic / totalCE) * 100) },
