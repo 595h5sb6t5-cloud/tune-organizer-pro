@@ -814,6 +814,11 @@ function Phase2ReportPanel() {
   const sampleComplete = row ? sampleAnalyzed >= row.size : false;
 
   const triggerGuard = async () => {
+    if (!row) return;
+    if (status === "completed_awaiting_review" || status === "approved_for_rollout") {
+      toast.success("Fase 2 ya está completa", { description: "El reporte de esta muestra ya está listo para revisar." });
+      return;
+    }
     if (!sampleComplete) {
       toast.error("Fase 2 bloqueada", {
         description: `La muestra aún no está completa (${sampleAnalyzed}/${row?.size}). Termina Fase 1 primero.`,
@@ -822,7 +827,7 @@ function Phase2ReportPanel() {
     }
     setRunning(true);
     try {
-      const { data, error } = await supabase.functions.invoke("phase2-guard", { body: {} });
+      const { data, error } = await supabase.functions.invoke("phase2-guard", { body: { sample_id: row.id } });
       if (error) throw new Error(error.message);
       if (data?.blocked) {
         const b = data.blocked;
@@ -898,10 +903,10 @@ function Phase2ReportPanel() {
             variant="outline"
             size="sm"
             onClick={triggerGuard}
-            disabled={running || status === "running" || !sampleComplete}
+            disabled={running || status === "running" || !sampleComplete || status === "completed_awaiting_review" || status === "approved_for_rollout"}
           >
             {running ? <Loader2 className="w-3 h-3 mr-2 animate-spin" /> : <Sparkles className="w-3 h-3 mr-2" />}
-            Disparar Fase 2 ahora
+            {status === "completed_awaiting_review" || status === "approved_for_rollout" ? "Fase 2 completa" : "Disparar Fase 2 ahora"}
           </Button>
         </div>
       </div>
