@@ -365,6 +365,18 @@ async function syncLikedSongs(
     }
 
     offset += 50;
+    if (offset === 50 || offset % 250 === 0 || offset >= total) {
+      await updateSyncStageProgress(adminClient, syncRunId, "liked_songs", {
+        items_found: Number.isFinite(total) ? total : spotifyLikedIds.size,
+        items_processed: Math.min(offset, Number.isFinite(total) ? total : offset),
+        meta: {
+          spotify_total_raw: Number.isFinite(total) ? total : null,
+          visible_collected: spotifyLikedIds.size,
+          hidden_or_unavailable: hiddenOrUnavailable,
+          mode: isFullSync ? "full" : "incremental",
+        },
+      });
+    }
     if (offset % 500 === 0) {
       console.log(`[spotify-import-tracks] liked songs: ${offset}/${total}, visible: ${spotifyLikedIds.size}, hidden: ${hiddenOrUnavailable}`);
     }
