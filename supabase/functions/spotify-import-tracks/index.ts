@@ -175,7 +175,9 @@ type TrackRow = {
 function extractTrack(item: any, userId: string): TrackRow | null {
   const track = item?.track;
   if (!track || typeof track.id !== "string") return null;
-  if (track.is_local === true || track.is_playable === false) return null;
+  // Only skip true local files. Do NOT filter by `is_playable` — it depends on
+  // market and is inconsistent between requests, causing tracks to drift in/out.
+  if (track.is_local === true) return null;
   const artists = Array.isArray(track.artists) ? track.artists.map((a: any) => a?.name).filter(Boolean).join(", ") : "";
   const album = track.album;
   const images = album?.images || [];
@@ -275,7 +277,9 @@ async function syncLikedSongs(
   let consecutiveKnown = 0;
   let earlyStopped = false;
   const KNOWN_THRESHOLD = 100;
-  const marketParam = userMarket ? `&market=${encodeURIComponent(userMarket)}` : "";
+  // Do NOT pass market for liked songs — Spotify's own UI count doesn't apply market
+  // filtering, and using it makes tracks flicker in/out between syncs.
+  const marketParam = "";
 
   while (offset < total) {
     const data = await spotifyGet(`https://api.spotify.com/v1/me/tracks?limit=50&offset=${offset}${marketParam}`, token);
