@@ -10,7 +10,7 @@ const PHASE_CONFIG: Record<AnalysisPhase, { icon: React.ElementType; label: stri
   defining_worlds: { icon: Globe, label: "Discovering Worlds", description: "Finding sonic patterns across your playlists, albums, and artists…" },
   assigning: { icon: ListMusic, label: "Building Playlists", description: "Assigning every song to its best sonic world using deep compatibility checks…" },
   saving: { icon: ListMusic, label: "Saving Playlists", description: "Persisting your curated playlists with covers, metadata, and track order…" },
-  validating: { icon: CheckCircle, label: "Final Quality Check", description: "Running coherence, outlier, and language-trap detection on every playlist…" },
+  validating: { icon: CheckCircle, label: "Final Quality Check", description: "Running coherence, outlier, and language-family checks on every playlist…" },
   done: { icon: CheckCircle, label: "Complete!", description: "Your playlists are ready." },
 };
 
