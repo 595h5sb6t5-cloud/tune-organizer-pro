@@ -51,10 +51,10 @@ Entrega SOLAMENTE JSON válido con esta forma exacta:
     "tracks": ["spotify_track_id_en_orden_final", "..."]
   }
 }
-Todos los scores entre 0 y 1. approved=true SOLO si coherence_score >= 0.85. No escribas nada fuera del JSON.`;
+Todos los scores entre 0 y 1. approved=true SOLO si coherence_score >= 0.86, name_score >= 0.80, ordering_score >= 0.80 y ninguna canción con fit menor a 0.74. No escribas nada fuera del JSON.`;
 
-const MIN_KEEP = 8;
-const MAX_REMOVE_RATIO = 0.25;
+const MIN_KEEP = 10;
+const MAX_REMOVE_RATIO = 0.20;
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });

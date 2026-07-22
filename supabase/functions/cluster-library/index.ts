@@ -12,15 +12,15 @@ const corsHeaders = {
 const json = (b: unknown, s = 200) =>
   new Response(JSON.stringify(b), { status: s, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
-// ---------- Tunables ----------
-const MIN_SIZE = 12;
-const RELAX_MIN_SIZE = 8;
-const RELAX_AVG = 0.88;
-const RELAX_MIN = 0.80;
-const AVG_COMPAT_MIN = 0.82;
-const MIN_COMPAT_FLOOR = 0.72;
-const SEED_JOIN_THRESHOLD = 0.84;   // to join an existing cluster
-const MAX_DIM_SPREAD = 0.38;        // per-dim max - min tolerance
+// ---------- Tunables (Master Prompt v4) ----------
+// Hard rule: never publish a playlist with fewer than 10 tracks.
+const MIN_SIZE = 10;
+const AVG_COMPAT_MIN = 0.84;        // average compat inside cluster
+const MIN_COMPAT_FLOOR = 0.74;      // no single track below this
+const PCT_ABOVE_STRONG = 0.80;      // at least 80% of tracks above STRONG_FIT
+const STRONG_FIT = 0.82;
+const SEED_JOIN_THRESHOLD = 0.86;   // stricter join to protect sonic identity
+const MAX_DIM_SPREAD = 0.32;        // tighter per-dim spread
 // Weights for numeric sonic dims (must sum roughly, we normalize).
 const NUMERIC_WEIGHTS: Record<string, number> = {
   energy_score: 1.3,
@@ -283,15 +283,14 @@ Deno.serve(async (req) => {
         const avg = compats.reduce((a, b) => a + b, 0) / compats.length;
         const mn = Math.min(...compats);
 
-        // Validate
+        // Validate against master-prompt quality gates
+        const pctStrong = compats.filter((c) => c >= STRONG_FIT).length / compats.length;
         let ok = true;
         let reason: string | undefined;
-        if (avg < AVG_COMPAT_MIN) { ok = false; reason = `avg_compat ${avg.toFixed(2)} < ${AVG_COMPAT_MIN}`; }
+        if (members.length < MIN_SIZE) { ok = false; reason = `size ${members.length} < ${MIN_SIZE}`; }
+        else if (avg < AVG_COMPAT_MIN) { ok = false; reason = `avg_compat ${avg.toFixed(2)} < ${AVG_COMPAT_MIN}`; }
         else if (mn < MIN_COMPAT_FLOOR) { ok = false; reason = `min_compat ${mn.toFixed(2)} < ${MIN_COMPAT_FLOOR}`; }
-        else if (members.length < RELAX_MIN_SIZE) { ok = false; reason = `size ${members.length} < ${RELAX_MIN_SIZE}`; }
-        else if (members.length < MIN_SIZE && (avg < RELAX_AVG || mn < RELAX_MIN)) {
-          ok = false; reason = `size ${members.length} needs avg>=${RELAX_AVG} & min>=${RELAX_MIN}`;
-        }
+        else if (pctStrong < PCT_ABOVE_STRONG) { ok = false; reason = `only ${(pctStrong * 100).toFixed(0)}% of tracks >= ${STRONG_FIT} (need ${PCT_ABOVE_STRONG * 100}%)`; }
 
         if (ok) {
           clusters.push({
@@ -390,7 +389,7 @@ Deno.serve(async (req) => {
         clustered_tracks: clusters.reduce((a, c) => a + c.members.length, 0),
         unassigned: unassigned.length,
       },
-      thresholds: { MIN_SIZE, RELAX_MIN_SIZE, RELAX_AVG, RELAX_MIN, AVG_COMPAT_MIN, MIN_COMPAT_FLOOR, SEED_JOIN_THRESHOLD, MAX_DIM_SPREAD },
+      thresholds: { MIN_SIZE, AVG_COMPAT_MIN, MIN_COMPAT_FLOOR, PCT_ABOVE_STRONG, STRONG_FIT, SEED_JOIN_THRESHOLD, MAX_DIM_SPREAD },
       clusters: report,
       unassigned: unassignedReport,
     });
