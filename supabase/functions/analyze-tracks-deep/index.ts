@@ -296,7 +296,7 @@ Deno.serve(async (req) => {
     const { data: liked } = await adm
       .from("liked_songs")
       .select("id, spotify_track_id, track_name, artist_name, album_name, audio_tempo, audio_energy, audio_valence, audio_danceability, audio_acousticness, audio_instrumentalness, audio_speechiness, genre_tags, mood")
-      .eq("user_id", user.id)
+      .eq("user_id", userId)
       .order("added_at", { ascending: false })
       .limit(fetchLimit);
 
@@ -307,13 +307,13 @@ Deno.serve(async (req) => {
     const { count: totalCount } = await adm
       .from("liked_songs")
       .select("id", { count: "exact", head: true })
-      .eq("user_id", user.id);
+      .eq("user_id", userId);
 
     // Existing v2 analysis for this user (cache lookup key)
     const { data: existing } = await adm
       .from("ai_track_analysis")
       .select("spotify_track_id, prompt_version, schema_version, model_used")
-      .eq("user_id", user.id)
+      .eq("user_id", userId)
       .eq("analysis_version", ANALYSIS_VERSION);
 
     const cacheKey = (id: string) => `${id}::${PROMPT_VERSION}::${SCHEMA_VERSION}::${MODEL}`;
@@ -338,7 +338,7 @@ Deno.serve(async (req) => {
       const { count: alreadyCount } = await adm
         .from("ai_track_analysis")
         .select("id", { head: true, count: "exact" })
-        .eq("user_id", user.id);
+        .eq("user_id", userId);
       const remainingQuota = Math.max(0, planLimit - (alreadyCount ?? 0));
       effectiveBatchSize = Math.min(batchSize, remainingQuota);
       if (effectiveBatchSize === 0) {
@@ -351,7 +351,7 @@ Deno.serve(async (req) => {
 
     // Load followed artists to enrich context (in parallel with tracks lookup)
     const [{ data: followed }, { data: existingTracks }] = await Promise.all([
-      adm.from("spotify_followed_artists").select("artist_name").eq("user_id", user.id),
+      adm.from("spotify_followed_artists").select("artist_name").eq("user_id", userId),
       adm.from("tracks").select("id, spotify_track_id").in("spotify_track_id", spotifyIds),
     ]);
     const followedSet = new Set<string>((followed ?? []).map((f: any) => f.artist_name?.toLowerCase()));
@@ -410,7 +410,7 @@ Deno.serve(async (req) => {
       if (!a.ok || !a.result || !trackId) { failed++; continue; }
       const r = a.result;
       rows.push({
-        user_id: user.id,
+        user_id: userId,
         track_id: trackId,
         liked_song_id: a.song.id,
         spotify_track_id: a.song.spotify_track_id,
@@ -469,7 +469,7 @@ Deno.serve(async (req) => {
     // Optional: persist benchmark row
     if (profile && benchmarkLabel) {
       await adm.from("analysis_benchmarks").insert({
-        user_id: user.id,
+        user_id: userId,
         label: benchmarkLabel,
         model_used: MODEL,
         prompt_version: PROMPT_VERSION,
