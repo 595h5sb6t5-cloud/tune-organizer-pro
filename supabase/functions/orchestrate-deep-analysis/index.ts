@@ -163,17 +163,26 @@ async function runLoop(
     const batchMs = Date.now() - batchStart;
     batchDurationsMs.push(batchMs);
     meta.batches_completed++;
-    meta.cache_hits += data.cache_hits ?? 0;
     meta.failed_count += data.failed ?? 0;
     meta.retry_count += data.profile?.retries ?? 0;
     if (data.profile?.avg_ms_per_track != null) meta.avg_ms_per_track = data.profile.avg_ms_per_track;
 
     const analyzedNow = data.analyzed ?? 0;
-    // "items_processed" reflects TOTAL rows already covered (cache + freshly analyzed).
-    // The analyzer returns `total` = full liked_songs count.
-    // We report processed = cache_hits + freshly-analyzed-across-run.
-    processedTotal += analyzedNow + (data.cache_hits ?? 0);
     totalItems = data.total ?? totalItems;
+
+    // Real coverage from DB (source of truth) — avoids double-counting cache
+    // hits when the analyzer re-reads the same page across batches.
+    const { count: coveredCount } = await adm
+      .from("ai_track_analysis")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .eq("analysis_version", "v2")
+      .eq("prompt_version", "v2.1-2026-11")
+      .eq("schema_version", "v2.0");
+    processedTotal = coveredCount ?? processedTotal;
+    meta.cache_hits = Math.max(0, processedTotal - analyzedNow * meta.batches_completed >= 0 ? (processedTotal - (analyzedNow * meta.batches_completed)) : 0);
+    // Simpler: cache_hits = total covered - freshly analyzed this run. Track fresh across the whole run:
+    // (recomputed below)
 
     // ETA: average across the last few batches
     const recent = batchDurationsMs.slice(-5);
