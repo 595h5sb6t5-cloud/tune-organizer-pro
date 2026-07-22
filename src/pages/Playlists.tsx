@@ -670,15 +670,31 @@ function Phase1DiagnosticPanel() {
         </div>
       )}
 
-      {complete && (
+      {phase2Unlocked && (
         <div className="mt-4 rounded-2xl border border-emerald-500/40 bg-emerald-500/5 p-4 text-sm">
           <p>
             <strong>{processed}/{sampleSize}</strong> analizadas con <code>music_family</code>, <code>primary_subgenre</code>,{" "}
             <code>artist_context</code> y <code>house_profile</code> cuando aplique.
-            {failed > 0 && <> · <strong>{failed}</strong> fallidas (revisar antes de aprobar Fase 2)</>}
           </p>
           <p className="text-xs text-muted-foreground mt-1">
-            Fase 2 (clustering endurecido) ya puede correr sobre esta muestra.
+            Fase 2 (clustering endurecido) desbloqueada.
+          </p>
+        </div>
+      )}
+      {status === "partially_completed" && (
+        <div className="mt-4 rounded-2xl border border-amber-500/40 bg-amber-500/5 p-4 text-sm">
+          <p>
+            <strong>{processed}/{sampleSize}</strong> analizadas · <strong>{failed}</strong> fallidas.
+          </p>
+          <p className="text-xs text-muted-foreground mt-1">
+            Fase 2 sigue <strong>bloqueada</strong>. Resetea los fallidos y reintenta, o arma una muestra nueva.
+          </p>
+        </div>
+      )}
+      {status === "failed" && (
+        <div className="mt-4 rounded-2xl border border-destructive/40 bg-destructive/5 p-4 text-sm">
+          <p>
+            <strong>0/{sampleSize}</strong> analizadas · <strong>{failed}</strong> fallidas. Fallo compartido probable — revisa el error de arriba.
           </p>
         </div>
       )}
