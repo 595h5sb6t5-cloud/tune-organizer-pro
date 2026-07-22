@@ -326,6 +326,7 @@ function Stat({ label, value }: { label: string; value: number | string }) {
 }
 
 const V3_PROMPT_VERSION = "v3.0-2026-family-subgenre";
+const V3_ANALYSIS_VERSION = "v3";
 const SAMPLE_ANALYSIS_BATCH_SIZE = 40;
 const MAX_ATTEMPTS_PER_TRACK = 3;
 
@@ -339,22 +340,67 @@ type SampleState = {
   preview: { spotify_track_id: string; name: string | null; artist: string | null; reason: string }[];
 };
 
-async function countAnalyzedInSample(userId: string, ids: string[]): Promise<Set<string>> {
-  if (!ids.length) return new Set();
-  const done = new Set<string>();
+type SampleBreakdown = {
+  attempted: number;            // rows exist (any version) or errored
+  valid: Set<string>;           // v3 + music_family + primary_subgenre + artist_context + (house_profile when is_house_related)
+  incomplete: Set<string>;      // v3 row exists but core fields missing OR house track missing house_profile
+  errored: Set<string>;         // last_error is not null on the row (v2 or v3)
+  no_v3_row: Set<string>;       // no v3 row at all (may or may not have v2 row)
+  has_v2_only: Set<string>;     // has v2 row but no v3 row (needs re-analysis)
+  house_tracks: number;         // among valid: is_house_related=true with house_profile
+  non_house_valid: number;      // among valid: is_house_related=false (house_profile null OK)
+};
+
+async function getSampleBreakdown(userId: string, ids: string[]): Promise<SampleBreakdown> {
+  const br: SampleBreakdown = {
+    attempted: 0,
+    valid: new Set(),
+    incomplete: new Set(),
+    errored: new Set(),
+    no_v3_row: new Set(ids),
+    has_v2_only: new Set(),
+    house_tracks: 0,
+    non_house_valid: 0,
+  };
+  if (!ids.length) return br;
   const CHUNK = 200;
+  const v3Ids = new Set<string>();
+  const anyRowIds = new Set<string>();
+
   for (let i = 0; i < ids.length; i += CHUNK) {
     const slice = ids.slice(i, i + CHUNK);
     const { data } = await supabase
       .from("ai_track_analysis")
-      .select("spotify_track_id")
+      .select("spotify_track_id, analysis_version, music_family, primary_subgenre, artist_context, is_house_related, house_profile, last_error")
       .eq("user_id", userId)
-      .eq("analysis_version", "v3")
-      .eq("prompt_version", V3_PROMPT_VERSION)
       .in("spotify_track_id", slice);
-    for (const r of data ?? []) if (r.spotify_track_id) done.add(r.spotify_track_id);
+    for (const r of data ?? []) {
+      const sid = r.spotify_track_id;
+      if (!sid) continue;
+      anyRowIds.add(sid);
+      if (r.last_error) br.errored.add(sid);
+      if (r.analysis_version === V3_ANALYSIS_VERSION) {
+        v3Ids.add(sid);
+        br.no_v3_row.delete(sid);
+        const coreOk = !!(r.music_family && r.primary_subgenre && r.artist_context);
+        const houseOk = r.is_house_related === true
+          ? !!(r.house_profile && typeof r.house_profile === "object" && (r.house_profile as any).primary_house_subgenre)
+          : true; // non-house: house_profile null is valid
+        if (coreOk && houseOk) {
+          br.valid.add(sid);
+          if (r.is_house_related === true) br.house_tracks++;
+          else br.non_house_valid++;
+        } else {
+          br.incomplete.add(sid);
+        }
+      }
+    }
   }
-  return done;
+  for (const id of ids) {
+    if (!v3Ids.has(id) && anyRowIds.has(id)) br.has_v2_only.add(id);
+  }
+  br.attempted = anyRowIds.size;
+  return br;
 }
 
 function Phase1DiagnosticPanel() {
@@ -363,7 +409,7 @@ function Phase1DiagnosticPanel() {
   const [loadingExisting, setLoadingExisting] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
   const [sample, setSample] = useState<SampleState | null>(null);
-  const [analyzedIds, setAnalyzedIds] = useState<Set<string>>(new Set());
+  const [breakdown, setBreakdown] = useState<SampleBreakdown | null>(null);
   const [failedAttempts, setFailedAttempts] = useState<Record<string, number>>({});
   const [permanentlyFailed, setPermanentlyFailed] = useState<Set<string>>(new Set());
   const [currentBatch, setCurrentBatch] = useState<{ index: number; total: number } | null>(null);
@@ -371,21 +417,27 @@ function Phase1DiagnosticPanel() {
   const jobsApi = useJobs();
 
   const sampleSize = sample?.size ?? 0;
-  const processed = analyzedIds.size;
-  const failed = permanentlyFailed.size;
-  const pending = Math.max(0, sampleSize - processed - failed);
-  const complete = sample != null && sampleSize > 0 && processed >= sampleSize;
-  // State machine: pending | running | partially_completed | completed | failed
+  const validCount = breakdown?.valid.size ?? 0;
+  const incompleteCount = breakdown?.incomplete.size ?? 0;
+  const missingCount = breakdown?.no_v3_row.size ?? 0;
+  const failedCount = permanentlyFailed.size;
+  const needsWork = missingCount + incompleteCount;
+
   const status: "pending" | "running" | "partially_completed" | "completed" | "failed" =
     !sample ? "pending"
     : analyzing ? "running"
-    : processed >= sampleSize && failed === 0 ? "completed"
-    : processed === 0 && failed > 0 ? "failed"
-    : processed > 0 && processed + failed >= sampleSize ? "partially_completed"
+    : validCount >= sampleSize && failedCount === 0 && incompleteCount === 0 ? "completed"
+    : validCount === 0 && failedCount > 0 ? "failed"
+    : failedCount > 0 && validCount + failedCount >= sampleSize ? "partially_completed"
     : "pending";
   const phase2Unlocked = status === "completed";
 
-  // Load latest persisted sample on mount so refreshing the page doesn't lose progress.
+  const loadBreakdown = async (userId: string, ids: string[]) => {
+    const b = await getSampleBreakdown(userId, ids);
+    setBreakdown(b);
+    return b;
+  };
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -415,8 +467,7 @@ function Phase1DiagnosticPanel() {
           reasons_summary: summary,
           preview: [],
         });
-        const done = await countAnalyzedInSample(user.id, ids);
-        if (!cancelled) setAnalyzedIds(done);
+        if (!cancelled) await loadBreakdown(user.id, ids);
       }
       setLoadingExisting(false);
     })();
@@ -426,7 +477,7 @@ function Phase1DiagnosticPanel() {
   const buildSample = async () => {
     setBuildingSample(true);
     setLastError(null);
-    setAnalyzedIds(new Set());
+    setBreakdown(null);
     setPermanentlyFailed(new Set());
     setFailedAttempts({});
     try {
@@ -434,10 +485,7 @@ function Phase1DiagnosticPanel() {
       if (error) throw new Error(error.message);
       if (data?.error) throw new Error(data.error);
       setSample(data);
-      if (user) {
-        const done = await countAnalyzedInSample(user.id, data.spotify_track_ids ?? []);
-        setAnalyzedIds(done);
-      }
+      if (user) await loadBreakdown(user.id, data.spotify_track_ids ?? []);
       toast.success("Muestra lista", { description: `${data.size} canciones de ${data.library_size}` });
     } catch (e: any) {
       toast.error("No se pudo armar la muestra", { description: e.message });
@@ -453,36 +501,37 @@ function Phase1DiagnosticPanel() {
     toast.success("Reintentos reseteados", { description: "Las canciones fallidas vuelven a pending" });
   };
 
-  const runAnalysisLoop = async () => {
-    if (!sample || !user) return;
+  // Core loop — accepts an explicit `targetIds` set so we can process only missing/incomplete tracks.
+  const runAnalysisOnIds = async (targetIds: string[], label: string) => {
+    if (!sample || !user || targetIds.length === 0) return;
     setAnalyzing(true);
     setLastError(null);
     const jobId = jobsApi.startJob({
       type: "playlist_generation",
-      label: `Analizando muestra Fase 1 (${sample.size} canciones)`,
-      message: "Corriendo análisis v3.0 en lotes resumibles…",
-      retry: () => { void runAnalysisLoop(); },
+      label,
+      message: `Corriendo análisis v3.0 sobre ${targetIds.length} canciones…`,
+      retry: () => { void runAnalysisOnIds(targetIds, label); },
     });
 
     try {
-      let currentAnalyzed = new Set(analyzedIds);
+      let queue = [...targetIds];
       let currentFailedAttempts = { ...failedAttempts };
       let currentPermanentFailed = new Set(permanentlyFailed);
       let safety = 0;
-      let consecutiveEmptyBatches = 0; // circuit breaker for shared errors
+      let consecutiveEmptyBatches = 0;
 
-      while (safety++ < 20) {
-        const remaining = sample.spotify_track_ids.filter(
-          (id) => !currentAnalyzed.has(id) && !currentPermanentFailed.has(id),
-        );
-        if (remaining.length === 0) break;
+      while (safety++ < 30 && queue.length > 0) {
+        // Refresh breakdown to know current valid set
+        const b = await loadBreakdown(user.id, sample.spotify_track_ids);
+        queue = queue.filter((id) => !b.valid.has(id) && !currentPermanentFailed.has(id));
+        if (queue.length === 0) break;
 
-        const batch = remaining.slice(0, SAMPLE_ANALYSIS_BATCH_SIZE);
-        const batchIndex = Math.ceil((sample.size - remaining.length) / SAMPLE_ANALYSIS_BATCH_SIZE) + 1;
-        const totalBatches = Math.ceil(sample.size / SAMPLE_ANALYSIS_BATCH_SIZE);
+        const batch = queue.slice(0, SAMPLE_ANALYSIS_BATCH_SIZE);
+        const totalBatches = Math.ceil(targetIds.length / SAMPLE_ANALYSIS_BATCH_SIZE);
+        const batchIndex = Math.min(safety, totalBatches);
         setCurrentBatch({ index: batchIndex, total: totalBatches });
 
-        const analyzedBefore = currentAnalyzed.size;
+        const validBefore = b.valid.size;
 
         const { data, error } = await supabase.functions.invoke("analyze-tracks-deep", {
           body: {
@@ -490,50 +539,32 @@ function Phase1DiagnosticPanel() {
             batch_size: batch.length,
             concurrency: 8,
             diagnostic: true,
-            force: false,
+            force: true, // re-analyze v2-only rows to overwrite with v3
           },
         });
         if (error) throw new Error(error.message);
         if (data?.error) throw new Error(data.error);
-
-        // Sanity: backend must return v3 markers. If not, deploy is stale.
         if (data?.prompt_version && data.prompt_version !== V3_PROMPT_VERSION) {
-          throw new Error(
-            `Backend devolvió prompt_version=${data.prompt_version} (esperado ${V3_PROMPT_VERSION}). El edge function analyze-tracks-deep está desactualizado — re-deploy pendiente.`,
-          );
+          throw new Error(`Backend devolvió prompt_version=${data.prompt_version} (esperado ${V3_PROMPT_VERSION}). Re-deploy pendiente.`);
         }
 
-        // Re-check DB (source of truth) — the function response can be misleading
-        // because it reports library-wide counters.
-        const doneNow = await countAnalyzedInSample(user.id, sample.spotify_track_ids);
-        currentAnalyzed = doneNow;
-        setAnalyzedIds(new Set(doneNow));
-
-        const analyzedAfter = doneNow.size;
-        const gained = analyzedAfter - analyzedBefore;
+        const bAfter = await loadBreakdown(user.id, sample.spotify_track_ids);
+        const gained = bAfter.valid.size - validBefore;
 
         if (gained === 0) {
           consecutiveEmptyBatches++;
-          // Circuit breaker: if 3 consecutive batches yield 0 new rows,
-          // it's a shared error (schema, DB, deploy). Don't waste credits.
           if (consecutiveEmptyBatches >= 3) {
-            throw new Error(
-              "3 lotes seguidos sin nuevas filas v3 en DB. Detengo para evitar gastar créditos. Revisa deploy de analyze-tracks-deep, columnas v3 o errores del edge function.",
-            );
+            throw new Error("3 lotes seguidos sin nuevas filas v3 válidas. Detenido para evitar gastar créditos. Revisa deploy de analyze-tracks-deep.");
           }
         } else {
           consecutiveEmptyBatches = 0;
         }
 
-        // Any ID in the batch that still isn't analyzed → increment failure count
         for (const id of batch) {
-          if (!doneNow.has(id)) {
+          if (!bAfter.valid.has(id)) {
             const next = (currentFailedAttempts[id] ?? 0) + 1;
             currentFailedAttempts[id] = next;
-            if (next >= MAX_ATTEMPTS_PER_TRACK) {
-              currentPermanentFailed.add(id);
-              console.warn(`[phase1] permanently failed: ${id} (${next} attempts)`);
-            }
+            if (next >= MAX_ATTEMPTS_PER_TRACK) currentPermanentFailed.add(id);
           } else {
             delete currentFailedAttempts[id];
           }
@@ -542,23 +573,20 @@ function Phase1DiagnosticPanel() {
         setPermanentlyFailed(new Set(currentPermanentFailed));
 
         jobsApi.updateJob(jobId, {
-          message: `Lote ${batchIndex}/${totalBatches} · ${doneNow.size}/${sample.size} analizadas · ${currentPermanentFailed.size} fallidas`,
+          message: `Lote ${batchIndex}/${totalBatches} · ${bAfter.valid.size}/${sample.size} válidas · ${currentPermanentFailed.size} fallidas`,
         });
+
+        queue = queue.filter((id) => !bAfter.valid.has(id) && !currentPermanentFailed.has(id));
       }
 
       setCurrentBatch(null);
-      const finalAnalyzed = currentAnalyzed.size;
-      const finalFailed = currentPermanentFailed.size;
-      jobsApi.completeJob(jobId, `${finalAnalyzed}/${sample.size} analizadas · ${finalFailed} fallidas`);
-      if (finalAnalyzed >= sample.size && finalFailed === 0) {
-        toast.success("Muestra 150/150 completa", { description: "Fase 2 desbloqueada" });
-      } else if (finalAnalyzed + finalFailed >= sample.size) {
-        toast.warning(`${finalAnalyzed} analizadas, ${finalFailed} imposibles`, {
-          description: "Fase 2 sigue bloqueada mientras haya fallidas",
-        });
-      } else {
-        toast.info(`Progreso: ${finalAnalyzed}/${sample.size}`, { description: "Vuelve a correr para continuar" });
-      }
+      const finalB = await loadBreakdown(user.id, sample.spotify_track_ids);
+      const v = finalB.valid.size;
+      const f = currentPermanentFailed.size;
+      jobsApi.completeJob(jobId, `${v}/${sample.size} válidas · ${f} fallidas`);
+      if (v >= sample.size && f === 0) toast.success("Muestra 150/150 válida", { description: "Fase 2 desbloqueada" });
+      else if (v + f >= sample.size) toast.warning(`${v} válidas, ${f} imposibles`, { description: "Fase 2 sigue bloqueada" });
+      else toast.info(`Progreso: ${v}/${sample.size}`, { description: "Vuelve a correr para continuar" });
     } catch (e: any) {
       setLastError(e.message);
       jobsApi.failJob(jobId, e.message);
@@ -569,7 +597,31 @@ function Phase1DiagnosticPanel() {
     }
   };
 
-  const percent = sampleSize ? Math.round((processed / sampleSize) * 100) : 0;
+  const runAll = async () => {
+    if (!sample) return;
+    const target = sample.spotify_track_ids.filter(
+      (id) => !(breakdown?.valid.has(id)) && !permanentlyFailed.has(id),
+    );
+    await runAnalysisOnIds(target, `Analizando muestra Fase 1 (${target.length} canciones)`);
+  };
+
+  const runMissingOnly = async () => {
+    if (!sample || !breakdown) return;
+    const target = [...breakdown.no_v3_row, ...breakdown.incomplete].filter((id) => !permanentlyFailed.has(id));
+    if (target.length === 0) return;
+    await runAnalysisOnIds(target, `Completando ${target.length} análisis faltantes`);
+  };
+
+  // Test with 3 tracks (1 house, 1 non-house electronic, 1 other) — picks from sample if identifiable, else first 3 missing.
+  const runTestThree = async () => {
+    if (!sample || !user || !breakdown) return;
+    const missing = [...breakdown.no_v3_row, ...breakdown.incomplete].filter((id) => !permanentlyFailed.has(id));
+    if (missing.length === 0) { toast.info("No hay faltantes para probar"); return; }
+    const picks = missing.slice(0, 3);
+    await runAnalysisOnIds(picks, `Prueba de 3 canciones`);
+  };
+
+  const percent = sampleSize ? Math.round((validCount / sampleSize) * 100) : 0;
 
   return (
     <div className="rounded-3xl border border-accent/40 bg-accent/5 p-6 md:p-8 mb-2">
@@ -579,32 +631,43 @@ function Phase1DiagnosticPanel() {
       </div>
       <h2 className="font-heading text-2xl mb-2">Muestra de 150 canciones (v3.0 — familia + subgénero + house_profile)</h2>
       <p className="text-sm text-muted-foreground mb-4">
-        Arma una muestra de 150 canciones y córrele el análisis v3.0 en lotes resumibles. Fase 2 solo se desbloquea cuando las 150 estén completas.
+        Una canción cuenta como <em>válida</em> solo cuando tiene <code>music_family</code>, <code>primary_subgenre</code>,{" "}
+        <code>artist_context</code> y (si es house) <code>house_profile</code> completo. Fase 2 se desbloquea únicamente
+        con 150 válidas, 0 incompletas y 0 fallidas.
       </p>
 
       <div className="flex flex-wrap gap-2 mb-4">
         <Button variant="hero" onClick={buildSample} disabled={buildingSample || analyzing || loadingExisting}>
           {buildingSample ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Armando…</> : <>1. Armar muestra nueva (150)</>}
         </Button>
-        <Button variant="outline" onClick={runAnalysisLoop} disabled={!sample || analyzing || loadingExisting || phase2Unlocked}>
+        <Button variant="outline" onClick={runAll} disabled={!sample || analyzing || loadingExisting || phase2Unlocked || needsWork === 0}>
           {analyzing
             ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Analizando lote {currentBatch?.index}/{currentBatch?.total}…</>
-            : phase2Unlocked ? <>Muestra completa ✓</> : <>2. Correr / continuar análisis v3.0</>}
+            : phase2Unlocked ? <>Muestra completa ✓</> : <>2. Correr análisis v3.0 completo</>}
         </Button>
-        {(failed > 0 || Object.keys(failedAttempts).length > 0) && !analyzing && (
+        {needsWork > 0 && !analyzing && (
+          <Button variant="default" onClick={runMissingOnly} disabled={phase2Unlocked}>
+            Completar {needsWork} análisis faltantes
+          </Button>
+        )}
+        {needsWork > 0 && !analyzing && (
+          <Button variant="ghost" onClick={runTestThree}>
+            Probar con 3 canciones
+          </Button>
+        )}
+        {(failedCount > 0 || Object.keys(failedAttempts).length > 0) && !analyzing && (
           <Button variant="ghost" onClick={resetFailedState}>
             Reset fallidos → pending
           </Button>
         )}
       </div>
 
-      {sample && (
+      {sample && breakdown && (
         <div className="rounded-2xl border border-border/50 bg-background/50 p-4 space-y-3">
-          {/* Sample-scoped progress */}
           <div>
             <div className="flex justify-between text-xs mb-1">
-              <span className="text-muted-foreground">Progreso de la muestra</span>
-              <span className="font-mono">{processed} / {sampleSize} ({percent}%)</span>
+              <span className="text-muted-foreground">Análisis v3.0 válidos</span>
+              <span className="font-mono">{validCount} / {sampleSize} ({percent}%)</span>
             </div>
             <div className="h-2 rounded-full bg-background overflow-hidden">
               <div
@@ -613,18 +676,48 @@ function Phase1DiagnosticPanel() {
               />
             </div>
             <div className="flex flex-wrap gap-2 text-xs mt-2">
-              <Badge variant="secondary">sample_size: {sampleSize}</Badge>
-              <Badge variant="secondary">sample_processed: {processed}</Badge>
-              <Badge variant={pending > 0 ? "outline" : "secondary"}>sample_pending: {pending}</Badge>
-              <Badge variant={failed > 0 ? "destructive" : "secondary"}>sample_failed: {failed}</Badge>
+              <Badge variant="secondary">sample_total: {sampleSize}</Badge>
+              <Badge variant="secondary">valid_analysis: {validCount}</Badge>
+              <Badge variant={incompleteCount > 0 ? "destructive" : "secondary"}>incomplete: {incompleteCount}</Badge>
+              <Badge variant={missingCount > 0 ? "outline" : "secondary"}>missing_v3: {missingCount}</Badge>
+              <Badge variant={failedCount > 0 ? "destructive" : "secondary"}>failed: {failedCount}</Badge>
               {currentBatch && (
-                <Badge variant="outline">current_batch: {currentBatch.index}/{currentBatch.total}</Badge>
+                <Badge variant="outline">batch: {currentBatch.index}/{currentBatch.total}</Badge>
               )}
               <Badge variant={status === "completed" ? "secondary" : status === "failed" ? "destructive" : "outline"}>
                 status: {status}
               </Badge>
             </div>
+            {validCount > 0 && (
+              <div className="flex flex-wrap gap-2 text-[10px] mt-2 text-muted-foreground">
+                <span>house_profile completo: <strong>{breakdown.house_tracks}</strong></span>
+                <span>·</span>
+                <span>no-house (house_profile=null correcto): <strong>{breakdown.non_house_valid}</strong></span>
+              </div>
+            )}
           </div>
+
+          {/* Breakdown by reason */}
+          {needsWork > 0 && (
+            <div className="rounded-xl border border-amber-500/40 bg-amber-500/5 p-3 text-xs space-y-1">
+              <p className="font-medium text-amber-500">Clasificación de {needsWork} canciones incompletas:</p>
+              <ul className="space-y-0.5 text-muted-foreground pl-3 list-disc">
+                {breakdown.has_v2_only.size > 0 && (
+                  <li>{breakdown.has_v2_only.size} tienen análisis v2 antiguo pero no v3.0 (necesitan re-análisis)</li>
+                )}
+                {breakdown.no_v3_row.size - breakdown.has_v2_only.size > 0 && (
+                  <li>{breakdown.no_v3_row.size - breakdown.has_v2_only.size} nunca han sido analizadas (no existe fila)</li>
+                )}
+                {incompleteCount > 0 && (
+                  <li>{incompleteCount} tienen fila v3 pero campos obligatorios vacíos (<code>music_family</code>, <code>primary_subgenre</code>, <code>artist_context</code> o <code>house_profile</code>)</li>
+                )}
+                {breakdown.errored.size > 0 && (
+                  <li>{breakdown.errored.size} tienen <code>last_error</code> guardado</li>
+                )}
+              </ul>
+              <p className="pt-1">Usa <em>Completar {needsWork} análisis faltantes</em> — no re-procesa las {validCount} válidas.</p>
+            </div>
+          )}
 
           {Object.keys(sample.reasons_summary).length > 0 && (
             <div className="flex flex-wrap gap-1 text-xs pt-2 border-t border-border/40">
@@ -633,20 +726,6 @@ function Phase1DiagnosticPanel() {
                 <Badge key={k} variant="outline" className="text-[10px]">{k}: {v}</Badge>
               ))}
             </div>
-          )}
-
-          {sample.preview.length > 0 && (
-            <details>
-              <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">Ver preview (30 canciones)</summary>
-              <ul className="mt-2 space-y-1 max-h-56 overflow-y-auto pr-2 text-xs">
-                {sample.preview.map((t) => (
-                  <li key={t.spotify_track_id} className="flex justify-between gap-2">
-                    <span className="truncate">{t.name} — <span className="text-muted-foreground">{t.artist}</span></span>
-                    <span className="text-muted-foreground shrink-0">{t.reason}</span>
-                  </li>
-                ))}
-              </ul>
-            </details>
           )}
 
           {permanentlyFailed.size > 0 && (
@@ -672,36 +751,20 @@ function Phase1DiagnosticPanel() {
 
       {phase2Unlocked && (
         <div className="mt-4 rounded-2xl border border-emerald-500/40 bg-emerald-500/5 p-4 text-sm">
-          <p>
-            <strong>{processed}/{sampleSize}</strong> analizadas con <code>music_family</code>, <code>primary_subgenre</code>,{" "}
-            <code>artist_context</code> y <code>house_profile</code> cuando aplique.
-          </p>
-          <p className="text-xs text-muted-foreground mt-1">
-            Fase 2 (clustering endurecido) desbloqueada.
-          </p>
+          <p><strong>{validCount}/{sampleSize}</strong> válidas · Fase 2 desbloqueada.</p>
         </div>
       )}
       {status === "partially_completed" && (
         <div className="mt-4 rounded-2xl border border-amber-500/40 bg-amber-500/5 p-4 text-sm">
-          <p>
-            <strong>{processed}/{sampleSize}</strong> analizadas · <strong>{failed}</strong> fallidas.
-          </p>
-          <p className="text-xs text-muted-foreground mt-1">
-            Fase 2 sigue <strong>bloqueada</strong>. Resetea los fallidos y reintenta, o arma una muestra nueva.
-          </p>
+          <p><strong>{validCount}/{sampleSize}</strong> válidas · <strong>{failedCount}</strong> fallidas.</p>
+          <p className="text-xs text-muted-foreground mt-1">Resetea fallidos y reintenta, o arma una muestra nueva.</p>
         </div>
       )}
       {status === "failed" && (
         <div className="mt-4 rounded-2xl border border-destructive/40 bg-destructive/5 p-4 text-sm">
-          <p>
-            <strong>0/{sampleSize}</strong> analizadas · <strong>{failed}</strong> fallidas. Fallo compartido probable — revisa el error de arriba.
-          </p>
+          <p><strong>0/{sampleSize}</strong> válidas · <strong>{failedCount}</strong> fallidas. Fallo compartido probable.</p>
         </div>
       )}
-
-      <p className="text-[10px] text-muted-foreground mt-3">
-        Nota: la biblioteca completa (fuera de la muestra) se analiza aparte con su propio contador; no se mezcla con este panel.
-      </p>
     </div>
   );
 }
