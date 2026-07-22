@@ -446,6 +446,13 @@ function Phase1DiagnosticPanel() {
     }
   };
 
+  const resetFailedState = () => {
+    setPermanentlyFailed(new Set());
+    setFailedAttempts({});
+    setLastError(null);
+    toast.success("Reintentos reseteados", { description: "Las canciones fallidas vuelven a pending" });
+  };
+
   const runAnalysisLoop = async () => {
     if (!sample || !user) return;
     setAnalyzing(true);
@@ -462,6 +469,7 @@ function Phase1DiagnosticPanel() {
       let currentFailedAttempts = { ...failedAttempts };
       let currentPermanentFailed = new Set(permanentlyFailed);
       let safety = 0;
+      let consecutiveEmptyBatches = 0; // circuit breaker for shared errors
 
       while (safety++ < 20) {
         const remaining = sample.spotify_track_ids.filter(
@@ -473,6 +481,8 @@ function Phase1DiagnosticPanel() {
         const batchIndex = Math.ceil((sample.size - remaining.length) / SAMPLE_ANALYSIS_BATCH_SIZE) + 1;
         const totalBatches = Math.ceil(sample.size / SAMPLE_ANALYSIS_BATCH_SIZE);
         setCurrentBatch({ index: batchIndex, total: totalBatches });
+
+        const analyzedBefore = currentAnalyzed.size;
 
         const { data, error } = await supabase.functions.invoke("analyze-tracks-deep", {
           body: {
@@ -486,11 +496,34 @@ function Phase1DiagnosticPanel() {
         if (error) throw new Error(error.message);
         if (data?.error) throw new Error(data.error);
 
+        // Sanity: backend must return v3 markers. If not, deploy is stale.
+        if (data?.prompt_version && data.prompt_version !== V3_PROMPT_VERSION) {
+          throw new Error(
+            `Backend devolvió prompt_version=${data.prompt_version} (esperado ${V3_PROMPT_VERSION}). El edge function analyze-tracks-deep está desactualizado — re-deploy pendiente.`,
+          );
+        }
+
         // Re-check DB (source of truth) — the function response can be misleading
         // because it reports library-wide counters.
         const doneNow = await countAnalyzedInSample(user.id, sample.spotify_track_ids);
         currentAnalyzed = doneNow;
         setAnalyzedIds(new Set(doneNow));
+
+        const analyzedAfter = doneNow.size;
+        const gained = analyzedAfter - analyzedBefore;
+
+        if (gained === 0) {
+          consecutiveEmptyBatches++;
+          // Circuit breaker: if 3 consecutive batches yield 0 new rows,
+          // it's a shared error (schema, DB, deploy). Don't waste credits.
+          if (consecutiveEmptyBatches >= 3) {
+            throw new Error(
+              "3 lotes seguidos sin nuevas filas v3 en DB. Detengo para evitar gastar créditos. Revisa deploy de analyze-tracks-deep, columnas v3 o errores del edge function.",
+            );
+          }
+        } else {
+          consecutiveEmptyBatches = 0;
+        }
 
         // Any ID in the batch that still isn't analyzed → increment failure count
         for (const id of batch) {
@@ -517,11 +550,11 @@ function Phase1DiagnosticPanel() {
       const finalAnalyzed = currentAnalyzed.size;
       const finalFailed = currentPermanentFailed.size;
       jobsApi.completeJob(jobId, `${finalAnalyzed}/${sample.size} analizadas · ${finalFailed} fallidas`);
-      if (finalAnalyzed >= sample.size) {
+      if (finalAnalyzed >= sample.size && finalFailed === 0) {
         toast.success("Muestra 150/150 completa", { description: "Fase 2 desbloqueada" });
       } else if (finalAnalyzed + finalFailed >= sample.size) {
         toast.warning(`${finalAnalyzed} analizadas, ${finalFailed} imposibles`, {
-          description: "Revisa los IDs fallidos antes de aprobar Fase 2",
+          description: "Fase 2 sigue bloqueada mientras haya fallidas",
         });
       } else {
         toast.info(`Progreso: ${finalAnalyzed}/${sample.size}`, { description: "Vuelve a correr para continuar" });
