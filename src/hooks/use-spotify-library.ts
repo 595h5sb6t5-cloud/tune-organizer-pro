@@ -368,6 +368,7 @@ export function useSpotifyLibrary(options: UseSpotifyLibraryOptions = {}) {
     setActiveRunId(run?.id ?? null);
     setLastRunStatus(run?.status ?? null);
     setSyncing(isActiveRun(run));
+    setSyncError(extractSyncError(run, res.stages));
     if (run?.summary) setLastSyncResult(run.summary);
     if (run && !isActiveRun(run)) await refreshData();
     return run;
