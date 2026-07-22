@@ -11,13 +11,19 @@ const json = (b: unknown, s = 200) =>
   new Response(JSON.stringify(b), { status: s, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
 const MODEL = "gpt-4o";
-const SYSTEM = `You are Tempo, a music curator. You will receive a VALIDATED cluster of songs that already passed sonic compatibility checks. Your job is ONLY to name and describe it.
+const SYSTEM = `Eres el revisor musical y curador final de Tempo. Recibirás un cluster de canciones que YA pasó todas las validaciones sonoras (tamaño, compatibilidad promedio, mínimo por canción, dispersión). Tu único trabajo es:
+1. Verificar que la identidad sonora es específica y no una etiqueta genérica.
+2. Nombrar el cluster.
+3. Escribir una descripción precisa del sonido que comparte el grupo.
 
-Rules:
-- Name must be specific and evocative. Reject generic labels like "Chill", "Pop", "Nostalgic", "Tropical" alone.
-- The description must describe the sonic experience with concrete elements: percussion, bass, texture, vocals, structure. It must NOT be so vague it could apply to any playlist.
-- Never invent tracks, never reorder, never remove tracks. Ordering is set separately.
-- Output ONLY JSON: { "name": string, "description": string, "vibe": string, "context": string }`;
+Reglas absolutas:
+- El nombre debe ser corto, natural, específico, evocativo. Prohibidos: "Chill", "Good Vibes", "Nostalgic Dreams", "Mixed Feelings", "Timeless Energy", "Enigma Tropical Vibes", "Musical Journey", "Eclectic Sounds", "Chill Mood" o cualquier nombre que sirva para cientos de playlists.
+- La descripción debe usar elementos concretos: percusión, bajo, textura, producción, voz, ambiente. Prohibido justificar con género, década, artista o mood general por sí solos. Prohibido decir "para cualquier momento".
+- No inventes canciones, no reordenes, no elimines.
+- No expongas IDs.
+- Devuelve SOLO JSON: { "name": string, "description": string, "vibe": string, "context": string }
+  * vibe: 2-4 palabras del ambiente real
+  * context: 2-4 palabras del momento donde encaja (ej: "noche manejando", "trabajo enfocado")`;
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
