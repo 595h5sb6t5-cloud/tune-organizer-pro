@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "./use-auth";
-import { useJobs, type JobType } from "./use-jobs";
 
 export interface SpotifyPlaylist {
   id: string;
@@ -49,9 +48,7 @@ export interface SavedAlbum {
   added_at: string | null;
 }
 
-/** Each stage the sync pipeline goes through, in order */
 export type SyncStage = "profile" | "liked_songs" | "albums" | "playlists" | "artists" | "tops" | "analysis";
-
 export type StageStatus = "pending" | "active" | "done" | "error" | "skipped";
 
 export interface SyncStageState {
@@ -74,6 +71,26 @@ export interface SyncMetadata {
   lastAlbumSyncAt: string | null;
 }
 
+const INITIAL_STAGES: SyncStageState[] = [
+  { stage: "profile", label: "Reading Spotify profile", status: "pending" },
+  { stage: "liked_songs", label: "Liked songs", status: "pending" },
+  { stage: "albums", label: "Saved albums", status: "pending" },
+  { stage: "playlists", label: "Playlists", status: "pending" },
+  { stage: "artists", label: "Followed artists", status: "pending" },
+  { stage: "tops", label: "Top tracks & recent plays", status: "pending" },
+  { stage: "analysis", label: "Audio analysis", status: "pending" },
+];
+
+const STAGE_MAP: Record<string, SyncStage> = {
+  profile: "profile",
+  liked_songs: "liked_songs",
+  saved_albums: "albums",
+  playlists: "playlists",
+  followed_artists: "artists",
+  tops_recent: "tops",
+  audio_analysis: "analysis",
+};
+
 function formatTimeAgo(dateStr: string | null): string | null {
   if (!dateStr) return null;
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -82,54 +99,90 @@ function formatTimeAgo(dateStr: string | null): string | null {
   if (mins < 60) return `${mins}m ago`;
   const hrs = Math.floor(mins / 60);
   if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  return `${days}d ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
 }
 
-/** Fetch all rows from a table, bypassing the 1000-row default limit */
 async function fetchAllRows<T>(
   table: string,
   select: string,
   userId: string,
   orderCol: string,
   ascending = true,
+  filters?: (query: any) => any,
 ): Promise<T[]> {
-  const PAGE = 1000;
+  const pageSize = 1000;
   let offset = 0;
   const all: T[] = [];
+
   while (true) {
-    const { data, error } = await (supabase
+    let query = supabase
       .from(table as any)
       .select(select)
       .eq("user_id", userId)
       .order(orderCol, { ascending })
-      .range(offset, offset + PAGE - 1) as any);
-    if (error || !data || data.length === 0) break;
-    all.push(...(data as T[]));
-    if (data.length < PAGE) break;
-    offset += PAGE;
+      .range(offset, offset + pageSize - 1) as any;
+    if (filters) query = filters(query);
+    const { data, error } = await query;
+    if (error) throw error;
+    const rows = (data || []) as T[];
+    all.push(...rows);
+    if (rows.length < pageSize) break;
+    offset += pageSize;
   }
+
   return all;
 }
 
-const INITIAL_STAGES: SyncStageState[] = [
-  { stage: "profile", label: "Reading your profile", status: "pending" },
-  { stage: "liked_songs", label: "Importing liked songs", status: "pending" },
-  { stage: "albums", label: "Importing saved albums", status: "pending" },
-  { stage: "playlists", label: "Importing playlists", status: "pending" },
-  { stage: "artists", label: "Importing followed artists", status: "pending" },
-  { stage: "tops", label: "Top tracks & recent plays", status: "pending" },
-  { stage: "analysis", label: "Audio analysis", status: "pending" },
-];
+function stageStatus(status: string): StageStatus {
+  if (status === "running") return "active";
+  if (status === "completed") return "done";
+  if (status === "failed") return "error";
+  if (status === "skipped") return "skipped";
+  return "pending";
+}
 
-function isSpotifyRateLimitedResult(result: Record<string, any> | null | undefined) {
-  return result?.status === "rate_limited" || result?.step === "spotify_rate_limited";
+function stageDetail(row: any): string | undefined {
+  if (row.error_message) return String(row.error_message);
+  const processed = Number(row.items_processed ?? 0);
+  const found = Number(row.items_found ?? 0);
+  const created = Number(row.items_created ?? 0);
+  const removed = Number(row.items_removed_or_deactivated ?? 0);
+  if (row.status === "running" && found > 0) return `${processed} / ${found}`;
+  const parts: string[] = [];
+  if (processed > 0 || found > 0) parts.push(found > 0 ? `${processed}/${found}` : `${processed}`);
+  if (created > 0) parts.push(`+${created}`);
+  if (removed > 0) parts.push(`-${removed}`);
+  const pendingAi = Number(row.meta?.pending_ai_analysis ?? 0);
+  if (pendingAi > 0) parts.push(`${pendingAi} pending AI`);
+  return parts.length ? parts.join(" · ") : undefined;
+}
+
+function mapStages(rows: any[] | null | undefined): SyncStageState[] {
+  if (!rows?.length) return INITIAL_STAGES;
+  const byStage = new Map<string, any>();
+  for (const row of rows) {
+    const stage = STAGE_MAP[row.stage_key];
+    if (stage) byStage.set(stage, row);
+  }
+  return INITIAL_STAGES.map((initial) => {
+    const row = byStage.get(initial.stage);
+    if (!row) return initial;
+    return {
+      ...initial,
+      label: row.label || initial.label,
+      status: stageStatus(String(row.status || "pending")),
+      detail: stageDetail(row),
+    };
+  });
+}
+
+function isActiveRun(run: any | null) {
+  return !!run && ["pending", "running", "waiting_rate_limit"].includes(String(run.status));
 }
 
 export function useSpotifyLibrary() {
   const { user, profile } = useAuth();
   const spotifyConnected = profile?.spotify_connected ?? false;
-  const jobsApi = useJobs();
 
   const [playlists, setPlaylists] = useState<SpotifyPlaylist[]>([]);
   const [likedSongs, setLikedSongs] = useState<LikedSong[]>([]);
@@ -141,6 +194,9 @@ export function useSpotifyLibrary() {
   const [syncing, setSyncing] = useState(false);
   const [syncStages, setSyncStages] = useState<SyncStageState[]>(INITIAL_STAGES);
   const [lastSyncResult, setLastSyncResult] = useState<Record<string, any> | null>(null);
+  const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  const [lastRunStatus, setLastRunStatus] = useState<string | null>(null);
+  const pollingRef = useRef<number | null>(null);
   const [syncMeta, setSyncMeta] = useState<SyncMetadata>({
     syncStatus: "idle",
     syncError: null,
@@ -152,11 +208,28 @@ export function useSpotifyLibrary() {
     lastAlbumSyncAt: null,
   });
 
-  const setStage = useCallback((stage: SyncStage, status: StageStatus, detail?: string) => {
-    setSyncStages(prev =>
-      prev.map(s => s.stage === stage ? { ...s, status, detail: detail ?? s.detail } : s)
-    );
+  const getFunctionAuthHeaders = useCallback(async () => {
+    let { data: { session }, error } = await supabase.auth.getSession();
+    if (error) throw new Error("Tu sesión expiró. Vuelve a iniciar sesión y presiona Sync otra vez.");
+
+    const expiresAt = session?.expires_at ? session.expires_at * 1000 : 0;
+    if (session && expiresAt > 0 && expiresAt < Date.now() + 60_000) {
+      const refreshed = await supabase.auth.refreshSession();
+      session = refreshed.data.session;
+      if (refreshed.error) throw new Error("Tu sesión expiró. Vuelve a iniciar sesión y presiona Sync otra vez.");
+    }
+
+    if (!session?.access_token) throw new Error("Tu sesión expiró. Vuelve a iniciar sesión y presiona Sync otra vez.");
+    return { Authorization: `Bearer ${session.access_token}` };
   }, []);
+
+  const invokeFunction = useCallback(async <T extends Record<string, any>>(name: string, body: Record<string, any> = {}) => {
+    const headers = await getFunctionAuthHeaders();
+    const res = await supabase.functions.invoke(name, { body, headers });
+    if (res.error) throw new Error(res.error.message || "No pudimos sincronizar.");
+    if ((res.data as any)?.error) throw new Error((res.data as any).error);
+    return (res.data ?? {}) as T;
+  }, [getFunctionAuthHeaders]);
 
   const loadSyncMeta = useCallback(async () => {
     if (!user || !spotifyConnected) return;
@@ -180,85 +253,22 @@ export function useSpotifyLibrary() {
     }
   }, [user, spotifyConnected]);
 
-  const getFunctionAuthHeaders = useCallback(async () => {
-    let { data: { session }, error } = await supabase.auth.getSession();
-    if (error) throw new Error("Tu sesión expiró. Vuelve a iniciar sesión y presiona Sync otra vez.");
-
-    const expiresAt = session?.expires_at ? session.expires_at * 1000 : 0;
-    if (session && expiresAt > 0 && expiresAt < Date.now() + 60_000) {
-      const refreshed = await supabase.auth.refreshSession();
-      session = refreshed.data.session;
-      if (refreshed.error) throw new Error("Tu sesión expiró. Vuelve a iniciar sesión y presiona Sync otra vez.");
-    }
-
-    if (!session?.access_token) {
-      throw new Error("Tu sesión expiró. Vuelve a iniciar sesión y presiona Sync otra vez.");
-    }
-
-    return { Authorization: `Bearer ${session.access_token}` };
-  }, []);
-
-  const readFunctionError = useCallback(async (error: any, data: any) => {
-    let payload = data;
-    const response = error?.context;
-
-    if (!payload && response && typeof response.clone === "function") {
-      try {
-        const text = await response.clone().text();
-        payload = text ? JSON.parse(text) : null;
-      } catch {
-        payload = null;
-      }
-    }
-
-    const step = typeof payload?.step === "string" ? payload.step : undefined;
-    const status = typeof payload?.status === "number" ? payload.status : response?.status;
-    const rawMessage = String(payload?.error || error?.message || "No pudimos sincronizar.");
-
-    if (
-      status === 401 &&
-      (step === "auth_validation" || step === "user_session" || /Invalid session|Unauthorized|Missing Authorization/i.test(rawMessage))
-    ) {
-      return "Tu sesión expiró. Vuelve a iniciar sesión y presiona Sync otra vez.";
-    }
-
-    if (step === "refresh_token" || /Spotify authorization expired/i.test(rawMessage)) {
-      return "La autorización de Spotify expiró. Reconecta Spotify en Settings y vuelve a sincronizar.";
-    }
-
-    if (status === 429 || step === "spotify_rate_limited" || /rate limited|too many requests/i.test(rawMessage)) {
-      return "Spotify está limitando temporalmente el sync. No se perdió nada; espera unos minutos y vuelve a intentar.";
-    }
-
-    return step ? `${rawMessage} · paso: ${step}` : rawMessage;
-  }, []);
-
-  const invokeFunction = useCallback(async <T extends Record<string, any>>(name: string, body: Record<string, any> = {}) => {
-    const headers = await getFunctionAuthHeaders();
-    const res = await supabase.functions.invoke(name, { body, headers });
-
-    if (res.error) {
-      throw new Error(await readFunctionError(res.error, res.data));
-    }
-    if ((res.data as any)?.error) {
-      throw new Error(await readFunctionError(null, res.data));
-    }
-
-    return (res.data ?? {}) as T;
-  }, [getFunctionAuthHeaders, readFunctionError]);
-
   const refreshLiked = useCallback(async () => {
     if (!user) return;
-    // Get count
-    const countRes = await supabase.from("liked_songs").select("id", { count: "exact", head: true }).eq("user_id", user.id);
+    const countRes = await supabase
+      .from("liked_songs")
+      .select("spotify_track_id", { count: "exact", head: true })
+      .eq("user_id", user.id)
+      .eq("is_active", true)
+      .eq("is_available", true);
     setLikedCount(countRes.count ?? 0);
-    // Fetch ALL liked songs
     const all = await fetchAllRows<LikedSong>(
       "liked_songs",
       "id, spotify_track_id, track_name, artist_name, album_name, image_url, added_at",
       user.id,
       "added_at",
       false,
+      (query) => query.eq("is_active", true).eq("is_available", true),
     );
     setLikedSongs(all);
   }, [user]);
@@ -301,7 +311,7 @@ export function useSpotifyLibrary() {
     setSavedAlbums(all);
   }, [user]);
 
-  const refresh = useCallback(async () => {
+  const refreshData = useCallback(async () => {
     if (!user || !spotifyConnected) {
       setPlaylists([]);
       setLikedSongs([]);
@@ -311,225 +321,96 @@ export function useSpotifyLibrary() {
       setAlbumCount(0);
       return;
     }
-    setLoading(true);
     await Promise.all([refreshLiked(), refreshPlaylists(), refreshArtists(), refreshAlbums(), loadSyncMeta()]);
-    setLoading(false);
   }, [user, spotifyConnected, refreshLiked, refreshPlaylists, refreshArtists, refreshAlbums, loadSyncMeta]);
 
-  const invokeSync = useCallback(async (scope: string, forceFullSync: boolean) => {
-    const body: Record<string, any> = { scope };
-    if (forceFullSync) body.force_full = true;
-    return invokeFunction("spotify-import-tracks", body);
-  }, [invokeFunction]);
+  const loadRun = useCallback(async (runId?: string | null) => {
+    if (!user || !spotifyConnected) return null;
+    const res = await invokeFunction<{ run: any | null; stages: any[] }>("spotify-sync-library", {
+      action: "status",
+      ...(runId ? { run_id: runId } : {}),
+    });
+    const run = res.run ?? null;
+    setSyncStages(mapStages(res.stages));
+    setActiveRunId(run?.id ?? null);
+    setLastRunStatus(run?.status ?? null);
+    setSyncing(isActiveRun(run));
+    if (run?.summary) setLastSyncResult(run.summary);
+    if (run && !isActiveRun(run)) await refreshData();
+    return run;
+  }, [user, spotifyConnected, invokeFunction, refreshData]);
 
-  const abortRef = useRef(false);
+  const startPolling = useCallback((runId: string) => {
+    if (pollingRef.current) window.clearInterval(pollingRef.current);
+    pollingRef.current = window.setInterval(async () => {
+      try {
+        const run = await loadRun(runId);
+        if (!isActiveRun(run) && pollingRef.current) {
+          window.clearInterval(pollingRef.current);
+          pollingRef.current = null;
+        }
+      } catch {
+        // keep polling; transient auth/network errors should not cancel the backend job
+      }
+    }, 2500);
+  }, [loadRun]);
+
+  const refresh = useCallback(async () => {
+    if (!user || !spotifyConnected) {
+      await refreshData();
+      return;
+    }
+    setLoading(true);
+    try {
+      await refreshData();
+      const run = await loadRun(activeRunId);
+      if (run?.id && isActiveRun(run)) startPolling(run.id);
+    } finally {
+      setLoading(false);
+    }
+  }, [user, spotifyConnected, refreshData, loadRun, activeRunId, startPolling]);
 
   const resync = useCallback(async (forceFullSync = false) => {
-    if (syncing || !user || !spotifyConnected) return;
-
-    abortRef.current = false;
+    if (!user || !spotifyConnected) return;
     setSyncing(true);
-    setSyncStages(INITIAL_STAGES.map(s => ({ ...s, status: "pending" as StageStatus })));
     setLastSyncResult(null);
-
-    const combinedResult: Record<string, any> = { success: true };
-
-    // Per-stage job helper
-    const runStage = async <T,>(
-      type: JobType,
-      label: string,
-      stage: SyncStage,
-      fn: (update: (msg: string, processed?: number, total?: number) => void) => Promise<T>,
-      opts: { silentFail?: boolean } = {},
-    ): Promise<T | null> => {
-      const jobId = jobsApi.startJob({
-        type,
-        label,
-        message: `Iniciando ${label.toLowerCase()}…`,
-        retry: () => { void resync(forceFullSync); },
-      });
-      setStage(stage, "active");
-      try {
-        const result = await fn((msg, processed, total) => {
-          setStage(stage, "active", msg);
-          jobsApi.updateJob(jobId, {
-            message: msg,
-            ...(processed != null ? { itemsProcessed: processed } : {}),
-            ...(total != null ? { totalItems: total } : {}),
-          });
-        });
-        jobsApi.completeJob(jobId, `${label} · listo`);
-        return result;
-      } catch (e: any) {
-        const msg = e?.message ?? "Error desconocido";
-        if (opts.silentFail) {
-          setStage(stage, "skipped", msg);
-          jobsApi.completeJob(jobId, `${label} · omitido`);
-          return null;
-        }
-        setStage(stage, "error", msg);
-        jobsApi.failJob(jobId, msg, { step: stage, technical: e?.stack });
-        throw e;
-      }
-    };
-
-    try {
-      await runStage("spotify_import", "Leyendo perfil de Spotify", "profile", async (update) => {
-        update("Leyendo tu perfil…");
-        await invokeFunction("spotify-sync-extras", {});
-        setStage("profile", "done", "ready");
-      }, { silentFail: true });
-      if (abortRef.current) return;
-
-      await runStage("sync_liked", "Sincronizando liked songs", "liked_songs", async (update) => {
-        update("Importando liked songs…");
-        const likedRes = await invokeSync("liked", forceFullSync);
-        Object.assign(combinedResult, likedRes);
-        if (isSpotifyRateLimitedResult(likedRes)) {
-          const message = likedRes.message || "Spotify está limitando el sync. Intenta de nuevo en unos minutos.";
-          update(message);
-          setStage("liked_songs", "skipped", "rate limited");
-          await refreshLiked();
-          return;
-        }
-        const added = likedRes.liked_songs_added ?? 0;
-        const removed = likedRes.liked_songs_removed ?? 0;
-        const total = likedRes.liked_songs_total ?? added;
-        const message = removed > 0
-          ? `${added} nuevas · ${removed} removidas · ${total} liked songs`
-          : `${added} nuevas · ${total} liked songs`;
-        update(message, total, total);
-        setStage("liked_songs", "done", `${added} new`);
-        await refreshLiked();
-      });
-      if (isSpotifyRateLimitedResult(combinedResult)) {
-        setSyncStages(prev => prev.map(s =>
-          s.status === "pending" ? { ...s, status: "skipped" as StageStatus, detail: "rate limited" } : s
-        ));
-        setLastSyncResult(combinedResult);
-        await loadSyncMeta();
-        return;
-      }
-      if (abortRef.current) return;
-
-      await runStage("sync_albums", "Sincronizando álbumes guardados", "albums", async (update) => {
-        update("Importando álbumes…");
-        const albumRes = await invokeSync("albums", forceFullSync);
-        Object.assign(combinedResult, albumRes);
-        if (isSpotifyRateLimitedResult(albumRes)) {
-          const message = albumRes.message || "Spotify está limitando álbumes por ahora.";
-          update(message);
-          setStage("albums", "skipped", "rate limited");
-          await refreshAlbums();
-          return;
-        }
-        const added = albumRes.albums_added ?? 0;
-        update(`+${added} álbumes`, added);
-        setStage("albums", "done", `+${added}`);
-        await refreshAlbums();
-      });
-      if (abortRef.current) return;
-
-      await runStage("sync_playlists", "Sincronizando playlists", "playlists", async (update) => {
-        let playlistsRemaining = Infinity;
-        let totalPlaylistTracksSynced = 0;
-        let plBatchNum = 0;
-        while (playlistsRemaining > 0) {
-          plBatchNum++;
-          update(`Procesando lote ${plBatchNum}…`);
-          const plRes = await invokeSync("playlists", forceFullSync);
-          Object.assign(combinedResult, plRes);
-          if (isSpotifyRateLimitedResult(plRes)) {
-            const message = plRes.message || "Spotify está limitando playlists por ahora.";
-            update(message);
-            setStage("playlists", "skipped", "rate limited");
-            break;
-          }
-          totalPlaylistTracksSynced += plRes.playlist_tracks_synced ?? 0;
-          playlistsRemaining = plRes.playlists_remaining ?? 0;
-          const totalPL = (plRes.total_playlists ?? 0);
-          const processedPL = totalPL - playlistsRemaining;
-          update(
-            `Lote ${plBatchNum}: ${plRes.playlist_tracks_synced ?? 0} canciones · ${playlistsRemaining} playlists restantes`,
-            processedPL > 0 ? processedPL : totalPlaylistTracksSynced,
-            totalPL > 0 ? totalPL : undefined,
-          );
-          setStage("playlists", "active", `batch ${plBatchNum}: ${plRes.playlist_tracks_synced ?? 0} tracks, ${playlistsRemaining} playlists remaining`);
-          if (plBatchNum > 50) break;
-        }
-        update(`${totalPlaylistTracksSynced} canciones sincronizadas`, totalPlaylistTracksSynced, totalPlaylistTracksSynced);
-        setStage("playlists", "done", `${totalPlaylistTracksSynced} tracks synced`);
-        await refreshPlaylists();
-      });
-      if (abortRef.current) return;
-
-      await runStage("sync_artists", "Sincronizando artistas seguidos", "artists", async (update) => {
-        update("Importando artistas…");
-        const artRes = await invokeSync("artists", forceFullSync);
-        Object.assign(combinedResult, artRes);
-        if (isSpotifyRateLimitedResult(artRes)) {
-          const message = artRes.message || "Spotify está limitando artistas por ahora.";
-          update(message);
-          setStage("artists", "skipped", "rate limited");
-          await refreshArtists();
-          return;
-        }
-        const added = artRes.artists_added ?? 0;
-        update(`+${added} artistas`, added);
-        setStage("artists", "done", `+${added}`);
-        await refreshArtists();
-      });
-      if (abortRef.current) return;
-
-      await runStage("spotify_import", "Top tracks y reproducciones recientes", "tops", async (update) => {
-        update("Cargando tops…");
-        const t = await invokeFunction("spotify-sync-extras", {});
-        update(`${t.top_tracks ?? 0} tops · ${t.recent_plays ?? 0} recientes`);
-        setStage("tops", "done", `${t.top_tracks ?? 0} tops · ${t.recent_plays ?? 0} recent`);
-      }, { silentFail: true });
-
-      await runStage("ai_analysis", "Análisis de audio Spotify", "analysis", async (update) => {
-        update("Analizando audio…");
-        const analysisRes = await invokeFunction("spotify-import-tracks", {
-          scope: "analysis",
-          skip_core: false,
-          ...(forceFullSync ? { force_full: true } : {}),
-        });
-        if (isSpotifyRateLimitedResult(analysisRes)) {
-          const message = analysisRes.message || "Spotify está limitando el análisis de audio por ahora.";
-          update(message);
-          setStage("analysis", "skipped", "rate limited");
-          return;
-        }
-        const featureCount = analysisRes.audio_features ?? 0;
-        update(featureCount > 0 ? `${featureCount} tracks analizados` : "Al día");
-        setStage("analysis", "done", featureCount > 0 ? `${featureCount} tracks` : "up to date");
-      }, { silentFail: true });
-
-      combinedResult.sync_mode = forceFullSync ? "full" : "incremental";
-      setLastSyncResult(combinedResult);
-      await loadSyncMeta();
-    } catch (e: any) {
-      setSyncStages(prev =>
-        prev.map(s => s.status === "active" ? { ...s, status: "error" as StageStatus, detail: e.message } : s)
-      );
-      await loadSyncMeta();
-      throw e;
-    } finally {
-      setSyncing(false);
-    }
-  }, [syncing, user, spotifyConnected, invokeSync, invokeFunction, refreshLiked, refreshAlbums, refreshPlaylists, refreshArtists, loadSyncMeta, setStage, jobsApi]);
+    const res = await invokeFunction<{ run_id: string; run: any; stages: any[]; reused?: boolean }>("spotify-sync-library", {
+      mode: forceFullSync ? "full" : "quick",
+    });
+    setActiveRunId(res.run_id);
+    setLastRunStatus(res.run?.status ?? "running");
+    setSyncStages(mapStages(res.stages));
+    startPolling(res.run_id);
+  }, [user, spotifyConnected, invokeFunction, startPolling]);
 
   useEffect(() => {
     void refresh();
+    return () => {
+      if (pollingRef.current) window.clearInterval(pollingRef.current);
+    };
   }, [refresh]);
 
   useEffect(() => {
-    return () => { abortRef.current = true; };
-  }, []);
+    if (!user || !spotifyConnected) return;
+    const channel = supabase
+      .channel(`sync-library-${user.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "sync_run_stages", filter: `user_id=eq.${user.id}` },
+        () => { void loadRun(activeRunId); },
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "sync_runs", filter: `user_id=eq.${user.id}` },
+        () => { void loadRun(activeRunId); },
+      )
+      .subscribe();
+    return () => { void supabase.removeChannel(channel); };
+  }, [user, spotifyConnected, activeRunId, loadRun]);
 
   const lastSyncedLabel = formatTimeAgo(syncMeta.lastIncrementalSyncAt || syncMeta.lastFullSyncAt);
-  const allDone = syncing === false && syncStages.some(s => s.status === "done");
+  const allDone = ["completed", "completed_with_restrictions"].includes(String(lastRunStatus)) &&
+    syncStages.every((stage) => stage.status === "done" || stage.status === "skipped" || stage.status === "error");
 
   return {
     playlists,
