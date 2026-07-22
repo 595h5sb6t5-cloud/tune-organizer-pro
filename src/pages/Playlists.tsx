@@ -202,6 +202,8 @@ function PlaylistDetail({ playlistId, onBack }: { playlistId: string; onBack: ()
   const [exporting, setExporting] = useState(false);
   const [isPublic, setIsPublic] = useState(false);
   const [exportError, setExportError] = useState<{ message: string; step?: string; needsReauth?: boolean } | null>(null);
+  const [reviewing, setReviewing] = useState(false);
+  const [review, setReview] = useState<any>(null);
 
   if (loading || !playlist) {
     return <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin" />Cargando…</div>;
