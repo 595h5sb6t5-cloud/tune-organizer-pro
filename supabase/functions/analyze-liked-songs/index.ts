@@ -305,17 +305,19 @@ SONIC COMPATIBILITY CHECKLIST (a song needs 7+/10 to belong):
 
 Same artist ≠ same world. Two Mecano / Julio Iglesias / Sting / Kanye tracks can go to different worlds if their sonic feel differs. Same genre ≠ same world (melodic rap vs dark minimalist rap must separate; heavy driving rock vs melodic softer rock must separate).
 
-LANGUAGE HAS ZERO WEIGHT. Ignore language completely. Only HOW IT SOUNDS matters.
+LANGUAGE FILTER (hard):
+- English songs ONLY join English-family worlds. Never assign an English song to a world whose accepted family is Romance/Latin (Spanish/Portuguese/Italian/French), and vice versa.
+- Spanish, Portuguese, Italian and French songs can be assigned to the same Romance/Latin world if sonic DNA matches.
+- Instrumental / no-vocals songs may join any family when sonic DNA matches.
+- If a song's language conflicts with the world's family, it goes to "needs_review" (or a different, compatible world) even if the sonic DNA is perfect.
 
 ASSIGNMENT RULES:
-- 7+ match: assign with confidence 0.7–1.0
-- 5–6 for BEST world: assign to best match with confidence 0.5–0.6
-- <5 for ALL worlds: assign to "needs_review" with confidence 0.3
-- A song MAY appear in more than one world ONLY if it genuinely fits multiple distinct ambiences at 7+ (do not duplicate without a clear reason)
+- 7+ match AND compatible language family: assign with confidence 0.7–1.0
+- 5–6 for BEST compatible world: assign with confidence 0.5–0.6
+- <5 for ALL worlds, OR language mismatch on every world: assign to "needs_review" with confidence 0.3
+- A song MAY appear in more than one world ONLY if it genuinely fits multiple distinct ambiences at 7+ AND both share a compatible language family
 - Never force a song into a world just to place it. "needs_review" is acceptable (<5% of library).
-- When tied, pick the world where GROOVE + ENERGY fit better.
-
-ANTI-LANGUAGE CHECK: if you catch yourself assigning 3+ same-language songs in a row to the same world, re-verify each on sonic qualities alone.`;
+- When tied, pick the world where GROOVE + ENERGY fit better.`;
 
 const ASSIGN_TOOL = {
   type: "function" as const,
