@@ -18,6 +18,7 @@ export type Database = {
         Row: {
           aggressiveness: number | null
           analysis_confidence: number | null
+          analysis_stage: string | null
           analysis_version: string | null
           artist_name: string | null
           avoid_pairing_with: string[]
@@ -39,6 +40,7 @@ export type Database = {
           id: string
           instrumentation_summary: string | null
           language: string | null
+          last_error: string | null
           liked_song_id: string | null
           main_genre: string | null
           main_mood: string | null
@@ -48,7 +50,11 @@ export type Database = {
           nostalgia: number | null
           playlist_fit: Json
           primary_genre: string | null
+          prompt_version: string | null
+          reasoning_mode: string | null
+          retry_count: number
           rhythm_type: string | null
+          schema_version: string | null
           secondary_genres: string[]
           secondary_genres_v2: string[] | null
           secondary_moods_v2: string[] | null
@@ -69,6 +75,7 @@ export type Database = {
         Insert: {
           aggressiveness?: number | null
           analysis_confidence?: number | null
+          analysis_stage?: string | null
           analysis_version?: string | null
           artist_name?: string | null
           avoid_pairing_with?: string[]
@@ -90,6 +97,7 @@ export type Database = {
           id?: string
           instrumentation_summary?: string | null
           language?: string | null
+          last_error?: string | null
           liked_song_id?: string | null
           main_genre?: string | null
           main_mood?: string | null
@@ -99,7 +107,11 @@ export type Database = {
           nostalgia?: number | null
           playlist_fit?: Json
           primary_genre?: string | null
+          prompt_version?: string | null
+          reasoning_mode?: string | null
+          retry_count?: number
           rhythm_type?: string | null
+          schema_version?: string | null
           secondary_genres?: string[]
           secondary_genres_v2?: string[] | null
           secondary_moods_v2?: string[] | null
@@ -120,6 +132,7 @@ export type Database = {
         Update: {
           aggressiveness?: number | null
           analysis_confidence?: number | null
+          analysis_stage?: string | null
           analysis_version?: string | null
           artist_name?: string | null
           avoid_pairing_with?: string[]
@@ -141,6 +154,7 @@ export type Database = {
           id?: string
           instrumentation_summary?: string | null
           language?: string | null
+          last_error?: string | null
           liked_song_id?: string | null
           main_genre?: string | null
           main_mood?: string | null
@@ -150,7 +164,11 @@ export type Database = {
           nostalgia?: number | null
           playlist_fit?: Json
           primary_genre?: string | null
+          prompt_version?: string | null
+          reasoning_mode?: string | null
+          retry_count?: number
           rhythm_type?: string | null
+          schema_version?: string | null
           secondary_genres?: string[]
           secondary_genres_v2?: string[] | null
           secondary_moods_v2?: string[] | null
@@ -224,6 +242,84 @@ export type Database = {
           spotify_url?: string | null
           total_tracks?: number | null
           updated_at?: string
+        }
+        Relationships: []
+      }
+      analysis_benchmarks: {
+        Row: {
+          avg_ms_per_track: number | null
+          cache_hit_pct: number | null
+          cache_hits: number
+          cached_prompt_tokens: number
+          concurrency: number | null
+          created_at: string
+          id: string
+          json_errors: number
+          label: string
+          model_used: string
+          notes: string | null
+          openai_calls: number
+          per_stage_ms: Json | null
+          per_track_ms: Json | null
+          prompt_version: string | null
+          retries: number
+          sample_size: number
+          schema_version: string | null
+          total_completion_tokens: number
+          total_ms: number
+          total_prompt_tokens: number
+          total_reasoning_tokens: number
+          user_id: string
+        }
+        Insert: {
+          avg_ms_per_track?: number | null
+          cache_hit_pct?: number | null
+          cache_hits?: number
+          cached_prompt_tokens?: number
+          concurrency?: number | null
+          created_at?: string
+          id?: string
+          json_errors?: number
+          label: string
+          model_used: string
+          notes?: string | null
+          openai_calls?: number
+          per_stage_ms?: Json | null
+          per_track_ms?: Json | null
+          prompt_version?: string | null
+          retries?: number
+          sample_size: number
+          schema_version?: string | null
+          total_completion_tokens?: number
+          total_ms: number
+          total_prompt_tokens?: number
+          total_reasoning_tokens?: number
+          user_id: string
+        }
+        Update: {
+          avg_ms_per_track?: number | null
+          cache_hit_pct?: number | null
+          cache_hits?: number
+          cached_prompt_tokens?: number
+          concurrency?: number | null
+          created_at?: string
+          id?: string
+          json_errors?: number
+          label?: string
+          model_used?: string
+          notes?: string | null
+          openai_calls?: number
+          per_stage_ms?: Json | null
+          per_track_ms?: Json | null
+          prompt_version?: string | null
+          retries?: number
+          sample_size?: number
+          schema_version?: string | null
+          total_completion_tokens?: number
+          total_ms?: number
+          total_prompt_tokens?: number
+          total_reasoning_tokens?: number
+          user_id?: string
         }
         Relationships: []
       }
