@@ -320,12 +320,20 @@ Deno.serve(async (req) => {
       .select("id", { count: "exact", head: true })
       .eq("user_id", userId);
 
-    // Existing v2 analysis for this user (cache lookup key)
-    const { data: existing } = await adm
-      .from("ai_track_analysis")
-      .select("spotify_track_id, prompt_version, schema_version, model_used")
-      .eq("user_id", userId)
-      .eq("analysis_version", ANALYSIS_VERSION);
+    // Existing v2 analysis for this user (cache lookup key). Paginate to bypass
+    // the 1000-row default limit for libraries with many prior analyses.
+    const existing: any[] = [];
+    for (let offset = 0; offset < 20000; offset += 1000) {
+      const { data: page } = await adm
+        .from("ai_track_analysis")
+        .select("spotify_track_id, prompt_version, schema_version, model_used")
+        .eq("user_id", userId)
+        .eq("analysis_version", ANALYSIS_VERSION)
+        .range(offset, offset + 999);
+      if (!page || page.length === 0) break;
+      existing.push(...page);
+      if (page.length < 1000) break;
+    }
 
     const cacheKey = (id: string) => `${id}::${PROMPT_VERSION}::${SCHEMA_VERSION}::${MODEL}`;
     const cachedSet = new Set<string>(
