@@ -441,7 +441,8 @@ function LanguageStep({ dna }: { dna: ReturnType<typeof useMusicDna> }) {
           <Globe2 className="w-6 h-6 text-accent shrink-0 mt-1" />
           <div>
             <p className="font-medium mb-1">Sin datos de idioma suficientes</p>
-            <p className="text-sm text-muted-foreground">El idioma es solo un dato de contexto y nunca se usa para agrupar playlists.</p>
+            <p className="text-sm text-muted-foreground">El inglés se agrupa solo con inglés; español, portugués, italiano y francés pueden compartir playlist.</p>
+
           </div>
         </div>
 
