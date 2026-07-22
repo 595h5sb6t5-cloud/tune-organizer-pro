@@ -1,7 +1,13 @@
-// cluster-hardened: Phase 2 hardened clustering over a diagnostic sample.
-// Writes cluster_candidates (phase='v3-hardened'), cluster_candidate_tracks,
-// unassigned_tracks, and a full report on diagnostic_samples.phase2_report.
-// Does NOT touch generated_playlists / spotify export.
+// cluster-hardened v2: Phase 2 with two-tier formation/promotion + calibrated gates.
+// - Bucketing: coarser (music_family for non-house, house::subgenre for house)
+// - House gates only apply when is_house_related AND house_profile.analysis_confidence >= 0.65
+// - Two tiers:
+//     candidate: min 4 tracks, avg pair fit >= 0.62, centroid fit >= 0.66, sonic >= 0.68
+//     promoted:  min 6 tracks, avg pair fit >= 0.72, centroid fit >= 0.76
+// - Penalty caps (individual + total 0.35)
+// - Confidence gating for hard gates (>=0.70) — soft weighting otherwise
+// - Rejection reason tally + score distribution in the report
+// - Does NOT touch generated_playlists / spotify export
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
 const corsHeaders = {
@@ -11,15 +17,38 @@ const corsHeaders = {
 const json = (b: unknown, s = 200) =>
   new Response(JSON.stringify(b), { status: s, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
-// ─── Thresholds (Prompt Maestro) ────────────────────────────────────────────
-const MIN_CLUSTER_SIZE = 10;
-const AVG_FIT_THRESHOLD = 0.84;
-const MIN_FIT_THRESHOLD = 0.74;
+// ─── Thresholds ─────────────────────────────────────────────────────────────
+// Two tiers so we can find groups first, then judge them.
+const CAND = {
+  min_size: 4,
+  centroid_fit: 0.66,
+  avg_pair_fit: 0.62,
+  sonic_fit: 0.68,
+};
+const PROMO = {
+  min_size: 6,
+  centroid_fit: 0.76,
+  avg_pair_fit: 0.72,
+  min_pair_fit: 0.62, // no track wildly worse than the group
+  sonic_coherence: 0.70,
+};
+
 const HOUSE_GATES = { groove: 0.78, kick: 0.74, bass: 0.74 };
-const SCENE_DISTANCE_MAX = 0.35;
+const HOUSE_GATE_MIN_CONF = 0.65;   // gates only apply if house_profile.analysis_confidence >= this
+const ANALYSIS_CONF_HARD_GATE = 0.70; // any hard rejection needs confidence >= this
 const ARTIST_SURPRISE = { sonic: 0.90, transition: 0.88, ctx: 0.75 };
 
-// House subgenre neighbor map (used for subgenre_fit)
+// Penalty caps
+const PEN_CAPS = {
+  artist_identity_break: 0.12,
+  scene_distance: 0.15,
+  skip_risk: 0.15,
+  subgenre_conflict: 0.12,
+  production_shift: 0.12,
+  total: 0.35,
+};
+
+// House subgenre neighbor map
 const HOUSE_NEIGHBORS: Record<string, string[]> = {
   deep_house: ["melodic_house", "organic_house", "soulful_house", "vocal_house"],
   melodic_house: ["deep_house", "organic_house", "progressive_house", "melodic_techno_adjacent"],
@@ -51,8 +80,7 @@ type Track = {
   language: string | null;
   dims: Record<string, number>;
   tempo_feel: string | null;
-  transition_in: string | null;
-  transition_out: string | null;
+  analysis_confidence: number; // overall confidence for hard-gate eligibility
 };
 
 function numOr(v: any, d = 0.5): number {
@@ -75,15 +103,14 @@ function subgenreFit(a: Track, b: Track): number {
   const secA = new Set(a.secondary_subgenres ?? []);
   const secB = new Set(b.secondary_subgenres ?? []);
   if (secA.has(b.primary_subgenre) || secB.has(a.primary_subgenre)) return 0.55;
-  return 0.2;
+  return 0.35;
 }
 
 function sceneDistance(a: Track, b: Track): number {
   const sA = String(a.artist_context?.artist_scene ?? "").toLowerCase();
   const sB = String(b.artist_context?.artist_scene ?? "").toLowerCase();
-  if (!sA || !sB) return 0.4;
+  if (!sA || !sB) return 0.35;
   if (sA === sB) return 0.0;
-  // token overlap
   const tA = new Set(sA.split(/[\s,/_-]+/).filter(Boolean));
   const tB = new Set(sB.split(/[\s,/_-]+/).filter(Boolean));
   let overlap = 0;
@@ -95,7 +122,7 @@ function sceneDistance(a: Track, b: Track): number {
 function artistContextFit(a: Track, b: Track): number {
   const gA: string[] = a.artist_context?.artist_primary_genres ?? [];
   const gB: string[] = b.artist_context?.artist_primary_genres ?? [];
-  if (!gA.length || !gB.length) return 0.5;
+  if (!gA.length || !gB.length) return 0.55; // missing → neutral-ish, don't punish
   const setA = new Set(gA.map((x) => String(x).toLowerCase()));
   const setB = new Set(gB.map((x) => String(x).toLowerCase()));
   let hit = 0;
@@ -106,7 +133,6 @@ function artistContextFit(a: Track, b: Track): number {
 }
 
 function transitionFit(a: Track, b: Track): number {
-  // Simple: closer tempo_feel + smoother energy_score bridge
   const eA = numOr(a.dims.energy_score);
   const eB = numOr(b.dims.energy_score);
   const energyBridge = 1 - Math.abs(eA - eB);
@@ -114,41 +140,48 @@ function transitionFit(a: Track, b: Track): number {
   return energyBridge * 0.6 + tempoMatch * 0.4;
 }
 
-function artistContextPenalty(a: Track, b: Track): number {
-  // Penalize when identity strong on both sides AND scenes clash
+function capped(v: number, cap: number) { return Math.max(0, Math.min(cap, v)); }
+
+function penalties(a: Track, b: Track) {
   const idA = numOr(a.artist_context?.artist_identity_strength, 0.5);
   const idB = numOr(b.artist_context?.artist_identity_strength, 0.5);
   const scene = sceneDistance(a, b);
   const outlierA = a.artist_context?.track_is_catalog_outlier === true;
   const outlierB = b.artist_context?.track_is_catalog_outlier === true;
-  // If either track is a known catalog outlier, tolerate more scene distance.
   const outlierRelief = (outlierA || outlierB) ? 0.5 : 1.0;
-  const raw = scene * ((idA + idB) / 2) * outlierRelief;
-  return Math.max(0, Math.min(0.6, raw));
+
+  const artistBreak = capped(scene * ((idA + idB) / 2) * outlierRelief * 0.6, PEN_CAPS.artist_identity_break);
+  const scenePen = capped(scene * 0.5, PEN_CAPS.scene_distance);
+  const sonic = sonicFit(a, b);
+  const trans = transitionFit(a, b);
+  const skipRisk = capped((scene * 0.5 + (1 - trans) * 0.5) * 0.5, PEN_CAPS.skip_risk);
+  const sub = subgenreFit(a, b);
+  const subPen = capped((1 - sub) * 0.4, PEN_CAPS.subgenre_conflict);
+  const prodShift = capped(Math.abs(numOr(a.dims.aggressiveness) - numOr(b.dims.aggressiveness)) * 0.3, PEN_CAPS.production_shift);
+
+  const rawTotal = artistBreak + scenePen + skipRisk + subPen + prodShift;
+  const total = Math.min(PEN_CAPS.total, rawTotal);
+  return { artistBreak, scenePen, skipRisk, subPen, prodShift, total, sonic, trans, scene, sub };
 }
 
 function pairFit(a: Track, b: Track) {
-  const sonic = sonicFit(a, b);
-  const sub = subgenreFit(a, b);
+  const p = penalties(a, b);
   const ctx = artistContextFit(a, b);
-  const scene = sceneDistance(a, b);
-  const trans = transitionFit(a, b);
-  const skip = Math.max(0, Math.min(1, scene * 0.5 + (1 - trans) * 0.5));
-  const penalty = artistContextPenalty(a, b);
-  // Weighted composite: 65% sonic, 20% context (sub+ctx), 15% flow (trans - skip)
-  const composite =
-    0.50 * sonic + 0.15 * sub + 0.20 * ctx + 0.15 * (trans * (1 - skip));
+  const composite = 0.55 * p.sonic + 0.15 * p.sub + 0.15 * ctx + 0.15 * p.trans;
   const surprise =
-    sonic >= ARTIST_SURPRISE.sonic &&
-    trans >= ARTIST_SURPRISE.transition &&
+    p.sonic >= ARTIST_SURPRISE.sonic &&
+    p.trans >= ARTIST_SURPRISE.transition &&
     ctx >= ARTIST_SURPRISE.ctx;
-  const final = Math.max(0, Math.min(1, composite - (surprise ? 0 : penalty)));
-  return { sonic, sub, ctx, scene, trans, skip, penalty, surprise, final };
+  const final = Math.max(0, Math.min(1, composite - (surprise ? 0 : p.total)));
+  return { sonic: p.sonic, sub: p.sub, ctx, scene: p.scene, trans: p.trans, skip: p.skipRisk, penalty: p.total, surprise, final };
 }
 
-// ─── Hard gates by family ───────────────────────────────────────────────────
-function houseGate(t: Track): { pass: boolean; failed?: string } {
+// ─── House gate w/ confidence ───────────────────────────────────────────────
+function houseGate(t: Track): { pass: boolean; failed?: string; skipped?: boolean } {
   const hp = t.house_profile ?? {};
+  const conf = numOr(hp.analysis_confidence, 0);
+  if (!t.is_house_related) return { pass: true, skipped: true };
+  if (conf < HOUSE_GATE_MIN_CONF) return { pass: true, skipped: true }; // low confidence → don't hard-reject
   const groove = numOr(hp.four_on_the_floor_strength ?? 0.5);
   const kick = numOr(hp.kick_weight ?? 0.5);
   const bass = numOr(hp.bassline_prominence ?? 0.5);
@@ -158,23 +191,22 @@ function houseGate(t: Track): { pass: boolean; failed?: string } {
   return { pass: true };
 }
 
-// ─── Bucketing ──────────────────────────────────────────────────────────────
+// ─── Bucketing (coarser) ────────────────────────────────────────────────────
 function bucketKey(t: Track): string {
   if (t.is_house_related) {
     const sg = t.house_profile?.primary_house_subgenre || t.primary_subgenre || "house_generic";
-    // group neighbors together
     for (const [k, ns] of Object.entries(HOUSE_NEIGHBORS)) {
       if (sg === k) return `house::${k}`;
       if (ns.includes(sg)) return `house::${k}`;
     }
     return `house::${sg}`;
   }
-  return `${t.music_family ?? "other"}::${t.primary_subgenre ?? "generic"}`;
+  // Coarser: family only, so 150 varied tracks don't split into 73 dust buckets
+  return t.music_family ?? "other";
 }
 
 // ─── Greedy clustering within a bucket ──────────────────────────────────────
 function greedyCluster(tracks: Track[]) {
-  // Sort by artist identity strength desc, then energy → deterministic seeds
   const sorted = tracks.slice().sort((a, b) => {
     const idA = numOr(a.artist_context?.artist_identity_strength, 0.5);
     const idB = numOr(b.artist_context?.artist_identity_strength, 0.5);
@@ -182,79 +214,81 @@ function greedyCluster(tracks: Track[]) {
   });
 
   const used = new Set<string>();
-  const clusters: { seed: Track; members: { t: Track; fit: ReturnType<typeof pairFit> }[] }[] = [];
+  const clusters: { seed: Track; members: { t: Track; fit: any }[] }[] = [];
 
   for (const seed of sorted) {
     if (used.has(seed.spotify_track_id)) continue;
-    const members: { t: Track; fit: ReturnType<typeof pairFit> }[] = [{
+    const members: { t: Track; fit: any }[] = [{
       t: seed,
       fit: { sonic: 1, sub: 1, ctx: 1, scene: 0, trans: 1, skip: 0, penalty: 0, surprise: false, final: 1 },
     }];
     used.add(seed.spotify_track_id);
 
-    // Candidates: everything not-yet-used in this bucket
-    const cands = sorted.filter((x) => !used.has(x.spotify_track_id));
-    // Score each against current centroid = average fit against all current members
-    const scored = cands.map((c) => {
-      let sumFinal = 0;
-      let minFinal = 1;
-      let sumParts = { sonic: 0, sub: 0, ctx: 0, scene: 0, trans: 0, skip: 0, penalty: 0 } as any;
-      let surprise = false;
-      for (const m of members) {
-        const f = pairFit(m.t, c);
-        sumFinal += f.final;
-        if (f.final < minFinal) minFinal = f.final;
-        for (const k of Object.keys(sumParts)) sumParts[k] += (f as any)[k];
-        if (f.surprise) surprise = true;
+    let expanded = true;
+    while (expanded && members.length < 50) {
+      expanded = false;
+      const cands = sorted.filter((x) => !used.has(x.spotify_track_id));
+      const scored = cands.map((c) => {
+        let sumFinal = 0, sumSonic = 0, sumCtx = 0, sumSub = 0, sumTrans = 0, sumSkip = 0, sumPen = 0, sumScene = 0;
+        let minFinal = 1;
+        let surprise = false;
+        for (const m of members) {
+          const f = pairFit(m.t, c);
+          sumFinal += f.final; sumSonic += f.sonic; sumCtx += f.ctx; sumSub += f.sub;
+          sumTrans += f.trans; sumSkip += f.skip; sumPen += f.penalty; sumScene += f.scene;
+          if (f.final < minFinal) minFinal = f.final;
+          if (f.surprise) surprise = true;
+        }
+        const n = members.length;
+        return {
+          c, minFinal, surprise,
+          avg: sumFinal / n,
+          sonic: sumSonic / n, ctx: sumCtx / n, sub: sumSub / n,
+          trans: sumTrans / n, skip: sumSkip / n, penalty: sumPen / n, scene: sumScene / n,
+        };
+      }).sort((a, b) => b.avg - a.avg);
+
+      // Formation tier: use CANDIDATE thresholds so groups can nucleate
+      for (const s of scored) {
+        if (s.avg < CAND.centroid_fit) break; // sorted desc, nothing lower will pass
+        if (s.sonic < CAND.sonic_fit) continue;
+        if (s.minFinal < CAND.avg_pair_fit - 0.10) continue; // let one soft member slide a bit
+        members.push({
+          t: s.c,
+          fit: {
+            sonic: s.sonic, sub: s.sub, ctx: s.ctx, scene: s.scene,
+            trans: s.trans, skip: s.skip, penalty: s.penalty,
+            surprise: s.surprise, final: s.avg,
+          },
+        });
+        used.add(s.c.spotify_track_id);
+        expanded = true;
+        break;
       }
-      const n = members.length;
-      const avg = sumFinal / n;
-      const parts = Object.fromEntries(Object.entries(sumParts).map(([k, v]: any) => [k, v / n]));
-      return { c, avg, minFinal, parts, surprise };
-    }).sort((a, b) => b.avg - a.avg);
-
-    for (const s of scored) {
-      if (s.minFinal < MIN_FIT_THRESHOLD) continue;
-      if (s.avg < MIN_FIT_THRESHOLD) continue;
-      members.push({
-        t: s.c,
-        fit: {
-          sonic: s.parts.sonic, sub: s.parts.sub, ctx: s.parts.ctx,
-          scene: s.parts.scene, trans: s.parts.trans, skip: s.parts.skip,
-          penalty: s.parts.penalty, surprise: s.surprise, final: s.avg,
-        },
-      });
-      used.add(s.c.spotify_track_id);
-      if (members.length >= 50) break;
     }
-
     clusters.push({ seed, members });
   }
   return clusters;
 }
 
-// ─── Cluster naming (simple, no LLM) ────────────────────────────────────────
 function clusterName(seed: Track, members: Track[]): string {
   if (seed.is_house_related) {
     const sg = seed.house_profile?.primary_house_subgenre || "house";
     const avgDark = members.reduce((s, m) => s + numOr(m.dims.darkness), 0) / members.length;
     const avgEnergy = members.reduce((s, m) => s + numOr(m.dims.energy_score), 0) / members.length;
     const mood = avgDark > 0.6 ? "Nocturno" : avgEnergy > 0.75 ? "Peak" : "Sunset";
-    return `${mood} ${sg.replace(/_/g, " ")}`;
+    return `${mood} ${String(sg).replace(/_/g, " ")}`;
   }
   const fam = seed.music_family ?? "mix";
   const subs = new Set(members.map((m) => m.primary_subgenre).filter(Boolean));
-  return `${fam.replace(/_/g, " ")} · ${Array.from(subs).slice(0, 2).join(" / ")}`;
+  return `${String(fam).replace(/_/g, " ")} · ${Array.from(subs).slice(0, 2).join(" / ")}`;
 }
 
-// ─── Problem-case detector ──────────────────────────────────────────────────
 function detectProblemCases(clusters: { seed: Track; members: { t: Track; fit: any }[] }[]) {
   const cases: any[] = [];
   for (const c of clusters) {
     const artists = c.members.map((m) => m.t.artist_name.toLowerCase());
-    const hasKanye = artists.some((a) => a.includes("kanye"));
-    const hasElton = artists.some((a) => a.includes("elton"));
-    if (hasKanye && hasElton) {
+    if (artists.some((a) => a.includes("kanye")) && artists.some((a) => a.includes("elton"))) {
       cases.push({
         case: "Kanye + Elton en el mismo cluster",
         cluster_seed: c.seed.track_name,
@@ -262,18 +296,47 @@ function detectProblemCases(clusters: { seed: Track; members: { t: Track; fit: a
         avg_final_fit: c.members.reduce((s, m) => s + m.fit.final, 0) / c.members.length,
       });
     }
-    const rufus = c.members.filter((m) => m.t.artist_name.toLowerCase().includes("rüfüs") || m.t.artist_name.toLowerCase().includes("rufus"));
+    const rufus = c.members.filter((m) => /r[uü]f[uü]s/i.test(m.t.artist_name));
     if (rufus.length > 0) {
-      const bucket = bucketKey(c.seed);
       cases.push({
         case: "RÜFÜS DU SOL en cluster",
         cluster_seed: c.seed.track_name,
-        bucket,
         rufus_tracks: rufus.map((r) => ({ name: r.t.track_name, subgenre: r.t.primary_subgenre, fit: r.fit.final })),
       });
     }
   }
   return cases;
+}
+
+// ─── Classify each formed cluster ───────────────────────────────────────────
+type ClusterStatus =
+  | "promoted"
+  | "candidate_needs_more_tracks"
+  | "candidate_needs_review"
+  | "rejected_incoherent"
+  | "single_track";
+
+function classify(size: number, avgFinal: number, minFinal: number, avgSonic: number): { status: ClusterStatus; reason: string } {
+  if (size < 2) return { status: "single_track", reason: "no_pair_evidence" };
+  // Coherent enough to eventually promote?
+  const coherent =
+    avgFinal >= CAND.centroid_fit &&
+    avgSonic >= CAND.sonic_fit &&
+    minFinal >= CAND.avg_pair_fit - 0.10;
+  if (!coherent) return { status: "rejected_incoherent", reason: `avg=${avgFinal.toFixed(2)} sonic=${avgSonic.toFixed(2)} min=${minFinal.toFixed(2)} below candidate floor` };
+
+  if (size < CAND.min_size) return { status: "candidate_needs_more_tracks", reason: `size=${size}<${CAND.min_size}` };
+
+  const meetsPromoted =
+    size >= PROMO.min_size &&
+    avgFinal >= PROMO.centroid_fit &&
+    minFinal >= PROMO.min_pair_fit &&
+    avgSonic >= PROMO.sonic_coherence;
+  if (meetsPromoted) return { status: "promoted", reason: "meets_promoted_thresholds" };
+
+  // Close but not enough
+  if (size < PROMO.min_size) return { status: "candidate_needs_more_tracks", reason: `size=${size}<${PROMO.min_size}` };
+  return { status: "candidate_needs_review", reason: `avg=${avgFinal.toFixed(2)} sonic=${avgSonic.toFixed(2)} min=${minFinal.toFixed(2)} below promoted floor` };
 }
 
 // ─── Main handler ───────────────────────────────────────────────────────────
@@ -297,18 +360,18 @@ Deno.serve(async (req) => {
       userId = user.id;
     }
 
+    // Allow re-running without touching guard: accept sample_id explicitly OR pick latest for the user.
     let sampleId: string | undefined = body.sample_id;
     if (!sampleId) {
       const { data: latest } = await adm
         .from("diagnostic_samples")
-        .select("id")
+        .select("id, phase2_status")
         .eq("user_id", userId)
-        .eq("phase2_status", "running")
         .order("created_at", { ascending: false })
         .limit(1);
       sampleId = latest?.[0]?.id;
     }
-    if (!sampleId) return json({ error: "no running sample" }, 400);
+    if (!sampleId) return json({ error: "no sample" }, 400);
 
     const { data: sample } = await adm
       .from("diagnostic_samples")
@@ -316,26 +379,27 @@ Deno.serve(async (req) => {
       .eq("id", sampleId).maybeSingle();
     if (!sample) return json({ error: "sample not found" }, 404);
     if (sample.user_id !== userId) return json({ error: "forbidden" }, 403);
-    if (sample.phase2_status !== "running") {
-      // Guard is the only path that sets running; refuse if something else
-      return json({ ok: true, skipped: `status=${sample.phase2_status}` });
-    }
+
+    // Mark running for this recalibrated pass (idempotent — we accept re-runs from the UI)
+    await adm.from("diagnostic_samples").update({
+      phase2_status: "running",
+      phase2_started_at: new Date().toISOString(),
+      phase2_block_reason: null,
+    }).eq("id", sampleId);
 
     const ids: string[] = sample.spotify_track_ids ?? [];
-    // Fetch v3 analyses + names
     const analyses: any[] = [];
     for (let i = 0; i < ids.length; i += 500) {
       const chunk = ids.slice(i, i + 500);
       const { data } = await adm
         .from("ai_track_analysis")
-        .select("spotify_track_id, track_name, artist_name, music_family, primary_subgenre, secondary_subgenres, is_house_related, house_profile, artist_context, language, energy_score, darkness, dance_feel, softness, aggressiveness, nostalgia, bass_level, drum_intensity, vocal_intensity, melody_level, emotional_intensity, song_variation, tempo_feel, transition_in, transition_out")
+        .select("spotify_track_id, track_name, artist_name, music_family, primary_subgenre, secondary_subgenres, is_house_related, house_profile, artist_context, language, energy_score, darkness, dance_feel, softness, aggressiveness, nostalgia, bass_level, drum_intensity, vocal_intensity, melody_level, emotional_intensity, song_variation, tempo_feel")
         .eq("user_id", userId)
         .eq("analysis_version", "v3")
         .in("spotify_track_id", chunk);
       if (data) analyses.push(...data);
     }
 
-    // Fallback names from liked_songs when analysis lacks them
     const nameById = new Map<string, { track_name: string; artist_name: string }>();
     for (let i = 0; i < ids.length; i += 500) {
       const chunk = ids.slice(i, i + 500);
@@ -359,8 +423,7 @@ Deno.serve(async (req) => {
       artist_context: a.artist_context ?? {},
       language: a.language,
       tempo_feel: a.tempo_feel,
-      transition_in: a.transition_in,
-      transition_out: a.transition_out,
+      analysis_confidence: numOr(a.artist_context?.analysis_confidence ?? a.house_profile?.analysis_confidence, 0.6),
       dims: {
         energy_score: numOr(a.energy_score),
         darkness: numOr(a.darkness),
@@ -377,32 +440,45 @@ Deno.serve(async (req) => {
       },
     }));
 
-    // 1. Segmentation into buckets
+    // Segmentation with confidence-aware gating
     const buckets = new Map<string, Track[]>();
-    const rejectedByGate: { track: Track; reason: string }[] = [];
+    const gateRejected: { track: Track; reason: string }[] = [];
     for (const t of tracks) {
-      if (t.is_house_related) {
-        const g = houseGate(t);
-        if (!g.pass) {
-          rejectedByGate.push({ track: t, reason: `house_gate_failed:${g.failed}` });
-          continue;
-        }
+      const g = houseGate(t);
+      if (!g.pass && t.analysis_confidence >= ANALYSIS_CONF_HARD_GATE) {
+        gateRejected.push({ track: t, reason: `house_gate:${g.failed}` });
+        continue;
       }
       const k = bucketKey(t);
       if (!buckets.has(k)) buckets.set(k, []);
       buckets.get(k)!.push(t);
     }
 
-    // 2. Cluster within each bucket
+    // Score-distribution sample: 10 random pairs from all bucket-eligible tracks
+    const sampleTracks = tracks.filter((t) => !gateRejected.some((g) => g.track.spotify_track_id === t.spotify_track_id));
+    const scoreSamples: any[] = [];
+    for (let i = 0; i < Math.min(10, Math.floor(sampleTracks.length / 2)); i++) {
+      const a = sampleTracks[Math.floor(Math.random() * sampleTracks.length)];
+      const b = sampleTracks[Math.floor(Math.random() * sampleTracks.length)];
+      if (a.spotify_track_id === b.spotify_track_id) continue;
+      const f = pairFit(a, b);
+      scoreSamples.push({
+        a: `${a.track_name} — ${a.artist_name}`,
+        b: `${b.track_name} — ${b.artist_name}`,
+        sonic: +f.sonic.toFixed(3),
+        subgenre: +f.sub.toFixed(3),
+        ctx: +f.ctx.toFixed(3),
+        transition: +f.trans.toFixed(3),
+        scene_distance: +f.scene.toFixed(3),
+        penalty: +f.penalty.toFixed(3),
+        final: +f.final.toFixed(3),
+      });
+    }
+
     type ClusterOut = {
-      name: string;
-      bucket: string;
-      seed: Track;
-      members: { t: Track; fit: any }[];
-      avg_final: number;
-      min_final: number;
-      promoted: boolean;
-      rejection_reason?: string;
+      name: string; bucket: string; seed: Track; members: { t: Track; fit: any }[];
+      avg_final: number; min_final: number; avg_sonic: number;
+      status: ClusterStatus; reason: string;
     };
     const allClusters: ClusterOut[] = [];
     for (const [key, list] of buckets.entries()) {
@@ -410,188 +486,167 @@ Deno.serve(async (req) => {
       for (const c of raw) {
         const avg = c.members.reduce((s, m) => s + m.fit.final, 0) / c.members.length;
         const min = c.members.reduce((m, x) => Math.min(m, x.fit.final), 1);
-        const promoted =
-          c.members.length >= MIN_CLUSTER_SIZE &&
-          avg >= AVG_FIT_THRESHOLD &&
-          min >= MIN_FIT_THRESHOLD;
-        let reason: string | undefined;
-        if (!promoted) {
-          if (c.members.length < MIN_CLUSTER_SIZE) reason = `too_small(${c.members.length}<${MIN_CLUSTER_SIZE})`;
-          else if (avg < AVG_FIT_THRESHOLD) reason = `avg_fit_low(${avg.toFixed(3)}<${AVG_FIT_THRESHOLD})`;
-          else if (min < MIN_FIT_THRESHOLD) reason = `min_fit_low(${min.toFixed(3)}<${MIN_FIT_THRESHOLD})`;
-        }
+        const avgSonic = c.members.reduce((s, m) => s + (m.fit.sonic ?? 1), 0) / c.members.length;
+        const cls = classify(c.members.length, avg, min, avgSonic);
         allClusters.push({
           name: clusterName(c.seed, c.members.map((m) => m.t)),
-          bucket: key,
-          seed: c.seed,
-          members: c.members,
-          avg_final: avg,
-          min_final: min,
-          promoted,
-          rejection_reason: reason,
+          bucket: key, seed: c.seed, members: c.members,
+          avg_final: avg, min_final: min, avg_sonic: avgSonic,
+          status: cls.status, reason: cls.reason,
         });
       }
     }
 
-    // 3. Unassigned: tracks in non-promoted clusters + gate-rejected + never bucketed
-    const promotedIds = new Set<string>();
-    for (const c of allClusters) if (c.promoted) for (const m of c.members) promotedIds.add(m.t.spotify_track_id);
+    // Unassigned: tracks not in any promoted OR candidate cluster
+    const keptStatuses: ClusterStatus[] = ["promoted", "candidate_needs_more_tracks", "candidate_needs_review"];
+    const kept = allClusters.filter((c) => keptStatuses.includes(c.status));
+    const keptIds = new Set<string>();
+    for (const c of kept) for (const m of c.members) keptIds.add(m.t.spotify_track_id);
+
     const unassigned: { track: Track; reason: string }[] = [];
     for (const c of allClusters) {
-      if (c.promoted) continue;
+      if (keptStatuses.includes(c.status)) continue;
       for (const m of c.members) {
-        if (!promotedIds.has(m.t.spotify_track_id)) {
-          unassigned.push({ track: m.t, reason: c.rejection_reason ?? "no_cluster_reached_min" });
-        }
+        if (!keptIds.has(m.t.spotify_track_id)) unassigned.push({ track: m.t, reason: c.status === "single_track" ? "single_track_no_match" : `rejected_incoherent:${c.reason}` });
       }
     }
-    for (const r of rejectedByGate) {
-      if (!promotedIds.has(r.track.spotify_track_id)) unassigned.push(r);
-    }
-    // Tracks with no analysis at all (shouldn't happen post-guard, but safe)
+    for (const r of gateRejected) if (!keptIds.has(r.track.spotify_track_id)) unassigned.push(r);
     const analyzedIds = new Set(tracks.map((t) => t.spotify_track_id));
     for (const id of ids) if (!analyzedIds.has(id)) {
       unassigned.push({ track: { spotify_track_id: id, track_name: nameById.get(id)?.track_name ?? "(unknown)", artist_name: nameById.get(id)?.artist_name ?? "(unknown)" } as any, reason: "no_v3_analysis" });
     }
 
-    // 4. Persist — clear previous v3-hardened runs for this sample, then insert fresh
+    // Persist — clear previous v3-hardened runs for this sample
     await adm.from("cluster_candidates").delete().eq("user_id", userId).eq("sample_id", sampleId).eq("phase", "v3-hardened");
     await adm.from("unassigned_tracks").delete().eq("user_id", userId).eq("sample_id", sampleId).eq("phase", "v3-hardened");
 
-    for (const c of allClusters.filter((c) => c.promoted)) {
+    for (const c of kept) {
       const { data: inserted, error: insErr } = await adm.from("cluster_candidates").insert({
-        user_id: userId,
-        sample_id: sampleId,
-        phase: "v3-hardened",
-        status: "candidate",
-        name: c.name,
-        music_family: c.seed.music_family,
+        user_id: userId, sample_id: sampleId, phase: "v3-hardened",
+        status: c.status === "promoted" ? "candidate" : c.status,
+        name: c.name, music_family: c.seed.music_family,
         dominant_subgenre: c.seed.is_house_related ? (c.seed.house_profile?.primary_house_subgenre ?? c.seed.primary_subgenre) : c.seed.primary_subgenre,
         size: c.members.length,
-        avg_compat: c.avg_final,
-        min_compat: c.min_final,
-        avg_final_fit: c.avg_final,
-        min_final_fit: c.min_final,
-        sonic_summary: `bucket=${c.bucket}`,
+        avg_compat: c.avg_final, min_compat: c.min_final,
+        avg_final_fit: c.avg_final, min_final_fit: c.min_final,
+        sonic_summary: `bucket=${c.bucket} status=${c.status}`,
         language_group: c.members[0]?.t.language ?? null,
       }).select("id").maybeSingle();
       if (insErr || !inserted) { console.error("insert cluster err", insErr); continue; }
       const rows = c.members.map((m, i) => ({
-        cluster_id: inserted.id,
-        user_id: userId,
-        spotify_track_id: m.t.spotify_track_id,
-        position: i,
+        cluster_id: inserted.id, user_id: userId,
+        spotify_track_id: m.t.spotify_track_id, position: i,
         compat_to_centroid: m.fit.final,
-        sonic_fit: m.fit.sonic,
-        subgenre_fit: m.fit.sub,
-        artist_context_fit: m.fit.ctx,
-        scene_distance: m.fit.scene,
-        skip_risk: m.fit.skip,
-        transition_fit: m.fit.trans,
+        sonic_fit: m.fit.sonic, subgenre_fit: m.fit.sub,
+        artist_context_fit: m.fit.ctx, scene_distance: m.fit.scene,
+        skip_risk: m.fit.skip, transition_fit: m.fit.trans,
         artist_context_penalty: m.fit.penalty,
-        final_fit: m.fit.final,
-        is_artist_surprise: m.fit.surprise,
+        final_fit: m.fit.final, is_artist_surprise: m.fit.surprise,
       }));
       if (rows.length) await adm.from("cluster_candidate_tracks").insert(rows);
     }
 
     if (unassigned.length) {
-      // dedupe by track id
       const seen = new Set<string>();
       const uRows = unassigned.filter((u) => {
         if (seen.has(u.track.spotify_track_id)) return false;
-        seen.add(u.track.spotify_track_id);
-        return true;
+        seen.add(u.track.spotify_track_id); return true;
       }).map((u) => ({
-        user_id: userId,
-        spotify_track_id: u.track.spotify_track_id,
-        sample_id: sampleId,
-        phase: "v3-hardened",
-        reason: u.reason,
+        user_id: userId, spotify_track_id: u.track.spotify_track_id,
+        sample_id: sampleId, phase: "v3-hardened", reason: u.reason,
         details: {
-          track_name: u.track.track_name,
-          artist_name: u.track.artist_name,
-          music_family: u.track.music_family,
-          primary_subgenre: u.track.primary_subgenre,
+          track_name: u.track.track_name, artist_name: u.track.artist_name,
+          music_family: u.track.music_family, primary_subgenre: u.track.primary_subgenre,
         },
       }));
-      // Delete-then-insert already handled above
-      if (uRows.length) {
-        // batch insert to avoid unique conflicts
-        for (let i = 0; i < uRows.length; i += 200) {
-          await adm.from("unassigned_tracks").upsert(uRows.slice(i, i + 200), { onConflict: "user_id,spotify_track_id" });
-        }
+      for (let i = 0; i < uRows.length; i += 200) {
+        await adm.from("unassigned_tracks").upsert(uRows.slice(i, i + 200), { onConflict: "user_id,spotify_track_id" });
       }
     }
 
-    // 5. Build report
-    const problemCases = detectProblemCases(allClusters.filter((c) => c.promoted));
+    // Rejection tally
+    const rejTally: Record<string, number> = {};
+    for (const c of allClusters) {
+      if (c.status === "promoted" || c.status === "candidate_needs_more_tracks" || c.status === "candidate_needs_review") continue;
+      const key = c.status === "single_track" ? "single_track_no_neighbor" : "rejected_incoherent";
+      rejTally[key] = (rejTally[key] ?? 0) + 1;
+    }
+    rejTally["house_hard_gate"] = gateRejected.length;
+
     const bucketStats: Record<string, number> = {};
     for (const [k, list] of buckets.entries()) bucketStats[k] = list.length;
 
-    // Load previous v2 clusters for diff (any phase != 'v3-hardened' for this user)
-    const { data: prevClusters } = await adm
-      .from("cluster_candidates")
-      .select("id, size, avg_compat")
-      .eq("user_id", userId)
-      .neq("phase", "v3-hardened");
-    const prevCount = prevClusters?.length ?? 0;
-    const prevAvgSize = prevCount ? (prevClusters!.reduce((s, x: any) => s + (x.size ?? 0), 0) / prevCount) : 0;
+    // Score distribution across all formed clusters
+    const allFinals: number[] = [];
+    for (const c of allClusters) for (const m of c.members) if (typeof m.fit.final === "number" && c.members.length > 1) allFinals.push(m.fit.final);
+    allFinals.sort((a, b) => a - b);
+    const dist = allFinals.length ? {
+      min: +allFinals[0].toFixed(3),
+      p25: +allFinals[Math.floor(allFinals.length * 0.25)].toFixed(3),
+      p50: +allFinals[Math.floor(allFinals.length * 0.50)].toFixed(3),
+      p75: +allFinals[Math.floor(allFinals.length * 0.75)].toFixed(3),
+      max: +allFinals[allFinals.length - 1].toFixed(3),
+      avg: +(allFinals.reduce((a, b) => a + b, 0) / allFinals.length).toFixed(3),
+      n: allFinals.length,
+    } : null;
 
-    const promoted = allClusters.filter((c) => c.promoted);
+    const promoted = allClusters.filter((c) => c.status === "promoted");
+    const needsMore = allClusters.filter((c) => c.status === "candidate_needs_more_tracks");
+    const needsReview = allClusters.filter((c) => c.status === "candidate_needs_review");
+    const rejected = allClusters.filter((c) => c.status === "rejected_incoherent" || c.status === "single_track");
+    const problemCases = detectProblemCases(kept);
+
+    const clusterReport = (c: ClusterOut) => ({
+      name: c.name, bucket: c.bucket, size: c.members.length,
+      status: c.status, reason: c.reason,
+      avg_final_fit: +c.avg_final.toFixed(3),
+      min_final_fit: +c.min_final.toFixed(3),
+      avg_sonic: +c.avg_sonic.toFixed(3),
+      dominant_subgenre: c.seed.is_house_related ? c.seed.house_profile?.primary_house_subgenre : c.seed.primary_subgenre,
+      tracks: c.members.map((m) => ({
+        name: m.t.track_name, artist: m.t.artist_name,
+        subgenre: m.t.primary_subgenre,
+        final_fit: +(m.fit.final ?? 0).toFixed(3),
+        sonic: +(m.fit.sonic ?? 0).toFixed(3),
+        artist_context: +(m.fit.ctx ?? 0).toFixed(3),
+        scene_distance: +(m.fit.scene ?? 0).toFixed(3),
+        artist_penalty: +(m.fit.penalty ?? 0).toFixed(3),
+        surprise: !!m.fit.surprise,
+      })),
+    });
+
     const report = {
       finished_at: new Date().toISOString(),
-      sample_size: ids.length,
-      analyzed_v3: tracks.length,
+      sample_size: ids.length, analyzed_v3: tracks.length,
       buckets: bucketStats,
-      clusters_promoted: promoted.map((c) => ({
-        name: c.name,
-        bucket: c.bucket,
-        size: c.members.length,
-        avg_final_fit: +c.avg_final.toFixed(3),
-        min_final_fit: +c.min_final.toFixed(3),
-        dominant_subgenre: c.seed.is_house_related ? c.seed.house_profile?.primary_house_subgenre : c.seed.primary_subgenre,
-        tracks: c.members.map((m) => ({
-          name: m.t.track_name,
-          artist: m.t.artist_name,
-          subgenre: m.t.primary_subgenre,
-          final_fit: +m.fit.final.toFixed(3),
-          sonic: +m.fit.sonic.toFixed(3),
-          artist_context: +m.fit.ctx.toFixed(3),
-          scene_distance: +m.fit.scene.toFixed(3),
-          skip_risk: +m.fit.skip.toFixed(3),
-          artist_penalty: +m.fit.penalty.toFixed(3),
-          surprise: m.fit.surprise,
-        })),
-      })),
-      clusters_rejected: allClusters.filter((c) => !c.promoted).map((c) => ({
-        bucket: c.bucket,
-        size: c.members.length,
-        reason: c.rejection_reason,
+      bucket_count: buckets.size,
+      calibration_version: "v3.1-two-tier",
+      score_distribution: dist,
+      pairwise_samples: scoreSamples,
+      rejection_reasons: rejTally,
+      counts: {
+        promoted: promoted.length,
+        candidate_needs_more_tracks: needsMore.length,
+        candidate_needs_review: needsReview.length,
+        rejected: rejected.length,
+        unassigned_tracks: unassigned.length,
+        gate_rejected_tracks: gateRejected.length,
+      },
+      clusters_promoted: promoted.map(clusterReport),
+      clusters_candidate_more_tracks: needsMore.map(clusterReport),
+      clusters_candidate_review: needsReview.map(clusterReport),
+      clusters_rejected: rejected.map((c) => ({
+        bucket: c.bucket, size: c.members.length, reason: c.reason,
         seed: `${c.seed.track_name} — ${c.seed.artist_name}`,
         avg_final_fit: +c.avg_final.toFixed(3),
         min_final_fit: +c.min_final.toFixed(3),
       })),
       unassigned: unassigned.map((u) => ({
-        name: u.track.track_name,
-        artist: u.track.artist_name,
-        subgenre: u.track.primary_subgenre,
-        reason: u.reason,
+        name: u.track.track_name, artist: u.track.artist_name,
+        subgenre: u.track.primary_subgenre, reason: u.reason,
       })),
       problem_cases: problemCases,
-      diff_vs_previous: {
-        previous_cluster_count: prevCount,
-        previous_avg_size: +prevAvgSize.toFixed(1),
-        new_cluster_count: promoted.length,
-        new_avg_size: promoted.length ? +(promoted.reduce((s, c) => s + c.members.length, 0) / promoted.length).toFixed(1) : 0,
-        new_avg_fit: promoted.length ? +(promoted.reduce((s, c) => s + c.avg_final, 0) / promoted.length).toFixed(3) : 0,
-      },
-      thresholds: {
-        min_cluster_size: MIN_CLUSTER_SIZE,
-        avg_fit_threshold: AVG_FIT_THRESHOLD,
-        min_fit_threshold: MIN_FIT_THRESHOLD,
-        house_gates: HOUSE_GATES,
-      },
+      thresholds: { candidate: CAND, promoted: PROMO, house_gates: HOUSE_GATES, house_gate_min_confidence: HOUSE_GATE_MIN_CONF, penalty_caps: PEN_CAPS },
     };
 
     await adm.from("diagnostic_samples").update({
@@ -601,7 +656,15 @@ Deno.serve(async (req) => {
       phase2_progress: { done: true, promoted: promoted.length, unassigned: unassigned.length },
     }).eq("id", sampleId);
 
-    return json({ ok: true, sample_id: sampleId, promoted: promoted.length, unassigned: unassigned.length, problem_cases: problemCases.length });
+    return json({
+      ok: true, sample_id: sampleId,
+      promoted: promoted.length,
+      candidates_more_tracks: needsMore.length,
+      candidates_review: needsReview.length,
+      rejected: rejected.length,
+      unassigned: unassigned.length,
+      distribution: dist,
+    });
   } catch (e: any) {
     console.error("cluster-hardened error", e);
     try {
