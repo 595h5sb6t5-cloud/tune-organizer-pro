@@ -51,7 +51,9 @@ Deno.serve(async (req) => {
       userId = user.id;
     }
 
-    // Find most recent sample awaiting phase 2 for this user
+    // Find the target sample for this user. If no explicit sample is supplied,
+    // always inspect the latest sample first so old blocked samples don't keep
+    // causing false "Fase 2 bloqueada" results after a newer sample completes.
     const sampleId: string | undefined = body.sample_id;
     let query = adm
       .from("diagnostic_samples")
@@ -60,7 +62,6 @@ Deno.serve(async (req) => {
       .order("created_at", { ascending: false })
       .limit(1);
     if (sampleId) query = query.eq("id", sampleId) as any;
-    else query = query.in("phase2_status", ["pending_analysis", "blocked"]) as any;
 
     const { data: samples, error: sampleErr } = await query;
     if (sampleErr) return json({ error: sampleErr.message }, 500);
