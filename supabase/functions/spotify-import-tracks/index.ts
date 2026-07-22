@@ -175,7 +175,9 @@ type TrackRow = {
 function extractTrack(item: any, userId: string): TrackRow | null {
   const track = item?.track;
   if (!track || typeof track.id !== "string") return null;
-  if (track.is_local === true || track.is_playable === false) return null;
+  // Only skip true local files. Do NOT filter by `is_playable` — it depends on
+  // market and is inconsistent between requests, causing tracks to drift in/out.
+  if (track.is_local === true) return null;
   const artists = Array.isArray(track.artists) ? track.artists.map((a: any) => a?.name).filter(Boolean).join(", ") : "";
   const album = track.album;
   const images = album?.images || [];
