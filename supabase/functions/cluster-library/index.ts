@@ -123,7 +123,7 @@ function centroidRow(rows: Row[]): Row {
   return out as Row;
 }
 
-function dimSpreadOk(rows: Row[]): { ok: boolean; worst: number } {
+function dimSpreadOk(rows: Row[], maxSpread = MAX_DIM_SPREAD): { ok: boolean; worst: number } {
   let worst = 0;
   for (const k of Object.keys(NUMERIC_WEIGHTS)) {
     let mn = Infinity, mx = -Infinity, any = false;
@@ -138,8 +138,9 @@ function dimSpreadOk(rows: Row[]): { ok: boolean; worst: number } {
     const spread = mx - mn;
     if (spread > worst) worst = spread;
   }
-  return { ok: worst <= MAX_DIM_SPREAD, worst };
+  return { ok: worst <= maxSpread, worst };
 }
+
 
 function dominantDimensions(rows: Row[]) {
   const c = centroidRow(rows);
