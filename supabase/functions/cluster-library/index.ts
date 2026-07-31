@@ -73,9 +73,15 @@ function num(v: unknown): number | null {
   return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : null;
 }
 
-function buildVector(r: Row) {
-  const vec: Record<string, number | null> = {};
-  for (const k of Object.keys(NUMERIC_WEIGHTS)) vec[k] = num((r as any)[k]);
+const NUMERIC_KEYS = Object.keys(NUMERIC_WEIGHTS);
+const NUMERIC_W = NUMERIC_KEYS.map((k) => (NUMERIC_WEIGHTS as any)[k] as number);
+const vecCache = new WeakMap<object, (number | null)[]>();
+
+function buildVector(r: Row): (number | null)[] {
+  const cached = vecCache.get(r as unknown as object);
+  if (cached) return cached;
+  const vec = NUMERIC_KEYS.map((k) => num((r as any)[k]));
+  vecCache.set(r as unknown as object, vec);
   return vec;
 }
 
@@ -84,12 +90,14 @@ function compat(a: Row, b: Row): number {
   const vb = buildVector(b);
   let wSum = 0;
   let dSum = 0;
-  for (const [k, w] of Object.entries(NUMERIC_WEIGHTS)) {
-    const x = va[k], y = vb[k];
+  for (let i = 0; i < NUMERIC_KEYS.length; i++) {
+    const x = va[i], y = vb[i];
     if (x === null || y === null) continue;
+    const w = NUMERIC_W[i];
     wSum += w;
     dSum += w * Math.abs(x - y);
   }
+
   const numeric = wSum > 0 ? 1 - dSum / wSum : 0.5;
   let catBonus = 0;
   let catCount = 0;
