@@ -111,6 +111,7 @@ export function useMusicDna(): MusicDna & { refresh: () => Promise<void> } {
   const [state, setState] = useState<MusicDna>({
     loading: true,
     totals: { liked: 0, playlists: 0, artists: 0, albums: 0, analyzed: 0 },
+    lastSyncAt: null,
     avgEnergy: 0, avgValence: 0, avgTempo: 0,
     calmVsEnergetic: { calm: 50, energetic: 50 },
     topMoods: [], topGenres: [], topVibes: [], contexts: [],
@@ -127,8 +128,10 @@ export function useMusicDna(): MusicDna & { refresh: () => Promise<void> } {
     while (true) {
       const { data } = await supabase
         .from("liked_songs")
-        .select("audio_energy,audio_valence,audio_tempo,mood,energy,genre_tags,sonic_texture,listening_context,atmosphere,artist_name")
+        .select("spotify_track_id,audio_energy,audio_valence,audio_tempo,mood,energy,genre_tags,sonic_texture,listening_context,atmosphere,artist_name")
         .eq("user_id", user.id)
+        .eq("is_active", true)
+        .eq("is_available", true)
         .range(off, off + PAGE - 1);
       if (!data || data.length === 0) break;
       liked.push(...data);
@@ -136,19 +139,30 @@ export function useMusicDna(): MusicDna & { refresh: () => Promise<void> } {
       off += PAGE;
     }
 
-    const [{ count: likedCount }, { count: plCount }, { count: artistsCount }, { count: albumsCount }, artistsRes, analysisRes] = await Promise.all([
-      supabase.from("liked_songs").select("id", { count: "exact", head: true }).eq("user_id", user.id),
+    const [{ count: likedCount }, { count: plCount }, { count: artistsCount }, { count: albumsCount }, artistsRes, connRes] = await Promise.all([
+      supabase.from("liked_songs").select("id", { count: "exact", head: true }).eq("user_id", user.id).eq("is_active", true).eq("is_available", true),
       supabase.from("spotify_playlists").select("id", { count: "exact", head: true }).eq("user_id", user.id),
       supabase.from("spotify_followed_artists").select("id", { count: "exact", head: true }).eq("user_id", user.id),
       supabase.from("spotify_saved_albums").select("id", { count: "exact", head: true }).eq("user_id", user.id),
       supabase.from("spotify_followed_artists").select("artist_name,image_url,genres,popularity").eq("user_id", user.id).order("popularity", { ascending: false }).limit(12),
-      supabase
+      supabase.from("spotify_connections").select("last_full_sync_at,last_library_sync_at,last_incremental_sync_at").eq("user_id", user.id).maybeSingle(),
+    ]);
+
+    const ANALYSIS_COLUMNS = "spotify_track_id,analysis_version,main_genre,secondary_genres_v2,primary_genre,secondary_genres,main_mood,secondary_moods_v2,moods,sound_texture,tempo_feel,beat_style,energy_score,dance_feel,darkness,softness,bass_level,drum_intensity,vocal_intensity,melody_level,emotional_intensity,best_contexts_v2,best_contexts,compatible_playlist_types,language";
+    const analysisRows: any[] = [];
+    let aOff = 0;
+    while (true) {
+      const { data } = await supabase
         .from("ai_track_analysis")
-        .select("spotify_track_id,analysis_version,main_genre,secondary_genres_v2,primary_genre,secondary_genres,main_mood,secondary_moods_v2,moods,sound_texture,tempo_feel,beat_style,energy_score,dance_feel,darkness,softness,bass_level,drum_intensity,vocal_intensity,melody_level,emotional_intensity,best_contexts_v2,best_contexts,compatible_playlist_types,language")
+        .select(ANALYSIS_COLUMNS)
         .eq("user_id", user.id)
         .order("updated_at", { ascending: false })
-        .limit(5000),
-    ]);
+        .range(aOff, aOff + PAGE - 1);
+      if (!data || data.length === 0) break;
+      analysisRows.push(...data);
+      if (data.length < PAGE) break;
+      aOff += PAGE;
+    }
 
     const moodMap = new Map<string, number>();
     const genreMap = new Map<string, number>();
@@ -185,7 +199,7 @@ export function useMusicDna(): MusicDna & { refresh: () => Promise<void> } {
       }
     }
 
-    for (const a of analysisRes.data ?? []) {
+    for (const a of analysisRows) {
       const row = a as any;
       if (row.spotify_track_id && (!analysisBySpotifyId.has(row.spotify_track_id) || row.analysis_version === "v2")) {
         analysisBySpotifyId.set(row.spotify_track_id, row);
@@ -289,8 +303,9 @@ export function useMusicDna(): MusicDna & { refresh: () => Promise<void> } {
         playlists: plCount ?? 0,
         artists: artistsCount ?? 0,
         albums: albumsCount ?? 0,
-        analyzed: analysisCount || audioCount,
+        analyzed: analysisBySpotifyId.size || analysisCount || audioCount,
       },
+      lastSyncAt: connRes.data?.last_full_sync_at || connRes.data?.last_library_sync_at || connRes.data?.last_incremental_sync_at || null,
       avgEnergy, avgValence, avgTempo,
       calmVsEnergetic: { calm: Math.round((calm / totalCE) * 100), energetic: Math.round((energetic / totalCE) * 100) },
       topMoods: topMoodsArr,
