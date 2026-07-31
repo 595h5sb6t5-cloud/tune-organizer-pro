@@ -294,7 +294,9 @@ Deno.serve(async (req) => {
         return score(b) - score(a);
       });
 
+
       const used = new Set<string>();
+      const rejectedSeeds = new Set<string>();
       for (const seed of pool) {
         if (used.has(seed.spotify_track_id)) continue;
         const members: Row[] = [seed];
@@ -348,11 +350,50 @@ Deno.serve(async (req) => {
             status: "candidate",
           });
         } else {
-          // Return members to unassigned (release used lock for future seeds? we won't; they had their chance)
-          for (const m of members) unassigned.push(m);
+          // A failed attempt must NOT burn its members. Only the seed stays locked
+          // (it already had its turn); everyone else returns to the pool so they can
+          // join a different, stronger cluster later in the pass.
+          rejectedSeeds.add(seed.spotify_track_id);
+          for (const m of members) {
+            if (m.spotify_track_id === seed.spotify_track_id) continue;
+            used.delete(m.spotify_track_id);
+          }
         }
       }
+
+      // Whatever is still loose in this language group after the greedy pass.
+      const clusteredIds = new Set(clusters.flatMap((c) => c.members.map((m) => m.spotify_track_id)));
+      for (const r of list) {
+        if (!clusteredIds.has(r.spotify_track_id)) leftovers.push(r);
+      }
     }
+
+    // ---- Rescue pass: try to place leftovers into an existing valid cluster ----
+    // Keeps the quality gates intact (track must be strongly compatible with the
+    // centroid and must not blow the per-dimension spread) but stops throwing away
+    // hundreds of tracks that simply never got a good seed.
+    for (const r of leftovers) {
+      const g = langGroup(r.language);
+      let best: { c: typeof clusters[number]; s: number } | null = null;
+      for (const c of clusters) {
+        if (c.members.length >= 50) continue;
+        if (!langCompatible(g, c.language_group)) continue;
+        const s = compat(centroidRow(c.members), r);
+        if (s < STRONG_FIT) continue;
+        if (!dimSpreadOk([...c.members, r]).ok) continue;
+        if (!best || s > best.s) best = { c, s };
+      }
+      if (best) {
+        best.c.members.push(r);
+        const cent = centroidRow(best.c.members);
+        const compats = best.c.members.map((m) => compat(cent, m));
+        best.c.avg_compat = compats.reduce((a, b) => a + b, 0) / compats.length;
+        best.c.min_compat = Math.min(...compats);
+      } else {
+        unassigned.push(r);
+      }
+    }
+
 
     // Build report
     const report = clusters.map((c) => {
