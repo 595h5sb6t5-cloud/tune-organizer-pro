@@ -551,10 +551,12 @@ Deno.serve(async (req) => {
 
       const { data: checkJob } = await adm
         .from("playlist_generation_jobs")
-        .select("status, phase")
+        .select("status, phase, user_id")
         .eq("id", jobId)
-        .single();
+        .eq("user_id", userId)
+        .maybeSingle();
       if (!checkJob) return json({ error: "Job not found" }, 404);
+      if (checkJob.user_id !== userId) return json({ error: "Forbidden" }, 403);
 
       const isResumable =
         checkJob.status === "failed" ||
