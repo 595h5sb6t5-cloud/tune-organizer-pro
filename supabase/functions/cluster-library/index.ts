@@ -73,9 +73,15 @@ function num(v: unknown): number | null {
   return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : null;
 }
 
-function buildVector(r: Row) {
-  const vec: Record<string, number | null> = {};
-  for (const k of Object.keys(NUMERIC_WEIGHTS)) vec[k] = num((r as any)[k]);
+const NUMERIC_KEYS = Object.keys(NUMERIC_WEIGHTS);
+const NUMERIC_W = NUMERIC_KEYS.map((k) => (NUMERIC_WEIGHTS as any)[k] as number);
+const vecCache = new WeakMap<object, (number | null)[]>();
+
+function buildVector(r: Row): (number | null)[] {
+  const cached = vecCache.get(r as unknown as object);
+  if (cached) return cached;
+  const vec = NUMERIC_KEYS.map((k) => num((r as any)[k]));
+  vecCache.set(r as unknown as object, vec);
   return vec;
 }
 
@@ -84,12 +90,14 @@ function compat(a: Row, b: Row): number {
   const vb = buildVector(b);
   let wSum = 0;
   let dSum = 0;
-  for (const [k, w] of Object.entries(NUMERIC_WEIGHTS)) {
-    const x = va[k], y = vb[k];
+  for (let i = 0; i < NUMERIC_KEYS.length; i++) {
+    const x = va[i], y = vb[i];
     if (x === null || y === null) continue;
+    const w = NUMERIC_W[i];
     wSum += w;
     dSum += w * Math.abs(x - y);
   }
+
   const numeric = wSum > 0 ? 1 - dSum / wSum : 0.5;
   let catBonus = 0;
   let catCount = 0;
@@ -123,7 +131,7 @@ function centroidRow(rows: Row[]): Row {
   return out as Row;
 }
 
-function dimSpreadOk(rows: Row[]): { ok: boolean; worst: number } {
+function dimSpreadOk(rows: Row[], maxSpread = MAX_DIM_SPREAD): { ok: boolean; worst: number } {
   let worst = 0;
   for (const k of Object.keys(NUMERIC_WEIGHTS)) {
     let mn = Infinity, mx = -Infinity, any = false;
@@ -138,8 +146,9 @@ function dimSpreadOk(rows: Row[]): { ok: boolean; worst: number } {
     const spread = mx - mn;
     if (spread > worst) worst = spread;
   }
-  return { ok: worst <= MAX_DIM_SPREAD, worst };
+  return { ok: worst <= maxSpread, worst };
 }
+
 
 function dominantDimensions(rows: Row[]) {
   const c = centroidRow(rows);
@@ -181,7 +190,7 @@ Deno.serve(async (req) => {
     const persist: boolean = body.persist === true;
     const runId = crypto.randomUUID();
 
-    // Pull v2 analyses joined to spotify_track_id (paginated: PostgREST caps each request at 1000 rows).
+    // Pull deep analyses (v2.1 and v3.0 share the same numeric sonic columns).
     const SELECT_COLS = "spotify_track_id, track_name, artist_name, language, tempo_feel, beat_style, sound_texture, main_mood, main_genre, energy_score, melody_level, bass_level, drum_intensity, vocal_intensity, aggressiveness, softness, darkness, nostalgia, dance_feel, emotional_intensity, song_variation, schema_version";
     const PAGE = 1000;
     const allAnalyses: any[] = [];
@@ -190,7 +199,7 @@ Deno.serve(async (req) => {
         .from("ai_track_analysis")
         .select(SELECT_COLS)
         .eq("user_id", user.id)
-        .eq("schema_version", "v2.1")
+        .in("schema_version", ["v2.1", "v3.0"])
         .not("spotify_track_id", "is", null)
         .order("spotify_track_id", { ascending: true })
         .range(offset, offset + PAGE - 1);
@@ -201,15 +210,41 @@ Deno.serve(async (req) => {
       if (offset > 50000) break;
     }
 
-    // Deduplicate by spotify_track_id (keep first)
-    const seen = new Set<string>();
-    let rows: Row[] = allAnalyses.filter((r: any) => {
-      if (r.energy_score === null) return false;
-      if (seen.has(r.spotify_track_id)) return false;
-      seen.add(r.spotify_track_id);
-      return true;
-    }) as Row[];
-    if (rows.length === 0) return json({ error: "No hay canciones analizadas con schema v2.1. Corre el Deep Analysis primero." }, 400);
+    // Library universe: every active liked song (paginated).
+    const likedIds = new Set<string>();
+    for (let offset = 0; ; offset += PAGE) {
+      const { data: page, error: lerr } = await adm
+        .from("liked_songs")
+        .select("spotify_track_id")
+        .eq("user_id", user.id)
+        .eq("is_active", true)
+        .eq("is_available", true)
+        .order("spotify_track_id", { ascending: true })
+        .range(offset, offset + PAGE - 1);
+      if (lerr) return json({ error: lerr.message }, 500);
+      const chunk = page ?? [];
+      for (const l of chunk) likedIds.add((l as any).spotify_track_id);
+      if (chunk.length < PAGE) break;
+      if (offset > 50000) break;
+    }
+
+    // Deduplicate by spotify_track_id, preferring the newest schema (v3.0 over v2.1).
+    const byTrack = new Map<string, any>();
+    for (const r of allAnalyses) {
+      if (r.energy_score === null) continue;
+      if (likedIds.size > 0 && !likedIds.has(r.spotify_track_id)) continue;
+      const prev = byTrack.get(r.spotify_track_id);
+      if (!prev || (prev.schema_version !== "v3.0" && r.schema_version === "v3.0")) {
+        byTrack.set(r.spotify_track_id, r);
+      }
+    }
+    let rows: Row[] = [...byTrack.values()] as Row[];
+    const libraryTotal = likedIds.size;
+    const pendingAnalysis = Math.max(libraryTotal - rows.length, 0);
+    if (rows.length === 0) {
+      return json({ error: "No hay canciones con análisis profundo. Corre el Deep Analysis primero." }, 400);
+    }
+
 
     // Enrich track/artist name if missing from liked_songs.
     const missing = rows.filter((r) => !r.track_name || !r.artist_name).map((r) => r.spotify_track_id);
@@ -236,13 +271,6 @@ Deno.serve(async (req) => {
       rows = rows.map((r) => ({ r, k: Math.random() })).sort((a, b) => a.k - b.k).slice(0, sampleSize).map((x) => x.r);
     }
 
-    // Group by language
-    const groups: Record<string, Row[]> = {};
-    for (const r of rows) {
-      const g = langGroup(r.language);
-      (groups[g] ??= []).push(r);
-    }
-
     type Cluster = {
       id: string;
       language_group: string;
@@ -255,78 +283,149 @@ Deno.serve(async (req) => {
     const clusters: Cluster[] = [];
     const unassigned: Row[] = [];
 
-    // Greedy clustering inside each language group
-    for (const [g, list] of Object.entries(groups)) {
-      const pool = [...list];
-      // Sort by "distinctiveness" (distance from 0.5 across dims) so we seed on strong tracks first
-      pool.sort((a, b) => {
-        const score = (r: Row) => {
-          let s = 0, c = 0;
-          for (const k of Object.keys(NUMERIC_WEIGHTS)) { const v = num((r as any)[k]); if (v === null) continue; s += Math.abs(v - 0.5); c++; }
-          return c ? s / c : 0;
-        };
-        return score(b) - score(a);
-      });
+    // Multi-round greedy clustering. Each round only sees the tracks that are still
+    // loose, so a song burned by a weak seed in round 1 gets fresh chances later
+    // instead of being discarded forever.
+    const ROUNDS = 4;
+    let pending: Row[] = rows;
+    for (let round = 0; round < ROUNDS && pending.length >= MIN_SIZE; round++) {
+      const groups: Record<string, Row[]> = {};
+      for (const r of pending) {
+        const g = langGroup(r.language);
+        (groups[g] ??= []).push(r);
+      }
+      const roundLeftovers: Row[] = [];
+      // Later rounds loosen only the *growth* heuristics (how easily a track joins a
+      // forming group); the publication gates below stay untouched.
+      const joinThreshold = Math.max(SEED_JOIN_THRESHOLD - round * 0.015, 0.80);
+      const maxSpread = MAX_DIM_SPREAD + round * 0.03;
 
-      const used = new Set<string>();
-      for (const seed of pool) {
-        if (used.has(seed.spotify_track_id)) continue;
-        const members: Row[] = [seed];
-        used.add(seed.spotify_track_id);
-        // Grow greedily
-        let changed = true;
-        while (changed && members.length < 45) {
-          changed = false;
-          const c = centroidRow(members);
-          const candidates: { r: Row; s: number }[] = [];
+      for (const [g, list] of Object.entries(groups)) {
+        const pool = [...list];
+        // Sort by "distinctiveness" (distance from 0.5 across dims) so we seed on strong tracks first
+        pool.sort((a, b) => {
+          const score = (r: Row) => {
+            let s = 0, c = 0;
+            for (const k of Object.keys(NUMERIC_WEIGHTS)) { const v = num((r as any)[k]); if (v === null) continue; s += Math.abs(v - 0.5); c++; }
+            return c ? s / c : 0;
+          };
+          return score(b) - score(a);
+        });
+
+        const used = new Set<string>();
+        const placed = new Set<string>();
+        for (const seed of pool) {
+          if (used.has(seed.spotify_track_id)) continue;
+
+          // Cheap pre-filter: if the seed does not even have MIN_SIZE-1 compatible
+          // neighbours left, there is no point running the expensive growth loop.
+          let neighbours: { r: Row; s: number }[] = [];
           for (const r of pool) {
-            if (used.has(r.spotify_track_id)) continue;
-            const s = compat(c, r);
-            if (s >= SEED_JOIN_THRESHOLD) candidates.push({ r, s });
+            if (r === seed || used.has(r.spotify_track_id)) continue;
+            const s = compat(seed, r);
+            if (s >= joinThreshold - 0.04) neighbours.push({ r, s });
           }
-          candidates.sort((a, b) => b.s - a.s);
-          // Try adding top candidate if spread still ok
-          for (const { r } of candidates) {
-            const test = [...members, r];
-            const spread = dimSpreadOk(test);
-            if (!spread.ok) continue;
-            members.push(r);
-            used.add(r.spotify_track_id);
-            changed = true;
-            break;
+          if (neighbours.length + 1 < MIN_SIZE) continue;
+          neighbours.sort((a, b) => b.s - a.s);
+          neighbours = neighbours.slice(0, 160);
+
+          const members: Row[] = [seed];
+          used.add(seed.spotify_track_id);
+          // Grow greedily, re-centroiding after each accepted member but only
+          // rescoring the short-listed neighbourhood instead of the whole pool.
+          let changed = true;
+          while (changed && members.length < 45) {
+            changed = false;
+            const c = centroidRow(members);
+            const scored: { r: Row; s: number }[] = [];
+            for (const n of neighbours) {
+              if (used.has(n.r.spotify_track_id)) continue;
+              const s = compat(c, n.r);
+              if (s >= joinThreshold) scored.push({ r: n.r, s });
+            }
+            scored.sort((a, b) => b.s - a.s);
+            for (const { r } of scored) {
+              if (!dimSpreadOk([...members, r], maxSpread).ok) continue;
+              members.push(r);
+              used.add(r.spotify_track_id);
+              changed = true;
+              break;
+            }
+          }
+
+
+          const cent = centroidRow(members);
+          const compats = members.map((m) => compat(cent, m));
+          const avg = compats.reduce((a, b) => a + b, 0) / compats.length;
+          const mn = Math.min(...compats);
+          const pctStrong = compats.filter((c) => c >= STRONG_FIT).length / compats.length;
+
+          let ok = true;
+          if (members.length < MIN_SIZE) ok = false;
+          else if (avg < AVG_COMPAT_MIN) ok = false;
+          else if (mn < MIN_COMPAT_FLOOR) ok = false;
+          else if (pctStrong < PCT_ABOVE_STRONG) ok = false;
+
+          if (ok) {
+            clusters.push({
+              id: crypto.randomUUID(),
+              language_group: g,
+              members,
+              avg_compat: avg,
+              min_compat: mn,
+              status: "candidate",
+            });
+            for (const m of members) placed.add(m.spotify_track_id);
           }
         }
 
-        // Compute metrics
-        const cent = centroidRow(members);
-        const compats = members.map((m) => compat(cent, m));
-        const avg = compats.reduce((a, b) => a + b, 0) / compats.length;
-        const mn = Math.min(...compats);
-
-        // Validate against master-prompt quality gates
-        const pctStrong = compats.filter((c) => c >= STRONG_FIT).length / compats.length;
-        let ok = true;
-        let reason: string | undefined;
-        if (members.length < MIN_SIZE) { ok = false; reason = `size ${members.length} < ${MIN_SIZE}`; }
-        else if (avg < AVG_COMPAT_MIN) { ok = false; reason = `avg_compat ${avg.toFixed(2)} < ${AVG_COMPAT_MIN}`; }
-        else if (mn < MIN_COMPAT_FLOOR) { ok = false; reason = `min_compat ${mn.toFixed(2)} < ${MIN_COMPAT_FLOOR}`; }
-        else if (pctStrong < PCT_ABOVE_STRONG) { ok = false; reason = `only ${(pctStrong * 100).toFixed(0)}% of tracks >= ${STRONG_FIT} (need ${PCT_ABOVE_STRONG * 100}%)`; }
-
-        if (ok) {
-          clusters.push({
-            id: crypto.randomUUID(),
-            language_group: g,
-            members,
-            avg_compat: avg,
-            min_compat: mn,
-            status: "candidate",
-          });
-        } else {
-          // Return members to unassigned (release used lock for future seeds? we won't; they had their chance)
-          for (const m of members) unassigned.push(m);
+        for (const r of list) {
+          if (!placed.has(r.spotify_track_id)) roundLeftovers.push(r);
         }
       }
+
+      if (roundLeftovers.length === pending.length) { pending = roundLeftovers; break; }
+      pending = roundLeftovers;
     }
+    const leftovers: Row[] = pending;
+
+
+    // ---- Rescue pass: try to place leftovers into an existing valid cluster ----
+    // Keeps the quality gates intact (track must be strongly compatible with the
+    // centroid and must not blow the per-dimension spread) but stops throwing away
+    // hundreds of tracks that simply never got a good seed.
+    const centroidCache = new Map<string, Row>();
+    const centroidOf = (c: Cluster) => {
+      let cached = centroidCache.get(c.id);
+      if (!cached) { cached = centroidRow(c.members); centroidCache.set(c.id, cached); }
+      return cached;
+    };
+    for (const r of leftovers) {
+      const g = langGroup(r.language);
+      let best: { c: Cluster; s: number } | null = null;
+      for (const c of clusters) {
+        if (c.members.length >= 50) continue;
+        if (!langCompatible(g, c.language_group)) continue;
+        const s = compat(centroidOf(c), r);
+        if (s < STRONG_FIT) continue;
+        if (!best || s > best.s) best = { c, s };
+      }
+      if (best && dimSpreadOk([...best.c.members, r]).ok) {
+        best.c.members.push(r);
+        centroidCache.delete(best.c.id);
+      } else {
+        unassigned.push(r);
+      }
+    }
+    // Recompute cluster metrics after the rescue pass.
+    for (const c of clusters) {
+      const cent = centroidRow(c.members);
+      const compats = c.members.map((m) => compat(cent, m));
+      c.avg_compat = compats.reduce((a, b) => a + b, 0) / compats.length;
+      c.min_compat = Math.min(...compats);
+    }
+
+
 
     // Build report
     const report = clusters.map((c) => {
@@ -404,11 +503,14 @@ Deno.serve(async (req) => {
       run_id: runId,
       persisted: persist,
       totals: {
+        library_total: libraryTotal,
+        pending_analysis: pendingAnalysis,
         analyzed: rows.length,
         clusters: clusters.length,
         clustered_tracks: clusters.reduce((a, c) => a + c.members.length, 0),
         unassigned: unassigned.length,
       },
+
       thresholds: { MIN_SIZE, AVG_COMPAT_MIN, MIN_COMPAT_FLOOR, PCT_ABOVE_STRONG, STRONG_FIT, SEED_JOIN_THRESHOLD, MAX_DIM_SPREAD },
       clusters: report,
       unassigned: unassignedReport,
