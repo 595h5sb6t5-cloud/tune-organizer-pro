@@ -280,6 +280,8 @@ Deno.serve(async (req) => {
     };
     const clusters: Cluster[] = [];
     const unassigned: Row[] = [];
+    const leftovers: Row[] = [];
+
 
     // Greedy clustering inside each language group
     for (const [g, list] of Object.entries(groups)) {
