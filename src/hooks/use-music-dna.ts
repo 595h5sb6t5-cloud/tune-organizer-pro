@@ -37,6 +37,8 @@ export interface MusicDna {
     albums: number;
     analyzed: number;
   };
+  lastSyncAt: string | null;
+
   avgEnergy: number;
   avgValence: number;
   avgTempo: number;
