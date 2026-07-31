@@ -36,8 +36,19 @@ const NUMERIC_WEIGHTS: Record<string, number> = {
   song_variation: 0.8,
   nostalgia: 0.5,
 };
-const CATEGORICAL_WEIGHT = 0.9; // per matched categorical dim
-const CATEGORICAL_FIELDS = ["tempo_feel", "beat_style", "sound_texture", "main_mood"] as const;
+// Categorical "DJ ear" fields. Texture/tempo/beat/mood carry the vibe; family,
+// subgenre and genre are only light references so two different genres that feel
+// the same can still live in one set.
+const CATEGORICAL_WEIGHTS: Record<string, number> = {
+  sound_texture: 1.0,
+  tempo_feel: 1.0,
+  beat_style: 0.9,
+  main_mood: 0.9,
+  music_family: 0.5,
+  primary_subgenre: 0.35,
+  main_genre: 0.25,
+};
+const CATEGORICAL_FIELDS = Object.keys(CATEGORICAL_WEIGHTS);
 
 // Language grouping (English isolated; Romance grouped; instrumental neutral)
 function langGroup(lang: string | null | undefined): "english" | "romance" | "instrumental" | "other" | "unknown" {
@@ -100,15 +111,16 @@ function compat(a: Row, b: Row): number {
 
   const numeric = wSum > 0 ? 1 - dSum / wSum : 0.5;
   let catBonus = 0;
-  let catCount = 0;
+  let catWeight = 0;
   for (const f of CATEGORICAL_FIELDS) {
     const av = (a as any)[f];
     const bv = (b as any)[f];
     if (!av || !bv) continue;
-    catCount++;
-    if (String(av).toLowerCase() === String(bv).toLowerCase()) catBonus += 1;
+    const w = CATEGORICAL_WEIGHTS[f];
+    catWeight += w;
+    if (String(av).toLowerCase() === String(bv).toLowerCase()) catBonus += w;
   }
-  const cat = catCount > 0 ? catBonus / catCount : 0.5;
+  const cat = catWeight > 0 ? catBonus / catWeight : 0.5;
   // Blend: numeric dominates, categorical tempers
   return Math.max(0, Math.min(1, 0.75 * numeric + 0.25 * cat));
 }
@@ -191,7 +203,7 @@ Deno.serve(async (req) => {
     const runId = crypto.randomUUID();
 
     // Pull deep analyses (v2.1 and v3.0 share the same numeric sonic columns).
-    const SELECT_COLS = "spotify_track_id, track_name, artist_name, language, tempo_feel, beat_style, sound_texture, main_mood, main_genre, energy_score, melody_level, bass_level, drum_intensity, vocal_intensity, aggressiveness, softness, darkness, nostalgia, dance_feel, emotional_intensity, song_variation, schema_version";
+    const SELECT_COLS = "spotify_track_id, track_name, artist_name, language, tempo_feel, beat_style, sound_texture, main_mood, main_genre, music_family, primary_subgenre, energy_score, melody_level, bass_level, drum_intensity, vocal_intensity, aggressiveness, softness, darkness, nostalgia, dance_feel, emotional_intensity, song_variation, schema_version";
     const PAGE = 1000;
     const allAnalyses: any[] = [];
     for (let offset = 0; ; offset += PAGE) {
@@ -390,40 +402,130 @@ Deno.serve(async (req) => {
     const leftovers: Row[] = pending;
 
 
-    // ---- Rescue pass: try to place leftovers into an existing valid cluster ----
-    // Keeps the quality gates intact (track must be strongly compatible with the
-    // centroid and must not blow the per-dimension spread) but stops throwing away
-    // hundreds of tracks that simply never got a good seed.
+    // ---- "Best home" pass ----------------------------------------------------
+    // A DJ never drops a track just because it did not fit the first crate he
+    // opened: before a song is declared unassigned, it is auditioned against EVERY
+    // existing set. It only gets in if the set keeps its identity afterwards
+    // (average coherence, floor and per-dimension spread all still pass).
     const centroidCache = new Map<string, Row>();
     const centroidOf = (c: Cluster) => {
       let cached = centroidCache.get(c.id);
       if (!cached) { cached = centroidRow(c.members); centroidCache.set(c.id, cached); }
       return cached;
     };
+    const metricsOf = (members: Row[]) => {
+      const cent = centroidRow(members);
+      const compats = members.map((m) => compat(cent, m));
+      const avg = compats.reduce((a, b) => a + b, 0) / compats.length;
+      return { avg, min: Math.min(...compats) };
+    };
+    // Would adding `r` keep the set listenable end to end?
+    const acceptsTrack = (c: Cluster, r: Row) => {
+      if (c.members.length >= 50) return false;
+      if (!langCompatible(langGroup(r.language), c.language_group)) return false;
+      const test = [...c.members, r];
+      if (!dimSpreadOk(test, MAX_DIM_SPREAD + 0.04).ok) return false;
+      const m = metricsOf(test);
+      return m.avg >= AVG_COMPAT_MIN && m.min >= MIN_COMPAT_FLOOR;
+    };
+
+    const ADOPT_FLOOR = 0.78; // flexible, but never a jarring transition
+
     for (const r of leftovers) {
       const g = langGroup(r.language);
-      let best: { c: Cluster; s: number } | null = null;
+      // Rank every set by how close the track sits to its centre, then take the
+      // best one that still survives the quality gates with the track inside.
+      const ranked: { c: Cluster; s: number }[] = [];
       for (const c of clusters) {
-        if (c.members.length >= 50) continue;
         if (!langCompatible(g, c.language_group)) continue;
         const s = compat(centroidOf(c), r);
-        if (s < STRONG_FIT) continue;
-        if (!best || s > best.s) best = { c, s };
+        if (s < ADOPT_FLOOR) continue;
+        ranked.push({ c, s });
       }
-      if (best && dimSpreadOk([...best.c.members, r]).ok) {
-        best.c.members.push(r);
-        centroidCache.delete(best.c.id);
-      } else {
-        unassigned.push(r);
+      ranked.sort((a, b) => b.s - a.s);
+      let homed = false;
+      for (const { c } of ranked) {
+        if (!acceptsTrack(c, r)) continue;
+        c.members.push(r);
+        centroidCache.delete(c.id);
+        homed = true;
+        break;
+      }
+      if (!homed) unassigned.push(r);
+    }
+
+    // ---- Relocation pass -------------------------------------------------------
+    // Keep the groupings that already work and only move the songs that clearly
+    // feel out of place: a track moves only when another set fits it noticeably
+    // better AND both sets stay valid after the swap.
+    const MOVE_DELTA = 0.04;
+    for (let pass = 0; pass < 2; pass++) {
+      let moved = 0;
+      for (const from of clusters) {
+        if (from.members.length <= MIN_SIZE) continue;
+        for (const r of [...from.members]) {
+          if (from.members.length <= MIN_SIZE) break;
+          const here = compat(centroidOf(from), r);
+          let best: { c: Cluster; s: number } | null = null;
+          for (const to of clusters) {
+            if (to === from) continue;
+            if (!langCompatible(langGroup(r.language), to.language_group)) continue;
+            const s = compat(centroidOf(to), r);
+            if (s < here + MOVE_DELTA) continue;
+            if (!best || s > best.s) best = { c: to, s };
+          }
+          if (!best || !acceptsTrack(best.c, r)) continue;
+          const remaining = from.members.filter((m) => m.spotify_track_id !== r.spotify_track_id);
+          const rm = metricsOf(remaining);
+          if (rm.avg < AVG_COMPAT_MIN || rm.min < MIN_COMPAT_FLOOR) continue;
+          from.members = remaining;
+          best.c.members.push(r);
+          centroidCache.delete(from.id);
+          centroidCache.delete(best.c.id);
+          moved++;
+        }
+      }
+      if (moved === 0) break;
+    }
+
+    // Second audition for anything still loose: the relocation pass may have opened
+    // room in a set that now matches a leftover track.
+    if (unassigned.length) {
+      const stillLoose: Row[] = [];
+      for (const r of unassigned) {
+        let homed = false;
+        const ranked = clusters
+          .map((c) => ({ c, s: compat(centroidOf(c), r) }))
+          .filter((x) => x.s >= ADOPT_FLOOR)
+          .sort((a, b) => b.s - a.s);
+        for (const { c } of ranked) {
+          if (!acceptsTrack(c, r)) continue;
+          c.members.push(r);
+          centroidCache.delete(c.id);
+          homed = true;
+          break;
+        }
+        if (!homed) stillLoose.push(r);
+      }
+      unassigned.length = 0;
+      unassigned.push(...stillLoose);
+    }
+
+    // Drop any set that fell under the publishable size after relocations.
+    for (let i = clusters.length - 1; i >= 0; i--) {
+      if (clusters[i].members.length < MIN_SIZE) {
+        unassigned.push(...clusters[i].members);
+        clusters.splice(i, 1);
       }
     }
-    // Recompute cluster metrics after the rescue pass.
+
+    // Recompute final cluster metrics.
     for (const c of clusters) {
-      const cent = centroidRow(c.members);
-      const compats = c.members.map((m) => compat(cent, m));
-      c.avg_compat = compats.reduce((a, b) => a + b, 0) / compats.length;
-      c.min_compat = Math.min(...compats);
+      const m = metricsOf(c.members);
+      c.avg_compat = m.avg;
+      c.min_compat = m.min;
     }
+
 
 
 
