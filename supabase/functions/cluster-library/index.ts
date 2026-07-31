@@ -181,35 +181,55 @@ Deno.serve(async (req) => {
     const persist: boolean = body.persist === true;
     const runId = crypto.randomUUID();
 
-    // Pull v2 analyses joined to spotify_track_id.
-    // ai_track_analysis stores spotify_track_id directly on v2 rows.
-    const { data: analyses, error: aerr } = await adm
-      .from("ai_track_analysis")
-      .select("spotify_track_id, track_name, artist_name, language, tempo_feel, beat_style, sound_texture, main_mood, main_genre, energy_score, melody_level, bass_level, drum_intensity, vocal_intensity, aggressiveness, softness, darkness, nostalgia, dance_feel, emotional_intensity, song_variation, schema_version")
-      .eq("user_id", user.id)
-      .eq("schema_version", "v2.1")
-      .not("spotify_track_id", "is", null)
-      .limit(5000);
-    if (aerr) return json({ error: aerr.message }, 500);
+    // Pull v2 analyses joined to spotify_track_id (paginated: PostgREST caps each request at 1000 rows).
+    const SELECT_COLS = "spotify_track_id, track_name, artist_name, language, tempo_feel, beat_style, sound_texture, main_mood, main_genre, energy_score, melody_level, bass_level, drum_intensity, vocal_intensity, aggressiveness, softness, darkness, nostalgia, dance_feel, emotional_intensity, song_variation, schema_version";
+    const PAGE = 1000;
+    const allAnalyses: any[] = [];
+    for (let offset = 0; ; offset += PAGE) {
+      const { data: page, error: aerr } = await adm
+        .from("ai_track_analysis")
+        .select(SELECT_COLS)
+        .eq("user_id", user.id)
+        .eq("schema_version", "v2.1")
+        .not("spotify_track_id", "is", null)
+        .order("spotify_track_id", { ascending: true })
+        .range(offset, offset + PAGE - 1);
+      if (aerr) return json({ error: aerr.message }, 500);
+      const chunk = page ?? [];
+      allAnalyses.push(...chunk);
+      if (chunk.length < PAGE) break;
+      if (offset > 50000) break;
+    }
 
-    let rows: Row[] = (analyses ?? []).filter((r: any) => r.energy_score !== null) as Row[];
+    // Deduplicate by spotify_track_id (keep first)
+    const seen = new Set<string>();
+    let rows: Row[] = allAnalyses.filter((r: any) => {
+      if (r.energy_score === null) return false;
+      if (seen.has(r.spotify_track_id)) return false;
+      seen.add(r.spotify_track_id);
+      return true;
+    }) as Row[];
     if (rows.length === 0) return json({ error: "No hay canciones analizadas con schema v2.1. Corre el Deep Analysis primero." }, 400);
 
     // Enrich track/artist name if missing from liked_songs.
     const missing = rows.filter((r) => !r.track_name || !r.artist_name).map((r) => r.spotify_track_id);
     if (missing.length) {
-      const { data: liked } = await adm
-        .from("liked_songs")
-        .select("spotify_track_id, track_name, artist_name")
-        .eq("user_id", user.id)
-        .in("spotify_track_id", missing);
-      const m = new Map((liked ?? []).map((l: any) => [l.spotify_track_id, l]));
+      const m = new Map<string, any>();
+      for (let i = 0; i < missing.length; i += 300) {
+        const { data: liked } = await adm
+          .from("liked_songs")
+          .select("spotify_track_id, track_name, artist_name")
+          .eq("user_id", user.id)
+          .in("spotify_track_id", missing.slice(i, i + 300));
+        for (const l of liked ?? []) m.set((l as any).spotify_track_id, l);
+      }
       rows = rows.map((r) => {
         const l: any = m.get(r.spotify_track_id);
         if (!l) return r;
         return { ...r, track_name: r.track_name ?? l.track_name, artist_name: r.artist_name ?? l.artist_name };
       });
     }
+
 
     // Optional sample: prefer diverse subset by shuffling
     if (sampleSize && rows.length > sampleSize) {
