@@ -36,8 +36,19 @@ const NUMERIC_WEIGHTS: Record<string, number> = {
   song_variation: 0.8,
   nostalgia: 0.5,
 };
-const CATEGORICAL_WEIGHT = 0.9; // per matched categorical dim
-const CATEGORICAL_FIELDS = ["tempo_feel", "beat_style", "sound_texture", "main_mood"] as const;
+// Categorical "DJ ear" fields. Texture/tempo/beat/mood carry the vibe; family,
+// subgenre and genre are only light references so two different genres that feel
+// the same can still live in one set.
+const CATEGORICAL_WEIGHTS: Record<string, number> = {
+  sound_texture: 1.0,
+  tempo_feel: 1.0,
+  beat_style: 0.9,
+  main_mood: 0.9,
+  music_family: 0.5,
+  primary_subgenre: 0.35,
+  main_genre: 0.25,
+};
+const CATEGORICAL_FIELDS = Object.keys(CATEGORICAL_WEIGHTS);
 
 // Language grouping (English isolated; Romance grouped; instrumental neutral)
 function langGroup(lang: string | null | undefined): "english" | "romance" | "instrumental" | "other" | "unknown" {
@@ -100,15 +111,16 @@ function compat(a: Row, b: Row): number {
 
   const numeric = wSum > 0 ? 1 - dSum / wSum : 0.5;
   let catBonus = 0;
-  let catCount = 0;
+  let catWeight = 0;
   for (const f of CATEGORICAL_FIELDS) {
     const av = (a as any)[f];
     const bv = (b as any)[f];
     if (!av || !bv) continue;
-    catCount++;
-    if (String(av).toLowerCase() === String(bv).toLowerCase()) catBonus += 1;
+    const w = CATEGORICAL_WEIGHTS[f];
+    catWeight += w;
+    if (String(av).toLowerCase() === String(bv).toLowerCase()) catBonus += w;
   }
-  const cat = catCount > 0 ? catBonus / catCount : 0.5;
+  const cat = catWeight > 0 ? catBonus / catWeight : 0.5;
   // Blend: numeric dominates, categorical tempers
   return Math.max(0, Math.min(1, 0.75 * numeric + 0.25 * cat));
 }
@@ -191,7 +203,7 @@ Deno.serve(async (req) => {
     const runId = crypto.randomUUID();
 
     // Pull deep analyses (v2.1 and v3.0 share the same numeric sonic columns).
-    const SELECT_COLS = "spotify_track_id, track_name, artist_name, language, tempo_feel, beat_style, sound_texture, main_mood, main_genre, energy_score, melody_level, bass_level, drum_intensity, vocal_intensity, aggressiveness, softness, darkness, nostalgia, dance_feel, emotional_intensity, song_variation, schema_version";
+    const SELECT_COLS = "spotify_track_id, track_name, artist_name, language, tempo_feel, beat_style, sound_texture, main_mood, main_genre, music_family, primary_subgenre, energy_score, melody_level, bass_level, drum_intensity, vocal_intensity, aggressiveness, softness, darkness, nostalgia, dance_feel, emotional_intensity, song_variation, schema_version";
     const PAGE = 1000;
     const allAnalyses: any[] = [];
     for (let offset = 0; ; offset += PAGE) {
