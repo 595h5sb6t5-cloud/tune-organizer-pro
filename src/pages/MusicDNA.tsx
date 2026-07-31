@@ -184,7 +184,8 @@ function ScanSummary({ dna }: { dna: ReturnType<typeof useMusicDna> }) {
     { label: "Listas para analizar", value: dna.totals.analyzed || dna.totals.liked, icon: Brain },
   ];
   return (
-    <StepShell eyebrow="Library Scan" title="Esto es lo que encontramos en tu biblioteca." subtitle="Datos reales importados directamente desde tu cuenta de Spotify.">
+    <StepShell eyebrow="Library Scan" title="Esto es lo que encontramos en tu biblioteca." subtitle={dna.lastSyncAt ? `Datos reales de tu cuenta de Spotify · último sync ${new Date(dna.lastSyncAt).toLocaleString("es-MX", { dateStyle: "medium", timeStyle: "short" })}` : "Datos reales importados directamente desde tu cuenta de Spotify."}>
+
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         {items.map(({ label, value, icon: Icon }) => (
           <div key={label} className="rounded-2xl border border-border/50 bg-card/50 p-5">
