@@ -65,6 +65,15 @@ Deno.serve(async (req) => {
     // add_to_playlist
     if (!rec.based_on_playlist_id || !rec.spotify_track_id) return json({ error: "Missing playlist or spotify track id" }, 400);
 
+    // Verify the target playlist belongs to the caller (service-role bypasses RLS)
+    const { data: ownedPlaylist } = await supabase
+      .from("generated_playlists")
+      .select("id, spotify_playlist_id, is_exported_to_spotify")
+      .eq("id", rec.based_on_playlist_id)
+      .eq("user_id", user.id)
+      .maybeSingle();
+    if (!ownedPlaylist) return json({ error: "Playlist not found" }, 404);
+
     // Ensure tracks row exists
     let { data: trackRow } = await supabase
       .from("tracks").select("id").eq("spotify_track_id", rec.spotify_track_id).maybeSingle();
@@ -100,10 +109,7 @@ Deno.serve(async (req) => {
     if (addErr) return json({ error: "Failed to add to playlist", details: addErr.message }, 500);
 
     // If playlist already exported, push to Spotify too
-    const { data: pl } = await supabase
-      .from("generated_playlists")
-      .select("spotify_playlist_id, is_exported_to_spotify")
-      .eq("id", rec.based_on_playlist_id).single();
+    const pl = ownedPlaylist;
     let pushedToSpotify = false;
     if (pl?.is_exported_to_spotify && pl.spotify_playlist_id) {
       const accessToken = await refreshToken(supabase, user.id);
