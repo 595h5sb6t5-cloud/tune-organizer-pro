@@ -473,11 +473,14 @@ Deno.serve(async (req) => {
       run_id: runId,
       persisted: persist,
       totals: {
+        library_total: libraryTotal,
+        pending_analysis: pendingAnalysis,
         analyzed: rows.length,
         clusters: clusters.length,
         clustered_tracks: clusters.reduce((a, c) => a + c.members.length, 0),
         unassigned: unassigned.length,
       },
+
       thresholds: { MIN_SIZE, AVG_COMPAT_MIN, MIN_COMPAT_FLOOR, PCT_ABOVE_STRONG, STRONG_FIT, SEED_JOIN_THRESHOLD, MAX_DIM_SPREAD },
       clusters: report,
       unassigned: unassignedReport,
