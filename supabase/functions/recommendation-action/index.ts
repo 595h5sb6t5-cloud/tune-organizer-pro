@@ -109,10 +109,7 @@ Deno.serve(async (req) => {
     if (addErr) return json({ error: "Failed to add to playlist", details: addErr.message }, 500);
 
     // If playlist already exported, push to Spotify too
-    const { data: pl } = await supabase
-      .from("generated_playlists")
-      .select("spotify_playlist_id, is_exported_to_spotify")
-      .eq("id", rec.based_on_playlist_id).single();
+    const pl = ownedPlaylist;
     let pushedToSpotify = false;
     if (pl?.is_exported_to_spotify && pl.spotify_playlist_id) {
       const accessToken = await refreshToken(supabase, user.id);
