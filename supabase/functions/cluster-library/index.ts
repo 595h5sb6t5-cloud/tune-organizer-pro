@@ -298,7 +298,6 @@ Deno.serve(async (req) => {
 
 
       const used = new Set<string>();
-      const rejectedSeeds = new Set<string>();
       for (const seed of pool) {
         if (used.has(seed.spotify_track_id)) continue;
         const members: Row[] = [seed];
