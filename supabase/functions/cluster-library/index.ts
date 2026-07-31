@@ -287,6 +287,10 @@ Deno.serve(async (req) => {
         (groups[g] ??= []).push(r);
       }
       const roundLeftovers: Row[] = [];
+      // Later rounds loosen only the *growth* heuristics (how easily a track joins a
+      // forming group); the publication gates below stay untouched.
+      const joinThreshold = Math.max(SEED_JOIN_THRESHOLD - round * 0.015, 0.80);
+      const maxSpread = MAX_DIM_SPREAD + round * 0.03;
 
       for (const [g, list] of Object.entries(groups)) {
         const pool = [...list];
@@ -315,11 +319,11 @@ Deno.serve(async (req) => {
             for (const r of pool) {
               if (used.has(r.spotify_track_id)) continue;
               const s = compat(c, r);
-              if (s >= SEED_JOIN_THRESHOLD) candidates.push({ r, s });
+              if (s >= joinThreshold) candidates.push({ r, s });
             }
             candidates.sort((a, b) => b.s - a.s);
             for (const { r } of candidates) {
-              if (!dimSpreadOk([...members, r]).ok) continue;
+              if (!dimSpreadOk([...members, r], maxSpread).ok) continue;
               members.push(r);
               used.add(r.spotify_track_id);
               changed = true;
