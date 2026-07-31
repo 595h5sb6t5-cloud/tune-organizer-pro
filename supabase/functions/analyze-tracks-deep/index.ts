@@ -311,6 +311,8 @@ Deno.serve(async (req) => {
         .from("liked_songs")
         .select("id, spotify_track_id, track_name, artist_name, album_name, audio_tempo, audio_energy, audio_valence, audio_danceability, audio_acousticness, audio_instrumentalness, audio_speechiness, genre_tags, mood")
         .eq("user_id", userId)
+        .eq("is_active", true)
+        .eq("is_available", true)
         .order("added_at", { ascending: false })
         .range(offset, upper);
       if (!page || page.length === 0) break;
@@ -325,7 +327,9 @@ Deno.serve(async (req) => {
     const { count: totalCount } = await adm
       .from("liked_songs")
       .select("id", { count: "exact", head: true })
-      .eq("user_id", userId);
+      .eq("user_id", userId)
+      .eq("is_active", true)
+      .eq("is_available", true);
 
     // Existing v2 analysis for this user (cache lookup key). Paginate to bypass
     // the 1000-row default limit for libraries with many prior analyses.
