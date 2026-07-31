@@ -316,21 +316,35 @@ Deno.serve(async (req) => {
         const placed = new Set<string>();
         for (const seed of pool) {
           if (used.has(seed.spotify_track_id)) continue;
+
+          // Cheap pre-filter: if the seed does not even have MIN_SIZE-1 compatible
+          // neighbours left, there is no point running the expensive growth loop.
+          let neighbours: { r: Row; s: number }[] = [];
+          for (const r of pool) {
+            if (r === seed || used.has(r.spotify_track_id)) continue;
+            const s = compat(seed, r);
+            if (s >= joinThreshold - 0.04) neighbours.push({ r, s });
+          }
+          if (neighbours.length + 1 < MIN_SIZE) continue;
+          neighbours.sort((a, b) => b.s - a.s);
+          neighbours = neighbours.slice(0, 160);
+
           const members: Row[] = [seed];
           used.add(seed.spotify_track_id);
-          // Grow greedily
+          // Grow greedily, re-centroiding after each accepted member but only
+          // rescoring the short-listed neighbourhood instead of the whole pool.
           let changed = true;
           while (changed && members.length < 45) {
             changed = false;
             const c = centroidRow(members);
-            const candidates: { r: Row; s: number }[] = [];
-            for (const r of pool) {
-              if (used.has(r.spotify_track_id)) continue;
-              const s = compat(c, r);
-              if (s >= joinThreshold) candidates.push({ r, s });
+            const scored: { r: Row; s: number }[] = [];
+            for (const n of neighbours) {
+              if (used.has(n.r.spotify_track_id)) continue;
+              const s = compat(c, n.r);
+              if (s >= joinThreshold) scored.push({ r: n.r, s });
             }
-            candidates.sort((a, b) => b.s - a.s);
-            for (const { r } of candidates) {
+            scored.sort((a, b) => b.s - a.s);
+            for (const { r } of scored) {
               if (!dimSpreadOk([...members, r], maxSpread).ok) continue;
               members.push(r);
               used.add(r.spotify_track_id);
@@ -338,6 +352,7 @@ Deno.serve(async (req) => {
               break;
             }
           }
+
 
           const cent = centroidRow(members);
           const compats = members.map((m) => compat(cent, m));
