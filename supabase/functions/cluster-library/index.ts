@@ -369,27 +369,37 @@ Deno.serve(async (req) => {
     // Keeps the quality gates intact (track must be strongly compatible with the
     // centroid and must not blow the per-dimension spread) but stops throwing away
     // hundreds of tracks that simply never got a good seed.
+    const centroidCache = new Map<string, Row>();
+    const centroidOf = (c: Cluster) => {
+      let cached = centroidCache.get(c.id);
+      if (!cached) { cached = centroidRow(c.members); centroidCache.set(c.id, cached); }
+      return cached;
+    };
     for (const r of leftovers) {
       const g = langGroup(r.language);
-      let best: { c: typeof clusters[number]; s: number } | null = null;
+      let best: { c: Cluster; s: number } | null = null;
       for (const c of clusters) {
         if (c.members.length >= 50) continue;
         if (!langCompatible(g, c.language_group)) continue;
-        const s = compat(centroidRow(c.members), r);
+        const s = compat(centroidOf(c), r);
         if (s < STRONG_FIT) continue;
-        if (!dimSpreadOk([...c.members, r]).ok) continue;
         if (!best || s > best.s) best = { c, s };
       }
-      if (best) {
+      if (best && dimSpreadOk([...best.c.members, r]).ok) {
         best.c.members.push(r);
-        const cent = centroidRow(best.c.members);
-        const compats = best.c.members.map((m) => compat(cent, m));
-        best.c.avg_compat = compats.reduce((a, b) => a + b, 0) / compats.length;
-        best.c.min_compat = Math.min(...compats);
+        centroidCache.delete(best.c.id);
       } else {
         unassigned.push(r);
       }
     }
+    // Recompute cluster metrics after the rescue pass.
+    for (const c of clusters) {
+      const cent = centroidRow(c.members);
+      const compats = c.members.map((m) => compat(cent, m));
+      c.avg_compat = compats.reduce((a, b) => a + b, 0) / compats.length;
+      c.min_compat = Math.min(...compats);
+    }
+
 
 
     // Build report
