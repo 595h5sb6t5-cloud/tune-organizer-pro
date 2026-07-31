@@ -181,7 +181,7 @@ Deno.serve(async (req) => {
     const persist: boolean = body.persist === true;
     const runId = crypto.randomUUID();
 
-    // Pull v2 analyses joined to spotify_track_id (paginated: PostgREST caps each request at 1000 rows).
+    // Pull deep analyses (v2.1 and v3.0 share the same numeric sonic columns).
     const SELECT_COLS = "spotify_track_id, track_name, artist_name, language, tempo_feel, beat_style, sound_texture, main_mood, main_genre, energy_score, melody_level, bass_level, drum_intensity, vocal_intensity, aggressiveness, softness, darkness, nostalgia, dance_feel, emotional_intensity, song_variation, schema_version";
     const PAGE = 1000;
     const allAnalyses: any[] = [];
@@ -190,7 +190,7 @@ Deno.serve(async (req) => {
         .from("ai_track_analysis")
         .select(SELECT_COLS)
         .eq("user_id", user.id)
-        .eq("schema_version", "v2.1")
+        .in("schema_version", ["v2.1", "v3.0"])
         .not("spotify_track_id", "is", null)
         .order("spotify_track_id", { ascending: true })
         .range(offset, offset + PAGE - 1);
@@ -201,15 +201,41 @@ Deno.serve(async (req) => {
       if (offset > 50000) break;
     }
 
-    // Deduplicate by spotify_track_id (keep first)
-    const seen = new Set<string>();
-    let rows: Row[] = allAnalyses.filter((r: any) => {
-      if (r.energy_score === null) return false;
-      if (seen.has(r.spotify_track_id)) return false;
-      seen.add(r.spotify_track_id);
-      return true;
-    }) as Row[];
-    if (rows.length === 0) return json({ error: "No hay canciones analizadas con schema v2.1. Corre el Deep Analysis primero." }, 400);
+    // Library universe: every active liked song (paginated).
+    const likedIds = new Set<string>();
+    for (let offset = 0; ; offset += PAGE) {
+      const { data: page, error: lerr } = await adm
+        .from("liked_songs")
+        .select("spotify_track_id")
+        .eq("user_id", user.id)
+        .eq("is_active", true)
+        .eq("is_available", true)
+        .order("spotify_track_id", { ascending: true })
+        .range(offset, offset + PAGE - 1);
+      if (lerr) return json({ error: lerr.message }, 500);
+      const chunk = page ?? [];
+      for (const l of chunk) likedIds.add((l as any).spotify_track_id);
+      if (chunk.length < PAGE) break;
+      if (offset > 50000) break;
+    }
+
+    // Deduplicate by spotify_track_id, preferring the newest schema (v3.0 over v2.1).
+    const byTrack = new Map<string, any>();
+    for (const r of allAnalyses) {
+      if (r.energy_score === null) continue;
+      if (likedIds.size > 0 && !likedIds.has(r.spotify_track_id)) continue;
+      const prev = byTrack.get(r.spotify_track_id);
+      if (!prev || (prev.schema_version !== "v3.0" && r.schema_version === "v3.0")) {
+        byTrack.set(r.spotify_track_id, r);
+      }
+    }
+    let rows: Row[] = [...byTrack.values()] as Row[];
+    const libraryTotal = likedIds.size;
+    const pendingAnalysis = Math.max(libraryTotal - rows.length, 0);
+    if (rows.length === 0) {
+      return json({ error: "No hay canciones con análisis profundo. Corre el Deep Analysis primero." }, 400);
+    }
+
 
     // Enrich track/artist name if missing from liked_songs.
     const missing = rows.filter((r) => !r.track_name || !r.artist_name).map((r) => r.spotify_track_id);
