@@ -20,7 +20,6 @@ export type Database = {
           analysis_confidence: number | null
           analysis_stage: string | null
           analysis_version: string | null
-          artist_context: Json | null
           artist_name: string | null
           avoid_pairing_with: string[]
           bass_level: number | null
@@ -38,10 +37,8 @@ export type Database = {
           energy_level: string | null
           energy_score: number | null
           full_analysis: Json | null
-          house_profile: Json | null
           id: string
           instrumentation_summary: string | null
-          is_house_related: boolean | null
           language: string | null
           last_error: string | null
           liked_song_id: string | null
@@ -50,11 +47,9 @@ export type Database = {
           melody_level: number | null
           model_used: string | null
           moods: string[]
-          music_family: string | null
           nostalgia: number | null
           playlist_fit: Json
           primary_genre: string | null
-          primary_subgenre: string | null
           prompt_version: string | null
           reasoning_mode: string | null
           retry_count: number
@@ -63,12 +58,10 @@ export type Database = {
           secondary_genres: string[]
           secondary_genres_v2: string[] | null
           secondary_moods_v2: string[] | null
-          secondary_subgenres: string[] | null
           softness: number | null
           song_variation: number | null
           sound_texture: string | null
           spotify_track_id: string | null
-          subgenre_confidence: number | null
           tempo_feel: string | null
           track_id: string
           track_name: string | null
@@ -84,7 +77,6 @@ export type Database = {
           analysis_confidence?: number | null
           analysis_stage?: string | null
           analysis_version?: string | null
-          artist_context?: Json | null
           artist_name?: string | null
           avoid_pairing_with?: string[]
           bass_level?: number | null
@@ -102,10 +94,8 @@ export type Database = {
           energy_level?: string | null
           energy_score?: number | null
           full_analysis?: Json | null
-          house_profile?: Json | null
           id?: string
           instrumentation_summary?: string | null
-          is_house_related?: boolean | null
           language?: string | null
           last_error?: string | null
           liked_song_id?: string | null
@@ -114,11 +104,9 @@ export type Database = {
           melody_level?: number | null
           model_used?: string | null
           moods?: string[]
-          music_family?: string | null
           nostalgia?: number | null
           playlist_fit?: Json
           primary_genre?: string | null
-          primary_subgenre?: string | null
           prompt_version?: string | null
           reasoning_mode?: string | null
           retry_count?: number
@@ -127,12 +115,10 @@ export type Database = {
           secondary_genres?: string[]
           secondary_genres_v2?: string[] | null
           secondary_moods_v2?: string[] | null
-          secondary_subgenres?: string[] | null
           softness?: number | null
           song_variation?: number | null
           sound_texture?: string | null
           spotify_track_id?: string | null
-          subgenre_confidence?: number | null
           tempo_feel?: string | null
           track_id: string
           track_name?: string | null
@@ -148,7 +134,6 @@ export type Database = {
           analysis_confidence?: number | null
           analysis_stage?: string | null
           analysis_version?: string | null
-          artist_context?: Json | null
           artist_name?: string | null
           avoid_pairing_with?: string[]
           bass_level?: number | null
@@ -166,10 +151,8 @@ export type Database = {
           energy_level?: string | null
           energy_score?: number | null
           full_analysis?: Json | null
-          house_profile?: Json | null
           id?: string
           instrumentation_summary?: string | null
-          is_house_related?: boolean | null
           language?: string | null
           last_error?: string | null
           liked_song_id?: string | null
@@ -178,11 +161,9 @@ export type Database = {
           melody_level?: number | null
           model_used?: string | null
           moods?: string[]
-          music_family?: string | null
           nostalgia?: number | null
           playlist_fit?: Json
           primary_genre?: string | null
-          primary_subgenre?: string | null
           prompt_version?: string | null
           reasoning_mode?: string | null
           retry_count?: number
@@ -191,12 +172,10 @@ export type Database = {
           secondary_genres?: string[]
           secondary_genres_v2?: string[] | null
           secondary_moods_v2?: string[] | null
-          secondary_subgenres?: string[] | null
           softness?: number | null
           song_variation?: number | null
           sound_texture?: string | null
           spotify_track_id?: string | null
-          subgenre_confidence?: number | null
           tempo_feel?: string | null
           track_id?: string
           track_name?: string | null
@@ -466,60 +445,30 @@ export type Database = {
       }
       cluster_candidate_tracks: {
         Row: {
-          artist_context_fit: number | null
-          artist_context_penalty: number | null
           cluster_id: string
           compat_to_centroid: number | null
           created_at: string
-          final_fit: number | null
-          gate_flags: Json | null
           id: string
-          is_artist_surprise: boolean
           position: number | null
-          scene_distance: number | null
-          skip_risk: number | null
-          sonic_fit: number | null
           spotify_track_id: string
-          subgenre_fit: number | null
-          transition_fit: number | null
           user_id: string
         }
         Insert: {
-          artist_context_fit?: number | null
-          artist_context_penalty?: number | null
           cluster_id: string
           compat_to_centroid?: number | null
           created_at?: string
-          final_fit?: number | null
-          gate_flags?: Json | null
           id?: string
-          is_artist_surprise?: boolean
           position?: number | null
-          scene_distance?: number | null
-          skip_risk?: number | null
-          sonic_fit?: number | null
           spotify_track_id: string
-          subgenre_fit?: number | null
-          transition_fit?: number | null
           user_id: string
         }
         Update: {
-          artist_context_fit?: number | null
-          artist_context_penalty?: number | null
           cluster_id?: string
           compat_to_centroid?: number | null
           created_at?: string
-          final_fit?: number | null
-          gate_flags?: Json | null
           id?: string
-          is_artist_surprise?: boolean
           position?: number | null
-          scene_distance?: number | null
-          skip_risk?: number | null
-          sonic_fit?: number | null
           spotify_track_id?: string
-          subgenre_fit?: number | null
-          transition_fit?: number | null
           user_id?: string
         }
         Relationships: [
@@ -535,22 +484,15 @@ export type Database = {
       cluster_candidates: {
         Row: {
           avg_compat: number | null
-          avg_final_fit: number | null
           centroid: Json | null
           created_at: string
           dominant_dimensions: Json | null
-          dominant_subgenre: string | null
           id: string
           language_group: string | null
           min_compat: number | null
-          min_final_fit: number | null
-          music_family: string | null
-          name: string | null
-          phase: string
           promoted_playlist_id: string | null
           rejection_reason: string | null
           run_id: string | null
-          sample_id: string | null
           size: number
           sonic_summary: string | null
           status: string
@@ -559,22 +501,15 @@ export type Database = {
         }
         Insert: {
           avg_compat?: number | null
-          avg_final_fit?: number | null
           centroid?: Json | null
           created_at?: string
           dominant_dimensions?: Json | null
-          dominant_subgenre?: string | null
           id?: string
           language_group?: string | null
           min_compat?: number | null
-          min_final_fit?: number | null
-          music_family?: string | null
-          name?: string | null
-          phase?: string
           promoted_playlist_id?: string | null
           rejection_reason?: string | null
           run_id?: string | null
-          sample_id?: string | null
           size?: number
           sonic_summary?: string | null
           status?: string
@@ -583,84 +518,18 @@ export type Database = {
         }
         Update: {
           avg_compat?: number | null
-          avg_final_fit?: number | null
           centroid?: Json | null
           created_at?: string
           dominant_dimensions?: Json | null
-          dominant_subgenre?: string | null
           id?: string
           language_group?: string | null
           min_compat?: number | null
-          min_final_fit?: number | null
-          music_family?: string | null
-          name?: string | null
-          phase?: string
           promoted_playlist_id?: string | null
           rejection_reason?: string | null
           run_id?: string | null
-          sample_id?: string | null
           size?: number
           sonic_summary?: string | null
           status?: string
-          updated_at?: string
-          user_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "cluster_candidates_sample_id_fkey"
-            columns: ["sample_id"]
-            isOneToOne: false
-            referencedRelation: "diagnostic_samples"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      diagnostic_samples: {
-        Row: {
-          created_at: string
-          id: string
-          label: string
-          phase2_block_reason: string | null
-          phase2_finished_at: string | null
-          phase2_progress: Json | null
-          phase2_report: Json | null
-          phase2_started_at: string | null
-          phase2_status: string
-          selection_reasons: Json | null
-          size: number
-          spotify_track_ids: string[]
-          updated_at: string
-          user_id: string
-        }
-        Insert: {
-          created_at?: string
-          id?: string
-          label: string
-          phase2_block_reason?: string | null
-          phase2_finished_at?: string | null
-          phase2_progress?: Json | null
-          phase2_report?: Json | null
-          phase2_started_at?: string | null
-          phase2_status?: string
-          selection_reasons?: Json | null
-          size: number
-          spotify_track_ids: string[]
-          updated_at?: string
-          user_id: string
-        }
-        Update: {
-          created_at?: string
-          id?: string
-          label?: string
-          phase2_block_reason?: string | null
-          phase2_finished_at?: string | null
-          phase2_progress?: Json | null
-          phase2_report?: Json | null
-          phase2_started_at?: string | null
-          phase2_status?: string
-          selection_reasons?: Json | null
-          size?: number
-          spotify_track_ids?: string[]
           updated_at?: string
           user_id?: string
         }
@@ -2188,49 +2057,32 @@ export type Database = {
       unassigned_tracks: {
         Row: {
           created_at: string
-          details: Json | null
           id: string
           last_run_id: string | null
-          phase: string | null
           reason: string | null
-          sample_id: string | null
           spotify_track_id: string
           updated_at: string
           user_id: string
         }
         Insert: {
           created_at?: string
-          details?: Json | null
           id?: string
           last_run_id?: string | null
-          phase?: string | null
           reason?: string | null
-          sample_id?: string | null
           spotify_track_id: string
           updated_at?: string
           user_id: string
         }
         Update: {
           created_at?: string
-          details?: Json | null
           id?: string
           last_run_id?: string | null
-          phase?: string | null
           reason?: string | null
-          sample_id?: string | null
           spotify_track_id?: string
           updated_at?: string
           user_id?: string
         }
-        Relationships: [
-          {
-            foreignKeyName: "unassigned_tracks_sample_id_fkey"
-            columns: ["sample_id"]
-            isOneToOne: false
-            referencedRelation: "diagnostic_samples"
-            referencedColumns: ["id"]
-          },
-        ]
+        Relationships: []
       }
       user_followed_artists: {
         Row: {

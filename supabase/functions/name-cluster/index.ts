@@ -58,96 +58,10 @@ Deno.serve(async (req) => {
     const { data: liked } = await adm.from("liked_songs").select("spotify_track_id, track_name, artist_name").eq("user_id", user.id).in("spotify_track_id", sids);
     const nameMap = new Map((liked ?? []).map((l: any) => [l.spotify_track_id, l]));
 
-    // ---------- SECOND-LAYER VALIDATION (artist / genre / taste) ----------
-    const { data: analyses } = await adm
-      .from("ai_track_analysis")
-      .select("spotify_track_id, artist_name, main_genre, primary_genre, tempo_feel, beat_style, sound_texture, main_mood, energy_score, melody_level, bass_level, drum_intensity, vocal_intensity, aggressiveness, softness, darkness, nostalgia, dance_feel, emotional_intensity, song_variation")
-      .eq("user_id", user.id)
-      .in("spotify_track_id", sids);
-    const aMap = new Map((analyses ?? []).map((a: any) => [a.spotify_track_id, a]));
-    const { data: feedback } = await adm
-      .from("recommendation_feedback")
-      .select("track_artist, action")
-      .eq("user_id", user.id);
-    const artistDismissals = new Map<string, number>();
-    for (const f of feedback ?? []) {
-      if (f.action === "dismissed" && f.track_artist) {
-        const k = f.track_artist.toLowerCase();
-        artistDismissals.set(k, (artistDismissals.get(k) ?? 0) + 1);
-      }
-    }
-    const NUMERIC_WEIGHTS: Record<string, number> = {
-      energy_score: 1.3, darkness: 1.2, softness: 1.0, aggressiveness: 1.2,
-      dance_feel: 1.2, drum_intensity: 1.1, bass_level: 1.1, melody_level: 1.0,
-      vocal_intensity: 1.0, emotional_intensity: 0.9, song_variation: 0.8, nostalgia: 0.5,
-    };
-    const CAT = ["tempo_feel", "beat_style", "sound_texture", "main_mood"] as const;
-    const nrm = (v: any) => { if (v === null || v === undefined) return null; const n = typeof v === "number" ? v : parseFloat(String(v)); return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : null; };
-    const rows = sids.map((s) => ({ spotify_track_id: s, ...(aMap.get(s) ?? {}), ...(nameMap.get(s) ?? {}) }));
-    // Centroid
-    const cent: any = {};
-    for (const k of Object.keys(NUMERIC_WEIGHTS)) { let s = 0, c = 0; for (const r of rows) { const v = nrm((r as any)[k]); if (v !== null) { s += v; c++; } } cent[k] = c > 0 ? s / c : null; }
-    for (const f of CAT) { const m = new Map<string, number>(); for (const r of rows) { const v = (r as any)[f]; if (v) m.set(String(v).toLowerCase(), (m.get(String(v).toLowerCase()) ?? 0) + 1); } let best: any = null, bc = 0; for (const [k, c] of m) if (c > bc) { best = k; bc = c; } cent[f] = best; }
-    const compat = (a: any, b: any) => {
-      let w = 0, d = 0;
-      for (const [k, wt] of Object.entries(NUMERIC_WEIGHTS)) { const x = nrm(a[k]), y = nrm(b[k]); if (x === null || y === null) continue; w += wt; d += wt * Math.abs(x - y); }
-      const num = w > 0 ? 1 - d / w : 0.5;
-      let cs = 0, cc = 0;
-      for (const f of CAT) { const av = a[f], bv = b[f]; if (!av || !bv) continue; cc++; if (String(av).toLowerCase() === String(bv).toLowerCase()) cs++; }
-      const cat = cc > 0 ? cs / cc : 0.5;
-      return Math.max(0, Math.min(1, 0.75 * num + 0.25 * cat));
-    };
-    const genreCounts = new Map<string, number>();
-    const artistCounts = new Map<string, number>();
-    for (const r of rows) {
-      const g = ((r as any).main_genre ?? (r as any).primary_genre ?? "").toString().toLowerCase();
-      if (g) genreCounts.set(g, (genreCounts.get(g) ?? 0) + 1);
-      const ar = ((r as any).artist_name ?? "").toString().toLowerCase();
-      if (ar) artistCounts.set(ar, (artistCounts.get(ar) ?? 0) + 1);
-    }
-    const total = rows.length;
-    const dominantGenre = [...genreCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
-    const findings = rows.map((r: any) => {
-      const sonic = compat(cent, r);
-      const g = (r.main_genre ?? r.primary_genre ?? "").toString().toLowerCase();
-      const same = g ? (genreCounts.get(g) ?? 0) : 0;
-      const head = g.split(/[\s\/-]/)[0];
-      let adj = 0; for (const [gg, n] of genreCounts) if (gg !== g && gg.split(/[\s\/-]/)[0] === head) adj += n;
-      const genreShare = total > 0 ? (same + 0.5 * adj) / total : 0;
-      const context = Math.max(0.3, Math.min(1, 0.35 + genreShare * 0.65));
-      const artist = (r.artist_name ?? "").toString().toLowerCase();
-      const dismisses = artistDismissals.get(artist) ?? 0;
-      const taste = dismisses === 0 ? 0.80 : dismisses === 1 ? 0.70 : dismisses === 2 ? 0.55 : 0.40;
-      const share = artist ? (artistCounts.get(artist) ?? 0) / total : 0;
-      const penalty = Math.max(0, Math.min(0.35, (1 - share) * 0.15 + Math.max(0, 0.85 - context) * 0.6));
-      const final = Math.max(0, Math.min(1, sonic * 0.65 + context * 0.20 + taste * 0.15 - penalty));
-      const isSurprise = share <= 1 / total && dominantGenre && g.split(/[\s\/-]/)[0] !== dominantGenre.split(/[\s\/-]/)[0];
-      let action: string = "keep";
-      if (isSurprise) {
-        const pass = sonic >= 0.90 && context >= 0.75;
-        action = pass ? "surprise_ok" : (context < 0.5 ? "unassign" : "move");
-      } else if (final < 0.60) action = "unassign";
-      else if (final < 0.72 || penalty >= 0.18) action = "move";
-      else if (penalty >= 0.10) action = "review";
-      return { spotify_track_id: r.spotify_track_id, artist: r.artist_name, name: r.track_name, sonic, context, taste, penalty, final, action, surprise: !!isSurprise };
-    });
-    // Drop only if it doesn't shrink under 10
-    const drop = new Set(findings.filter((f) => f.action === "unassign").map((f) => f.spotify_track_id));
-    let filteredSids = sids;
-    if (drop.size > 0 && sids.length - drop.size >= 10) {
-      filteredSids = sids.filter((s) => !drop.has(s));
-      // Return dropped tracks to unassigned pool
-      const rowsBack = [...drop].map((s) => ({ user_id: user.id, spotify_track_id: s, last_run_id: crypto.randomUUID(), reason: "artist_context_penalty" }));
-      await adm.from("unassigned_tracks").upsert(rowsBack, { onConflict: "user_id,spotify_track_id" });
-    }
-    const dropReport = findings.filter((f) => drop.has(f.spotify_track_id));
-    const flagReport = findings.filter((f) => f.action !== "keep" && !drop.has(f.spotify_track_id));
-
-    const trackLines = filteredSids.map((s, i) => {
+    const trackLines = sids.map((s, i) => {
       const l: any = nameMap.get(s) ?? {};
       return `${i + 1}. "${l.track_name ?? "?"}" — ${l.artist_name ?? "?"}`;
     }).join("\n");
-
 
     const prompt = `Cluster metrics:
 - size: ${cluster.size}
@@ -192,21 +106,14 @@ Name this specific sonic world.`;
       min_compat: cluster.min_compat,
       dimensions_summary: cluster.dominant_dimensions,
       source_cluster_id: cluster_id,
-      intent_profile: {
-        second_layer: {
-          dominant_genre: dominantGenre,
-          dropped: dropReport.map((f) => ({ name: f.name, artist: f.artist, reason: f.action, final: Number(f.final.toFixed(3)) })),
-          flagged: flagReport.map((f) => ({ name: f.name, artist: f.artist, action: f.action, final: Number(f.final.toFixed(3)), sonic: Number(f.sonic.toFixed(3)), context: Number(f.context.toFixed(3)), penalty: Number(f.penalty.toFixed(3)) })),
-        },
-      },
     }).select("id").single();
     if (plErr || !pl) return json({ error: "failed to create playlist", detail: plErr?.message }, 500);
 
-    // Ensure tracks rows (only the filtered set)
-    const { data: existing } = await adm.from("tracks").select("id, spotify_track_id").in("spotify_track_id", filteredSids);
+    // Ensure tracks rows
+    const { data: existing } = await adm.from("tracks").select("id, spotify_track_id").in("spotify_track_id", sids);
     const idMap = new Map<string, string>();
     for (const t of existing ?? []) idMap.set(t.spotify_track_id, t.id);
-    const toInsert = filteredSids.filter((s) => !idMap.has(s)).map((s) => {
+    const toInsert = sids.filter((s) => !idMap.has(s)).map((s) => {
       const l: any = nameMap.get(s) ?? {};
       return { spotify_track_id: s, name: l.track_name ?? "Unknown", artist_names: l.artist_name ? [l.artist_name] : [], album_name: null };
     });
@@ -215,32 +122,20 @@ Name this specific sonic world.`;
       for (const t of ins ?? []) idMap.set(t.spotify_track_id, t.id);
     }
 
-    const compatMap = new Map((cts ?? []).map((t: any) => [t.spotify_track_id, t.compat_to_centroid]));
-    const rows = filteredSids.map((s, i) => ({
+    const rows = (cts ?? []).map((t: any, i: number) => ({
       generated_playlist_id: pl.id,
       user_id: user.id,
-      track_id: idMap.get(s)!,
+      track_id: idMap.get(t.spotify_track_id)!,
       position: i + 1,
       added_by: "ai",
-      fit_score: compatMap.get(s) ?? null,
+      fit_score: t.compat_to_centroid,
       reason_for_inclusion: null,
     })).filter((r) => r.track_id);
     if (rows.length) await adm.from("generated_playlist_tracks").insert(rows);
 
     await adm.from("cluster_candidates").update({ status: "promoted", promoted_playlist_id: pl.id }).eq("id", cluster_id);
 
-    return json({
-      success: true,
-      playlist_id: pl.id,
-      name,
-      track_count: rows.length,
-      second_layer: {
-        dropped: dropReport.length,
-        flagged: flagReport.length,
-        dominant_genre: dominantGenre,
-      },
-    });
-
+    return json({ success: true, playlist_id: pl.id, name, track_count: rows.length });
   } catch (e: any) {
     console.error("name-cluster", e);
     return json({ error: e?.message ?? "unknown" }, 500);
