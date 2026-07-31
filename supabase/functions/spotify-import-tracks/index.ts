@@ -326,14 +326,15 @@ async function syncLikedSongs(
     );
   }
 
-  // Incremental fast-path: stop as soon as we've walked past the last sync
-  // cutoff AND have seen a run of tracks we already have locally. Liked songs
-  // come back sorted by added_at DESC, so once we clear the cutoff there are
-  // no more new items to find.
-  const canEarlyExit = !isFullSync && cutoffMs > 0;
+  // Liked songs ALWAYS do a complete scan + reconciliation, even on quick sync.
+  // ~50 tracks per request means a 1,600 track library is ~32 calls, which is fast
+  // enough and guarantees the local count matches Spotify exactly (additions AND
+  // removals). The early-exit fast-path caused stale/inflated counts, so it's off.
+  const canEarlyExit = false;
   let pastCutoff = false;
   let consecutiveKnown = 0;
   const KNOWN_THRESHOLD = 100;
+
 
   outer: while (offset < total) {
     const params = new URLSearchParams({ limit: "50", offset: String(offset) });
