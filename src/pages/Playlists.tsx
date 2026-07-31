@@ -224,6 +224,15 @@ function ClusterSampleTest({ onPromoted }: { onPromoted: (id: string) => void })
             <Stat label="Agrupadas" value={report.totals.clustered_tracks} />
             <Stat label="Sin asignar" value={report.totals.unassigned} />
           </div>
+          {typeof report.totals.library_total === "number" && (
+            <p className="text-xs text-muted-foreground">
+              Biblioteca sincronizada: {report.totals.library_total} canciones
+              {report.totals.pending_analysis > 0
+                ? ` · ${report.totals.pending_analysis} sin análisis profundo todavía`
+                : " · análisis profundo completo"}
+            </p>
+          )}
+
 
           {report.clusters.length === 0 && (
             <p className="text-sm text-muted-foreground">
