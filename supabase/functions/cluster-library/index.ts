@@ -351,16 +351,11 @@ Deno.serve(async (req) => {
             min_compat: mn,
             status: "candidate",
           });
-        } else {
-          // A failed attempt must NOT burn its members. Only the seed stays locked
-          // (it already had its turn); everyone else returns to the pool so they can
-          // join a different, stronger cluster later in the pass.
-          rejectedSeeds.add(seed.spotify_track_id);
-          for (const m of members) {
-            if (m.spotify_track_id === seed.spotify_track_id) continue;
-            used.delete(m.spotify_track_id);
-          }
         }
+        // Failed attempts keep their members locked here (re-seeding the whole pool
+        // is quadratic and blows the function's CPU budget). They are recovered
+        // cheaply in the rescue pass below.
+
       }
 
       // Whatever is still loose in this language group after the greedy pass.
