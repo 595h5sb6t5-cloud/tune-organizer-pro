@@ -15,8 +15,8 @@ import { useGeneratedPlaylists, useGeneratedPlaylistDetail } from "@/hooks/use-g
 import { supabase } from "@/integrations/supabase/client";
 import { useJobs } from "@/hooks/use-jobs";
 import { toast } from "sonner";
+import OrganizeLibraryPanel from "@/components/app/OrganizeLibraryPanel";
 
-// Old concept-first generator kept in code for reference; UI uses ClusterSampleTest.
 
 
 const Playlists = () => {
@@ -54,7 +54,7 @@ const Playlists = () => {
           </div>
         </div>
 
-        <ClusterSampleTest onPromoted={(id) => { void refresh(); setSelected(id); }} />
+        <OrganizeLibraryPanel onSaved={() => { void refresh(); }} />
 
         <div className="mt-10">
           <h2 className="font-heading text-xl mb-4">Tus playlists generadas</h2>
@@ -126,192 +126,6 @@ function EmptyConnect() {
   );
 }
 
-type ClusterReport = {
-  id: string;
-  language_group: string;
-  size: number;
-  avg_compat: number;
-  min_compat: number;
-  least_compatible: { name: string | null; artist: string | null; compat: number } | null;
-  dominant_dimensions: { strong: { dim: string; value: number }[]; tempo?: string; beat?: string; texture?: string; mood?: string };
-  tracks: { spotify_track_id: string; name: string | null; artist: string | null; compat: number }[];
-};
-
-function ClusterSampleTest({ onPromoted }: { onPromoted: (id: string) => void }) {
-  const [running, setRunning] = useState(false);
-  const [sampleSize, setSampleSize] = useState(200);
-  const [report, setReport] = useState<null | {
-    run_id: string; persisted: boolean; totals: any; thresholds: any;
-    clusters: ClusterReport[]; unassigned: { spotify_track_id: string; name: string | null; artist: string | null; language: string | null }[];
-  }>(null);
-  const [promoting, setPromoting] = useState<string | null>(null);
-  const jobsApi = useJobs();
-
-  const run = async (persist: boolean) => {
-    setRunning(true);
-    const jobId = jobsApi.startJob({
-      type: "playlist_generation",
-      label: persist ? "Corriendo clustering sobre biblioteca completa" : `Prueba de clustering (${sampleSize} canciones)`,
-      message: "Agrupando por compatibilidad sonora…",
-      retry: () => { void run(persist); },
-    });
-    try {
-      const { data, error } = await supabase.functions.invoke("cluster-library", {
-        body: persist ? { persist: true } : { sample_size: sampleSize, persist: false },
-      });
-      if (error) throw new Error(error.message);
-      if (data?.error) throw new Error(data.error);
-      setReport(data);
-      jobsApi.completeJob(jobId, `${data.totals.clusters} clusters · ${data.totals.unassigned} sin asignar`);
-    } catch (e: any) {
-      jobsApi.failJob(jobId, e.message);
-      toast.error("Clustering falló", { description: e.message });
-    } finally {
-      setRunning(false);
-    }
-  };
-
-  const promote = async (clusterId: string) => {
-    setPromoting(clusterId);
-    try {
-      const { data, error } = await supabase.functions.invoke("name-cluster", { body: { cluster_id: clusterId } });
-      if (error) throw new Error(error.message);
-      if (data?.error) throw new Error(data.error);
-      toast.success("Playlist creada", { description: `${data.name} · ${data.track_count} canciones` });
-      onPromoted(data.playlist_id);
-    } catch (e: any) {
-      toast.error("No se pudo promover el cluster", { description: e.message });
-    } finally {
-      setPromoting(null);
-    }
-  };
-
-  return (
-    <div className="rounded-3xl border border-border/50 bg-gradient-to-br from-accent/10 via-primary/5 to-background p-6 md:p-8">
-      <div className="flex items-center gap-2 mb-2">
-        <ShieldCheck className="w-4 h-4 text-accent" />
-        <p className="text-xs uppercase tracking-[0.2em] text-accent">Cluster-first pipeline · Sample test</p>
-      </div>
-      <h2 className="font-heading text-2xl mb-2">Agrupar primero, nombrar después.</h2>
-      <p className="text-sm text-muted-foreground mb-5">
-        El sistema mide compatibilidad sonora real entre canciones y sólo forma grupos que cumplen los mínimos.
-        Corre una prueba con una muestra antes de aplicarlo a toda tu biblioteca.
-      </p>
-
-      <div className="flex flex-col md:flex-row gap-3 mb-4">
-        <Input
-          type="number"
-          value={sampleSize}
-          onChange={(e) => setSampleSize(Math.min(500, Math.max(50, Number(e.target.value) || 200)))}
-          className="w-full md:w-32"
-          disabled={running}
-          min={50}
-          max={500}
-        />
-        <Button variant="hero" onClick={() => run(false)} disabled={running}>
-          {running ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Corriendo…</> : <><Wand2 className="w-4 h-4 mr-2" />Correr prueba</>}
-        </Button>
-        <Button variant="outline" onClick={() => run(true)} disabled={running || !report}>
-          Correr sobre biblioteca completa (persistir)
-        </Button>
-      </div>
-
-      {report && (
-        <div className="mt-6 space-y-4">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-            <Stat label="Analizadas" value={report.totals.analyzed} />
-            <Stat label="Clusters válidos" value={report.totals.clusters} />
-            <Stat label="Agrupadas" value={report.totals.clustered_tracks} />
-            <Stat label="Sin asignar" value={report.totals.unassigned} />
-          </div>
-          {typeof report.totals.library_total === "number" && (
-            <p className="text-xs text-muted-foreground">
-              Biblioteca sincronizada: {report.totals.library_total} canciones
-              {report.totals.pending_analysis > 0
-                ? ` · ${report.totals.pending_analysis} sin análisis profundo todavía`
-                : " · análisis profundo completo"}
-            </p>
-          )}
-
-
-          {report.clusters.length === 0 && (
-            <p className="text-sm text-muted-foreground">
-              Ningún grupo pasó los filtros con esta muestra. Sube el tamaño de muestra o corre más análisis profundo.
-            </p>
-          )}
-
-          {report.clusters.map((c, i) => (
-            <div key={c.id} className="rounded-2xl border border-border/50 bg-card/50 p-5">
-              <div className="flex items-start justify-between gap-3 mb-3">
-                <div>
-                  <p className="text-xs uppercase tracking-wider text-accent mb-1">Cluster #{i + 1} · {c.language_group}</p>
-                  <p className="text-sm">
-                    <strong>{c.size}</strong> canciones · avg <strong>{c.avg_compat.toFixed(2)}</strong> · min <strong>{c.min_compat.toFixed(2)}</strong>
-                  </p>
-                </div>
-                <Button
-                  size="sm"
-                  variant="hero"
-                  disabled={!report.persisted || promoting === c.id}
-                  onClick={() => promote(c.id)}
-                  title={!report.persisted ? "Primero corre sobre biblioteca completa para persistir" : ""}
-                >
-                  {promoting === c.id ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" />Nombrando…</> : "Promover a playlist"}
-                </Button>
-              </div>
-
-              <div className="flex flex-wrap gap-1.5 mb-3">
-                {c.dominant_dimensions.strong.map((d) => (
-                  <Badge key={d.dim} variant="secondary" className="text-xs">
-                    {d.dim} · {d.value.toFixed(2)}
-                  </Badge>
-                ))}
-                {c.dominant_dimensions.mood && <Badge variant="outline" className="text-xs">mood: {c.dominant_dimensions.mood}</Badge>}
-                {c.dominant_dimensions.beat && <Badge variant="outline" className="text-xs">beat: {c.dominant_dimensions.beat}</Badge>}
-                {c.dominant_dimensions.texture && <Badge variant="outline" className="text-xs">texture: {c.dominant_dimensions.texture}</Badge>}
-              </div>
-
-              {c.least_compatible && (
-                <p className="text-xs text-muted-foreground mb-2">
-                  Menos compatible: <strong>{c.least_compatible.name}</strong> — {c.least_compatible.artist} (compat {c.least_compatible.compat.toFixed(2)})
-                </p>
-              )}
-
-              <details className="text-sm">
-                <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">Ver todas las canciones ({c.tracks.length})</summary>
-                <ul className="mt-2 space-y-1 max-h-64 overflow-y-auto pr-2">
-                  {c.tracks.map((t) => (
-                    <li key={t.spotify_track_id} className="flex justify-between gap-3 text-xs">
-                      <span className="truncate">{t.name} — <span className="text-muted-foreground">{t.artist}</span></span>
-                      <span className="text-muted-foreground shrink-0">{t.compat.toFixed(2)}</span>
-                    </li>
-                  ))}
-                </ul>
-              </details>
-            </div>
-          ))}
-
-          {report.unassigned.length > 0 && (
-            <div className="rounded-2xl border border-dashed border-border/50 p-5">
-              <p className="text-sm font-medium mb-2">Sin asignar ({report.unassigned.length})</p>
-              <p className="text-xs text-muted-foreground mb-3">
-                Estas canciones no encontraron un grupo suficientemente compatible. Se guardarán como pendientes cuando corras el pipeline completo.
-              </p>
-              <details className="text-xs">
-                <summary className="cursor-pointer text-muted-foreground">Ver lista</summary>
-                <ul className="mt-2 space-y-1 max-h-48 overflow-y-auto pr-2">
-                  {report.unassigned.slice(0, 100).map((u) => (
-                    <li key={u.spotify_track_id} className="truncate">{u.name} — <span className="text-muted-foreground">{u.artist}</span></li>
-                  ))}
-                </ul>
-              </details>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
 
 function Stat({ label, value }: { label: string; value: number | string }) {
   return (
@@ -331,8 +145,6 @@ function PlaylistDetail({ playlistId, onBack }: { playlistId: string; onBack: ()
   const [exporting, setExporting] = useState(false);
   const [isPublic, setIsPublic] = useState(false);
   const [exportError, setExportError] = useState<{ message: string; step?: string; needsReauth?: boolean } | null>(null);
-  const [reviewing, setReviewing] = useState(false);
-  const [review, setReview] = useState<any>(null);
 
   if (loading || !playlist) {
     return <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin" />Cargando…</div>;
@@ -390,32 +202,6 @@ function PlaylistDetail({ playlistId, onBack }: { playlistId: string; onBack: ()
       toast.error("Export falló", { description: e.message });
     } finally {
       setExporting(false);
-    }
-  };
-
-  const runReview = async (apply: boolean) => {
-    setReviewing(true);
-    const jobId = jobsApi.startJob({
-      type: "playlist_review",
-      label: apply ? `Aplicando revisión a "${playlist.name}"` : `Revisando "${playlist.name}" con IA`,
-      message: "Analizando coherencia sonora…",
-      retry: () => { void runReview(apply); },
-    });
-    try {
-      const { data, error } = await supabase.functions.invoke("review-playlist", {
-        body: { generated_playlist_id: playlistId, apply },
-      });
-      if (error) throw new Error(error.message);
-      if (data?.error) throw new Error(data.error);
-      setReview(data.review);
-      jobsApi.completeJob(jobId, apply ? "Revisión aplicada" : `Coherencia ${(data.review?.coherence_score ?? 0).toFixed(2)}`);
-      if (apply) { await refresh(); toast.success("Revisión aplicada"); }
-      else toast.success("Revisión lista");
-    } catch (e: any) {
-      jobsApi.failJob(jobId, e.message);
-      toast.error("No se pudo revisar", { description: e.message });
-    } finally {
-      setReviewing(false);
     }
   };
 
@@ -491,55 +277,8 @@ function PlaylistDetail({ playlistId, onBack }: { playlistId: string; onBack: ()
                   {exporting ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" />Exportando…</> : <><Upload className="w-4 h-4 mr-1.5" />Exportar a Spotify</>}
                 </Button>
               )}
-              <Button variant="outline" size="sm" onClick={() => runReview(false)} disabled={reviewing || tracks.length === 0}>
-                {reviewing ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" />Revisando…</> : <><ShieldCheck className="w-4 h-4 mr-1.5" />Revisar con IA</>}
-              </Button>
             </div>
 
-            {review && (
-              <div className="mt-5 rounded-2xl border border-border/50 bg-background/40 p-4">
-                <div className="flex items-center justify-between gap-3 mb-3">
-                  <div className="flex items-center gap-2">
-                    <ShieldCheck className={`w-4 h-4 ${review.approved ? "text-accent" : "text-destructive"}`} />
-                    <p className="text-sm font-medium">
-                      {review.approved ? "Playlist aprobada" : "Necesita ajustes"}
-                    </p>
-                  </div>
-                  <div className="flex gap-3 text-xs text-muted-foreground tabular-nums">
-                    <span>Coh. {Math.round((review.coherence_score ?? 0) * 100)}%</span>
-                    <span>Nom. {Math.round((review.name_score ?? 0) * 100)}%</span>
-                    <span>Ord. {Math.round((review.ordering_score ?? 0) * 100)}%</span>
-                  </div>
-                </div>
-                {review.main_issue && review.main_issue !== "ninguno" && (
-                  <p className="text-xs text-muted-foreground mb-3"><strong className="text-foreground">Problema:</strong> {review.main_issue}</p>
-                )}
-                {review.songs_to_remove?.length > 0 && (
-                  <div className="mb-2">
-                    <p className="text-xs font-medium mb-1">Sugiere eliminar {review.songs_to_remove.length}:</p>
-                    <ul className="text-xs text-muted-foreground space-y-1">
-                      {review.songs_to_remove.slice(0, 5).map((r: any, i: number) => (
-                        <li key={i}>• {tracks.find(t => t.spotify_track_id === r.spotify_track_id)?.name ?? r.spotify_track_id}: {r.reason}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-                {review.songs_to_reorder?.length > 0 && (
-                  <p className="text-xs text-muted-foreground mb-2">Sugiere reordenar {review.songs_to_reorder.length} canciones.</p>
-                )}
-                {review.should_split && (
-                  <p className="text-xs text-muted-foreground mb-2"><strong className="text-foreground">Dividir:</strong> {review.split_reason}</p>
-                )}
-                <div className="flex flex-wrap gap-2 mt-3">
-                  <Button variant="hero" size="sm" onClick={() => runReview(true)} disabled={reviewing}>
-                    <Check className="w-3.5 h-3.5 mr-1.5" />Aplicar cambios
-                  </Button>
-                  <Button variant="ghost" size="sm" onClick={() => setReview(null)}>
-                    <X className="w-3.5 h-3.5 mr-1.5" />Descartar
-                  </Button>
-                </div>
-              </div>
-            )}
           </>
         )}
 

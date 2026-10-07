@@ -1,0 +1,1 @@
+- Playlist organizing lives only in src/lib/playlist/organize.ts (client-side); no other playlist engine or edge function — avoids two engines with conflicting rules.
