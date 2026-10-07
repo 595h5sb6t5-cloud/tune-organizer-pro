@@ -1,6 +1,6 @@
 // Supabase Edge Function: classify-tracks
 // Estimates sung language, energy, mood, etc. for up to 50 songs per request.
-// Secret needed:  supabase secrets set ANTHROPIC_API_KEY=sk-ant-...
+// Secret needed:  supabase secrets set OPENAI_API_KEY=sk-...
 // Deploy:         supabase functions deploy classify-tracks
 
 const corsHeaders = {
@@ -12,7 +12,10 @@ const corsHeaders = {
 const SYSTEM = `You are a music analyst. For each song you receive, estimate how it SOUNDS so an app can build playlists that flow without skips.
 Use your knowledge of the specific song when you know it; otherwise infer from the artist, album, year and genres.
 
-Return ONLY a JSON array, no prose and no markdown fences. One object per song, same order, with exactly these keys:
+Return ONLY JSON, no prose and no markdown fences, with this exact shape:
+{"results": [ ...one object per song, same order... ]}
+
+Each object has exactly these keys:
 - "id": the id you received
 - "lang": language the lyrics are SUNG in (not the title language). One of: "es","en","pt","fr","it","de","ko","ja","zh","instrumental","other". Mostly-Spanish songs with a few English words are "es".
 - "energy": 0 to 1 (0 = very calm, 1 = very intense)
@@ -45,8 +48,8 @@ Deno.serve(async (req) => {
       return json({ error: "Send between 1 and 50 tracks." }, 400);
     }
 
-    const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
-    if (!apiKey) return json({ error: "ANTHROPIC_API_KEY is not set." }, 500);
+    const apiKey = Deno.env.get("OPENAI_API_KEY");
+    if (!apiKey) return json({ error: "OPENAI_API_KEY is not set." }, 500);
 
     const list = tracks
       .map((t, i) =>
@@ -54,34 +57,31 @@ Deno.serve(async (req) => {
       )
       .join("\n");
 
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001", // fast and cheap, good enough for this task
-        max_tokens: 6000,
-        system: SYSTEM,
-        messages: [{ role: "user", content: list }],
+        model: "gpt-4.1-mini", // fast and cheap, good enough for this task
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: SYSTEM },
+          { role: "user", content: list },
+        ],
       }),
     });
 
     if (!res.ok) return json({ error: `AI request failed (${res.status})` }, 502);
 
     const data = await res.json();
-    const text = (data.content ?? [])
-      .filter((b: { type: string }) => b.type === "text")
-      .map((b: { text: string }) => b.text)
-      .join("")
-      .replace(/```json|```/g, "")
-      .trim();
+    const text = String(data.choices?.[0]?.message?.content ?? "").trim();
 
     const parsed = JSON.parse(text);
     const validIds = new Set(tracks.map((t) => t.id));
-    const results = Array.isArray(parsed) ? parsed.filter((r) => r && validIds.has(r.id)) : [];
+    const arr = Array.isArray(parsed) ? parsed : parsed?.results;
+    const results = Array.isArray(arr) ? arr.filter((r) => r && validIds.has(r.id)) : [];
     return json({ results });
   } catch (err) {
     return json({ error: err instanceof Error ? err.message : "Unknown error" }, 500);
