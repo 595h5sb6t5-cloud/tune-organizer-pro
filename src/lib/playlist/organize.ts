@@ -79,7 +79,7 @@ export function compatibility(a: TrackProfile, b: TrackProfile): number {
     [closeness(a.valence, b.valence, 0.5), 0.1],
     [tempoCloseness(a.tempo, b.tempo), 0.08],
     [closeness(a.danceability, b.danceability, 0.5), 0.05],
-    [a.year && b.year ? Math.max(0, 1 - Math.abs(a.year - b.year) / 25) : null, 0.1],
+    [a.year && b.year ? Math.max(0, 1 - Math.abs(a.year - b.year) / 15) : null, 0.18],
     [a.explicit === b.explicit ? 1 : 0.6, 0.03],
   ];
 
@@ -94,6 +94,7 @@ export function compatibility(a: TrackProfile, b: TrackProfile): number {
 
   // A strong clash in energy is a skip, no matter how similar the genre is.
   if (a.energy !== null && b.energy !== null && Math.abs(a.energy - b.energy) > 0.55) score *= 0.5;
+  if (a.year && b.year && Math.abs(a.year - b.year) > 25) score *= 0.6;
   if (a.artistIds.some((id) => b.artistIds.includes(id))) score = Math.min(1, score + 0.08);
   return score;
 }
@@ -285,7 +286,12 @@ function nameFor(tracks: TrackProfile[], lang: string, used: Set<string>): strin
   const base = family ? FAMILY_LABEL[family] : lang === "instrumental" ? "Instrumental" : "Mix";
   let name = mood ? `${base} · ${MOOD_LABEL[mood]}` : base;
   if ((!family || used.has(name)) && LANG_LABEL[lang]) name = `${name} ${LANG_LABEL[lang]}`;
-  if (used.has(name) && decade) name = `${name} · ${String(decade).slice(2)}s`;
+  const decadeCounts = new Map<number, number>();
+  for (const y of years) { const d = Math.floor(y / 10) * 10; decadeCounts.set(d, (decadeCounts.get(d) ?? 0) + 1); }
+  const top = [...decadeCounts.entries()].sort((x, y) => y[1] - x[1])[0];
+  const strongDecade = top && top[1] / tracks.length >= 0.7 ? top[0] : null;
+  if (strongDecade !== null) name = `${name} · ${strongDecade}s`;
+  else if (used.has(name) && decade) name = `${name} · ${String(decade).slice(2)}s`;
   let unique = name;
   for (let i = 2; used.has(unique); i++) unique = `${name} ${i}`;
   used.add(unique);

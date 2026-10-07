@@ -18,6 +18,8 @@ export interface AiTrackInfo {
   danceability: number;
   tempo: number;
   mood: Mood;
+  original_year?: number | null;
+  year_checked?: boolean;
 }
 
 const LANGS: Lang[] = ["es", "en", "pt", "fr", "it", "de", "ko", "ja", "zh", "instrumental", "other"];
@@ -35,6 +37,11 @@ function clamp01(n: unknown): number {
   return Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0.5;
 }
 
+function validYear(n: unknown): number | null {
+  const y = Number(n);
+  return Number.isInteger(y) && y >= 1900 && y <= new Date().getFullYear() ? y : null;
+}
+
 function sanitize(raw: any): AiTrackInfo | null {
   if (!raw || typeof raw.id !== "string") return null;
   const tempo = Number(raw.tempo);
@@ -46,6 +53,8 @@ function sanitize(raw: any): AiTrackInfo | null {
     danceability: clamp01(raw.danceability),
     tempo: Number.isFinite(tempo) && tempo >= 50 && tempo <= 220 ? tempo : 110,
     mood: MOODS.includes(raw.mood) ? raw.mood : "chill",
+    original_year: validYear(raw.original_year),
+    year_checked: !!raw.year_checked,
   };
 }
 
@@ -97,7 +106,7 @@ async function loadDeepAnalysis(userId: string): Promise<Map<string, Partial3>> 
 async function loadStoredClassifications(userId: string): Promise<Map<string, AiTrackInfo>> {
   const rows = await fetchAll<any>((a, b) =>
     supabase.from("track_ai_classification")
-      .select("spotify_track_id, lang, energy, valence, danceability, tempo, mood")
+      .select("spotify_track_id, lang, energy, valence, danceability, tempo, mood, original_year, year_checked")
       .eq("user_id", userId).range(a, b));
   const map = new Map<string, AiTrackInfo>();
   for (const r of rows) {
@@ -134,7 +143,8 @@ export async function enrichWithAI(
   const complete = (d?: Partial3) => !!d && !!d.lang && d.energy != null && !!d.mood;
 
   // Only songs missing language, energy or mood (and not classified before) go to the AI.
-  const missing = profiles.filter((p) => !complete(deep.get(p.id)) && !stored.has(p.id));
+  const missing = profiles.filter((p) => (!complete(deep.get(p.id)) && !stored.has(p.id)) || (stored.has(p.id) && !stored.get(p.id)!.year_checked) || (!stored.has(p.id) && complete(deep.get(p.id))));
+  // Songs without a year check yet go once to the AI to get their original release year.
   let done = 0;
 
   for (let i = 0; i < missing.length; i += BATCH_SIZE) {
@@ -155,12 +165,13 @@ export async function enrichWithAI(
       if (!error && Array.isArray(data?.results)) {
         const rows = [];
         for (const r of data.results) {
-          const info = sanitize(r);
+          const info = sanitize({ ...r, year_checked: true });
           if (!info) continue;
           stored.set(info.id, info);
           rows.push({
             user_id: user.id, spotify_track_id: info.id, lang: info.lang, energy: info.energy,
             valence: info.valence, danceability: info.danceability, tempo: info.tempo, mood: info.mood,
+            original_year: info.original_year ?? null, year_checked: true,
           });
         }
         if (rows.length) {
@@ -180,6 +191,7 @@ export async function enrichWithAI(
     let out = p;
     if (ai) out = apply(out, ai, true);
     if (d) out = apply(out, d, false); // Deep Analysis wins where present
+    if (ai?.original_year) out = { ...out, year: ai.original_year };
     return out;
   });
 }
