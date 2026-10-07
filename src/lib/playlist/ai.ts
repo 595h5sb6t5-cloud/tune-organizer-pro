@@ -20,6 +20,7 @@ export interface AiTrackInfo {
   original_year?: number | null;
   year_checked?: boolean;
   family?: string | null;
+  style?: string | null;
 }
 
 const LANGS: Lang[] = ["es", "en", "pt", "fr", "it", "de", "ko", "ja", "zh", "instrumental", "other"];
@@ -56,6 +57,7 @@ function sanitize(raw: any): AiTrackInfo | null {
     original_year: validYear(raw.original_year),
     year_checked: !!raw.year_checked,
     family: typeof raw.family === "string" ? raw.family : null,
+    style: typeof raw.style === "string" ? raw.style : null,
   };
 }
 
@@ -107,7 +109,7 @@ async function loadDeepAnalysis(userId: string): Promise<Map<string, Partial3>> 
 async function loadStoredClassifications(userId: string): Promise<Map<string, AiTrackInfo>> {
   const rows = await fetchAll<any>((a, b) =>
     supabase.from("track_ai_classification")
-      .select("spotify_track_id, lang, energy, valence, danceability, tempo, mood, original_year, year_checked, family")
+      .select("spotify_track_id, lang, energy, valence, danceability, tempo, mood, original_year, year_checked, family, style")
       .eq("user_id", userId).range(a, b));
   const map = new Map<string, AiTrackInfo>();
   for (const r of rows) {
@@ -151,6 +153,7 @@ export async function enrichWithAI(
     let out = p;
     if (ai) out = apply(out, ai, true);
     if (d) out = apply(out, d, false); // Deep Analysis wins where present
+    if (ai?.style) out = { ...out, style: ai.style };
     if (ai?.original_year) out = { ...out, year: ai.original_year };
     // Artists with no stored genres: use the AI's genre family for the song.
     if (!out.families.length && ai?.family) out = { ...out, families: [ai.family] };
