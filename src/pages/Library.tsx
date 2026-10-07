@@ -223,7 +223,7 @@ const LibraryPage = () => {
             {followedArtists.length > 0 && (
               <HorizontalRow title="Followed Artists" icon={<Users className="w-5 h-5 text-accent" />} count={followedArtists.length}>
                 {followedArtists.map((artist) => {
-                  const pending = (artist.top_tracks_count ?? 0) === 0 && !artist.top_tracks_synced_at;
+                  const pending = false; // Spotify removed artist top tracks (2026)
                   return (
                     <button
                       key={artist.id}

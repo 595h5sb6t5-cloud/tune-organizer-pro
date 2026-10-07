@@ -2,7 +2,18 @@
 // (title, artists, album, release year, explicit flag, ISRC, artist genres).
 // Energy / mood / tempo come later from the optional AI step (ai.ts).
 
-import type { SpotifyTrack } from "../spotify/api";
+export interface SpotifyArtistRef { id: string; name: string }
+export interface SpotifyTrack {
+  id: string;
+  uri: string;
+  name: string;
+  explicit: boolean;
+  duration_ms: number;
+  is_local: boolean;
+  artists: SpotifyArtistRef[];
+  album: { id: string; name: string; release_date: string; images: { url: string }[] };
+  external_ids?: { isrc?: string };
+}
 
 export type Lang =
   | "es" | "en" | "pt" | "fr" | "it" | "de" | "ko" | "ja" | "zh"

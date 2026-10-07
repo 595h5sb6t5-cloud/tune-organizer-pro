@@ -56,7 +56,7 @@ Deno.serve(async (req) => {
   const me = await spotifyFetch("https://api.spotify.com/v1/me", token);
   const playlistId = "3DFFXGlZHn4a17Haa4KmDZ";
   const meta = await spotifyFetch(`https://api.spotify.com/v1/playlists/${playlistId}`, token);
-  const tracks = await spotifyFetch(`https://api.spotify.com/v1/playlists/${playlistId}/tracks?limit=100`, token);
+  const tracks = await spotifyFetch(`https://api.spotify.com/v1/playlists/${playlistId}/items?limit=100`, token);
 
   return new Response(JSON.stringify({
     token_info: {
@@ -73,7 +73,7 @@ Deno.serve(async (req) => {
       owner_id: meta.body?.owner?.id,
       public: meta.body?.public,
       collaborative: meta.body?.collaborative,
-      total_tracks: meta.body?.tracks?.total,
+      total_tracks: (meta.body?.items?.total ?? meta.body?.tracks?.total),
       error: meta.body?.error,
     },
     playlist_tracks: {

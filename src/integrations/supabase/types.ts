@@ -398,6 +398,24 @@ export type Database = {
         }
         Relationships: []
       }
+      artist_genres: {
+        Row: {
+          artist_id: string
+          genres: string[]
+          updated_at: string
+        }
+        Insert: {
+          artist_id: string
+          genres?: string[]
+          updated_at?: string
+        }
+        Update: {
+          artist_id?: string
+          genres?: string[]
+          updated_at?: string
+        }
+        Relationships: []
+      }
       artist_tracks: {
         Row: {
           artist_spotify_id: string
@@ -972,9 +990,12 @@ export type Database = {
       liked_songs: {
         Row: {
           added_at: string | null
+          album_id: string | null
           album_name: string | null
+          album_release_date: string | null
           analyzed_at: string | null
           artist_name: string
+          artists: Json | null
           atmosphere: string | null
           audio_acousticness: number | null
           audio_danceability: number | null
@@ -991,8 +1012,10 @@ export type Database = {
           audio_valence: number | null
           created_at: string
           deactivated_at: string | null
+          duration_ms: number | null
           energy: string | null
           era: string | null
+          explicit: boolean | null
           genre_tags: string[] | null
           groove_feel: string | null
           id: string
@@ -1000,6 +1023,7 @@ export type Database = {
           intimacy_scale: string | null
           is_active: boolean
           is_available: boolean
+          isrc: string | null
           last_seen_sync_run_id: string | null
           listening_context: string | null
           mood: string | null
@@ -1017,9 +1041,12 @@ export type Database = {
         }
         Insert: {
           added_at?: string | null
+          album_id?: string | null
           album_name?: string | null
+          album_release_date?: string | null
           analyzed_at?: string | null
           artist_name: string
+          artists?: Json | null
           atmosphere?: string | null
           audio_acousticness?: number | null
           audio_danceability?: number | null
@@ -1036,8 +1063,10 @@ export type Database = {
           audio_valence?: number | null
           created_at?: string
           deactivated_at?: string | null
+          duration_ms?: number | null
           energy?: string | null
           era?: string | null
+          explicit?: boolean | null
           genre_tags?: string[] | null
           groove_feel?: string | null
           id?: string
@@ -1045,6 +1074,7 @@ export type Database = {
           intimacy_scale?: string | null
           is_active?: boolean
           is_available?: boolean
+          isrc?: string | null
           last_seen_sync_run_id?: string | null
           listening_context?: string | null
           mood?: string | null
@@ -1062,9 +1092,12 @@ export type Database = {
         }
         Update: {
           added_at?: string | null
+          album_id?: string | null
           album_name?: string | null
+          album_release_date?: string | null
           analyzed_at?: string | null
           artist_name?: string
+          artists?: Json | null
           atmosphere?: string | null
           audio_acousticness?: number | null
           audio_danceability?: number | null
@@ -1081,8 +1114,10 @@ export type Database = {
           audio_valence?: number | null
           created_at?: string
           deactivated_at?: string | null
+          duration_ms?: number | null
           energy?: string | null
           era?: string | null
+          explicit?: boolean | null
           genre_tags?: string[] | null
           groove_feel?: string | null
           id?: string
@@ -1090,6 +1125,7 @@ export type Database = {
           intimacy_scale?: string | null
           is_active?: boolean
           is_available?: boolean
+          isrc?: string | null
           last_seen_sync_run_id?: string | null
           listening_context?: string | null
           mood?: string | null

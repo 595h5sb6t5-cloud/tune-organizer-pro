@@ -19,7 +19,7 @@ const Index = () => {
               <Link to="/auth">Log in</Link>
             </Button>
             <Button variant="hero" size="sm" asChild>
-              <Link to="/organize">Get started</Link>
+              <Link to="/auth">Get started</Link>
             </Button>
           </div>
         </div>
@@ -40,7 +40,7 @@ const Index = () => {
             Connect your Spotify account, let AI analyze your real music taste, and generate playlists that actually feel like you.
           </p>
           <Button variant="hero" size="lg" className="rounded-xl px-8 h-12 text-base" asChild>
-            <Link to="/organize">
+            <Link to="/auth">
               Connect Spotify <ArrowRight className="w-4 h-4 ml-1" />
             </Link>
           </Button>

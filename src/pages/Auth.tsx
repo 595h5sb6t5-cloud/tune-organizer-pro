@@ -84,7 +84,7 @@ const Auth = () => {
     const hasPendingConnect = readPendingSpotifyConnect();
     if (hasPendingCallback || hasPendingConnect || connectSpotify) return;
 
-    navigate("/organize", { replace: true });
+    navigate("/dashboard", { replace: true });
   }, [user, profile?.onboarding_completed, navigate, connectSpotify]);
 
   // New user (onboarding not done) → show connect step
@@ -116,7 +116,7 @@ const Auth = () => {
         <ConnectCard
           onComplete={async () => {
             await updateProfile({ onboarding_completed: true });
-            navigate("/organize");
+            navigate("/dashboard");
           }}
         />
       )}

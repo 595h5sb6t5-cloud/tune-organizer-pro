@@ -190,29 +190,14 @@ Deno.serve(async (req) => {
 
       step = "clear_existing_tracks";
       // Replace tracks (replace endpoint with empty array clears)
-      await fetch(`https://api.spotify.com/v1/playlists/${spotifyPlaylistId}/tracks`, {
+      await fetch(`https://api.spotify.com/v1/playlists/${spotifyPlaylistId}/items`, {
         method: "PUT",
         headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
         body: JSON.stringify({ uris: [] }),
       });
     } else {
-      step = "fetch_spotify_user";
-      let spotifyUserId = conn.spotify_user_id as string | null;
-      if (!spotifyUserId) {
-        const meRes = await fetch("https://api.spotify.com/v1/me", { headers: { Authorization: `Bearer ${accessToken}` } });
-        const meData = await meRes.json();
-        spotifyUserId = meData.id;
-        if (spotifyUserId) {
-          await supabase.from("spotify_connections").update({ spotify_user_id: spotifyUserId }).eq("user_id", user.id);
-        }
-      }
-      if (!spotifyUserId) {
-        await markStatus({ status: "failed", last_export_error: "Could not resolve Spotify user", last_export_step: step });
-        return jsonResponse({ error: "Could not resolve Spotify user", step }, 500);
-      }
-
       step = "create_playlist";
-      const createRes = await fetch(`https://api.spotify.com/v1/users/${spotifyUserId}/playlists`, {
+      const createRes = await fetch(`https://api.spotify.com/v1/me/playlists`, {
         method: "POST",
         headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -245,7 +230,7 @@ Deno.serve(async (req) => {
     let lastSnapshotId: string | null = null;
     for (let i = 0; i < uris.length; i += 100) {
       const batch = uris.slice(i, i + 100);
-      const addRes = await fetch(`https://api.spotify.com/v1/playlists/${spotifyPlaylistId}/tracks`, {
+      const addRes = await fetch(`https://api.spotify.com/v1/playlists/${spotifyPlaylistId}/items`, {
         method: "POST",
         headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
         body: JSON.stringify({ uris: batch }),
