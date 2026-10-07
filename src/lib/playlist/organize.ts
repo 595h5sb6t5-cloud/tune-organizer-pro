@@ -431,3 +431,63 @@ export function organizeLibrary(all: TrackProfile[], options: OrganizeOptions = 
 
   return { playlists, unsorted: [...leftovers, ...notReady] };
 }
+// ---------- Final AI curator (skip test) ----------
+
+export interface CuratorVerdict { remove: { id: string; reason: string }[]; name: string }
+export type Curator = (tracks: TrackProfile[]) => Promise<CuratorVerdict | null>;
+
+/**
+ * Runs the curator on every playlist: removed songs move to another playlist where they
+ * fit (≥ 0.6) or to unsorted; playlists under minSize are dissolved; the rest is re-sequenced.
+ */
+export async function curateLibrary(
+  result: OrganizeResult,
+  curator: Curator,
+  onProgress?: (done: number, total: number) => void,
+  minSize = 8,
+  maxSize = 40,
+): Promise<OrganizeResult & { reasons: Record<string, string> }> {
+  const reasons: Record<string, string> = {};
+  const kept: PlaylistDraft[] = [];
+  const removed: TrackProfile[] = [];
+  let done = 0;
+  for (const p of result.playlists) {
+    const verdict = await curator(p.tracks).catch(() => null);
+    onProgress?.(++done, result.playlists.length);
+    const drop = new Set(verdict?.remove.map((r) => r.id) ?? []);
+    verdict?.remove.forEach((r) => (reasons[r.id] = r.reason));
+    const tracks = p.tracks.filter((t) => !drop.has(t.id));
+    removed.push(...p.tracks.filter((t) => drop.has(t.id)));
+    const name = verdict?.name || p.name;
+    kept.push({ ...p, name, tracks });
+  }
+
+  const unsorted = [...result.unsorted];
+  for (const t of removed) {
+    let best: PlaylistDraft | null = null;
+    let bestFit = 0.6;
+    for (const p of kept) {
+      if (p.tracks.length >= maxSize || p.tracks.length < minSize) continue;
+      if (!(p.lang === t.lang || t.lang === "instrumental")) continue;
+      const fit = averageFit(t, p.tracks);
+      if (fit >= bestFit) { bestFit = fit; best = p; }
+    }
+    if (best) best.tracks.push(t);
+    else unsorted.push(t);
+  }
+
+  const used = new Set<string>();
+  const playlists: PlaylistDraft[] = [];
+  for (const p of kept) {
+    if (p.tracks.length < minSize) { unsorted.push(...p.tracks); continue; }
+    const ordered = sequence(p.tracks);
+    let name = p.name;
+    for (let i = 2; used.has(name); i++) name = `${p.name} ${i}`;
+    used.add(name);
+    playlists.push({
+      ...p, name, tracks: ordered, cohesion: cohesionOf(ordered),
+      description: `Organized by Tempo from your Liked Songs · ${ordered.length} songs`,
+    });
+  }
+  return { playlists, unsorted, reasons };
+}
