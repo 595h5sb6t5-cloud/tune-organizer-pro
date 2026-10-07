@@ -60,7 +60,7 @@ export function useGeneratedPlaylists() {
         counts.set(r.generated_playlist_id, (counts.get(r.generated_playlist_id) ?? 0) + 1);
       }
     }
-    setPlaylists((pls ?? []).map((p) => ({ ...p, track_count: counts.get(p.id) ?? 0 })));
+    setPlaylists((pls ?? []).map((p) => ({ ...p, track_count: counts.get(p.id) ?? (p as any).track_ids?.length ?? 0 })));
     setLoading(false);
   }, [user]);
 
@@ -109,6 +109,21 @@ export function useGeneratedPlaylistDetail(playlistId: string | null) {
       album_name: r.tracks?.album_name ?? null,
       image_url: imageMap.get(r.tracks?.spotify_track_id) ?? null,
     }));
+    // Playlists made by the playlist engine keep their exact order in track_ids.
+    const ids: string[] = (pl as any)?.track_ids ?? [];
+    if (!mapped.length && ids.length) {
+      const { data: songs } = await supabase.from("liked_songs")
+        .select("spotify_track_id, track_name, artist_name, album_name, image_url").in("spotify_track_id", ids);
+      const byId = new Map((songs ?? []).map((x) => [x.spotify_track_id, x]));
+      ids.forEach((sid, i) => {
+        const x = byId.get(sid);
+        mapped.push({
+          id: `sid:${sid}`, position: i + 1, fit_score: null, reason_for_inclusion: null, track_id: "",
+          spotify_track_id: sid, name: x?.track_name ?? "Unknown", artist_names: x ? [x.artist_name] : [],
+          album_name: x?.album_name ?? null, image_url: x?.image_url ?? null,
+        });
+      });
+    }
     setTracks(mapped);
     setLoading(false);
   }, [playlistId]);
@@ -116,9 +131,14 @@ export function useGeneratedPlaylistDetail(playlistId: string | null) {
   useEffect(() => { void load(); }, [load]);
 
   const removeTrack = useCallback(async (rowId: string) => {
-    await supabase.from("generated_playlist_tracks").delete().eq("id", rowId);
+    if (rowId.startsWith("sid:")) {
+      const next = tracks.filter((x) => x.id !== rowId);
+      await supabase.from("generated_playlists").update({ track_ids: next.map((x) => x.spotify_track_id) }).eq("id", playlistId!);
+    } else {
+      await supabase.from("generated_playlist_tracks").delete().eq("id", rowId);
+    }
     setTracks((t) => t.filter((x) => x.id !== rowId).map((x, i) => ({ ...x, position: i + 1 })));
-  }, []);
+  }, [tracks, playlistId]);
 
   const move = useCallback(async (rowId: string, dir: -1 | 1) => {
     setTracks((cur) => {
@@ -129,9 +149,13 @@ export function useGeneratedPlaylistDetail(playlistId: string | null) {
       [next[idx], next[ni]] = [next[ni], next[idx]];
       const reordered = next.map((t, i) => ({ ...t, position: i + 1 }));
       // persist async
-      void Promise.all(reordered.map((t) =>
-        supabase.from("generated_playlist_tracks").update({ position: t.position }).eq("id", t.id),
-      ));
+      if (reordered[0]?.id.startsWith("sid:")) {
+        void supabase.from("generated_playlists").update({ track_ids: reordered.map((t) => t.spotify_track_id) }).eq("id", playlistId!);
+      } else {
+        void Promise.all(reordered.map((t) =>
+          supabase.from("generated_playlist_tracks").update({ position: t.position }).eq("id", t.id),
+        ));
+      }
       return reordered;
     });
   }, []);
