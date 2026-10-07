@@ -1,3 +1,9 @@
 project_id = "uftegpmdzjybstjncnkc"
 [functions.classify-tracks]
 verify_jwt = true
+
+[functions.vibe-spec]
+verify_jwt = true
+
+[functions.vibe-select]
+verify_jwt = true
