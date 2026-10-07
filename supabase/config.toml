@@ -1,1 +1,3 @@
 project_id = "uftegpmdzjybstjncnkc"
+[functions.classify-tracks]
+verify_jwt = true
