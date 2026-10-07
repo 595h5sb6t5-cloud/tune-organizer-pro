@@ -6,7 +6,7 @@ export const norm = (s: string) =>
     .replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
 
 export const cleanTitle = (t: string) =>
-  norm(t.replace(/\(.*?\)|\[.*?\]/g, " ").split(" - ")[0]);
+  norm(t.replace(/\(.*?\)|\[.*?\]/g, " ").split(" - ")[0].replace(/\s(feat|ft|featuring|with)\.?\s.*$/i, ""));
 
 function lev(a: string, b: string): number {
   const d = Array.from({ length: b.length + 1 }, (_, i) => i);
