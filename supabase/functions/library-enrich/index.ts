@@ -108,6 +108,7 @@ async function runHop(admin: any, userId: string, started: number) {
   await save({ status: "running", artists_total: allArtists.length, artists_done: artistsDone, tracks_total: trackIds.length, tracks_done: tracksDone, paused_until: null, pause_reason: null, error: null });
 
   // 1) Artist genres from Spotify.
+  let spotifyPause: Pause | null = null;
   if (artistQueue.length) {
     const token = await getToken(admin, userId);
     const rows: any[] = [];
@@ -147,7 +148,7 @@ async function runHop(admin: any, userId: string, started: number) {
     };
     await Promise.all(Array.from({ length: CONCURRENCY }, worker));
     await flush();
-    if (pause) throw pause;
+    spotifyPause = pause;
   }
 
   // 2) AI classification (only songs with no data). Uses whatever genres exist.
@@ -201,6 +202,7 @@ async function runHop(admin: any, userId: string, started: number) {
     await Promise.all(Array.from({ length: CONCURRENCY }, worker));
   }
 
+  if (spotifyPause) throw spotifyPause; // AI step above still ran with the genres we have
   const remaining = artistQueue.length + Math.max(0, trackIds.length - tracksDone);
   return { remaining, artistsDone, tracksDone };
 }
