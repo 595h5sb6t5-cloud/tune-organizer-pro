@@ -142,8 +142,8 @@ export async function enrichWithAI(
   const [deep, stored] = await Promise.all([loadDeepAnalysis(user.id), loadStoredClassifications(user.id)]);
   const complete = (d?: Partial3) => !!d && !!d.lang && d.energy != null && !!d.mood;
 
-  // Only songs missing language, energy or mood (and not classified before) go to the AI.
-  const missing = profiles.filter((p) => (!complete(deep.get(p.id)) && !stored.has(p.id)) || (stored.has(p.id) && !stored.get(p.id)!.year_checked) || (!stored.has(p.id) && complete(deep.get(p.id))));
+  // Songs never classified, or classified before original_year existed, go to the AI once.
+  const missing = profiles.filter((p) => !stored.get(p.id)?.year_checked);
   // Songs without a year check yet go once to the AI to get their original release year.
   let done = 0;
 
