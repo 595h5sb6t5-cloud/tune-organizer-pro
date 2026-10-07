@@ -244,6 +244,8 @@ function extractTrack(item: any, userId: string, userMarket = ""): TrackRow | nu
 
 async function fetchAudioFeatures(trackIds: string[], token: string): Promise<Map<string, any>> {
   const featureMap = new Map<string, any>();
+  // Spotify removed /audio-features for Development Mode apps (Feb 2026).
+  if (featureMap.size === 0) return featureMap;
   for (let i = 0; i < trackIds.length; i += 100) {
     const batch = trackIds.slice(i, i + 100);
     try {
@@ -697,7 +699,7 @@ async function syncPlaylists(
     if (existing?.spotify_playlist_id) {
       try {
         const pl = await spotifyGet(
-          `https://api.spotify.com/v1/playlists/${existing.spotify_playlist_id}?fields=id,name,description,images,collaborative,public,snapshot_id,owner(id,display_name),tracks(total)`,
+          `https://api.spotify.com/v1/playlists/${existing.spotify_playlist_id}?fields=id,name,description,images,collaborative,public,snapshot_id,owner(id,display_name),items(total)`,
           token,
         );
         playlists.push({
@@ -705,7 +707,7 @@ async function syncPlaylists(
           name: pl.name || "Untitled",
           description: pl.description || null,
           image_url: pl.images?.[0]?.url || null,
-          track_count: pl.tracks?.total ?? 0,
+          track_count: pl.items?.total ?? pl.tracks?.total ?? 0,
           owner_id: pl.owner?.id || "",
           owner_display_name: pl.owner?.display_name || null,
           is_owned: pl.owner?.id === spotifyUserId,
@@ -728,8 +730,8 @@ async function syncPlaylists(
       const items = data.items || [];
       for (const pl of items) {
         if (!pl || !pl.id) continue;
-        const playlistTrackTotal = typeof pl.tracks?.total === "number"
-          ? pl.tracks.total
+        const playlistTrackTotal = typeof (pl.items?.total ?? pl.tracks?.total) === "number"
+          ? (pl.items?.total ?? pl.tracks.total)
           : typeof pl.items?.total === "number"
             ? pl.items.total
             : 0;
@@ -911,7 +913,7 @@ async function syncPlaylists(
 
       const trackRows: any[] = [];
       const seenTrackIds = new Set<string>();
-      let nextUrl: string | null = `https://api.spotify.com/v1/playlists/${pl.id}/tracks?limit=100&offset=0&fields=next,total,items(added_at,added_by(id),track(id,uri,name,duration_ms,preview_url,artists(name),album(name,images)))`;
+      let nextUrl: string | null = `https://api.spotify.com/v1/playlists/${pl.id}/items?limit=100&offset=0`;
       let expectedTotal = pl.track_count;
       let pageNum = 0;
 
@@ -923,7 +925,7 @@ async function syncPlaylists(
           expectedTotal = data.total;
         }
         for (const item of items) {
-          const track = item?.track;
+          const track = item?.item ?? item?.track;
           if (!track || !track.id) continue;
           // Dedupe within a single playlist (Spotify allows duplicates, our unique constraint forbids them)
           if (seenTrackIds.has(track.id)) continue;
@@ -1121,8 +1123,10 @@ async function syncFollowedArtists(
   let topTracksImported = 0;
   let artistsWithTopTracks = 0;
   let topTracksRestrictedCount = 0;
-  const country = "US"; // Spotify accepts any market; "from_token" requires user-read scope which we already have but US is safest
-  for (const a of artists) {
+  const country = "US";
+  // GET /artists/{id}/top-tracks was removed for Development Mode apps (Feb 2026); skipped.
+  const topTrackArtists: typeof artists = [];
+  for (const a of topTrackArtists) {
     try {
       const tt = await spotifyGet(
         `https://api.spotify.com/v1/artists/${a.spotify_artist_id}/top-tracks?market=${country}`,
