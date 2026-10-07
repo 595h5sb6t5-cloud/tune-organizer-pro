@@ -190,7 +190,7 @@ Deno.serve(async (req) => {
 
       step = "clear_existing_tracks";
       // Replace tracks (replace endpoint with empty array clears)
-      await fetch(`https://api.spotify.com/v1/playlists/${spotifyPlaylistId}/tracks`, {
+      await fetch(`https://api.spotify.com/v1/playlists/${spotifyPlaylistId}/items`, {
         method: "PUT",
         headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
         body: JSON.stringify({ uris: [] }),
@@ -212,7 +212,7 @@ Deno.serve(async (req) => {
       }
 
       step = "create_playlist";
-      const createRes = await fetch(`https://api.spotify.com/v1/users/${spotifyUserId}/playlists`, {
+      const createRes = await fetch(`https://api.spotify.com/v1/me/playlists`, {
         method: "POST",
         headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -245,7 +245,7 @@ Deno.serve(async (req) => {
     let lastSnapshotId: string | null = null;
     for (let i = 0; i < uris.length; i += 100) {
       const batch = uris.slice(i, i + 100);
-      const addRes = await fetch(`https://api.spotify.com/v1/playlists/${spotifyPlaylistId}/tracks`, {
+      const addRes = await fetch(`https://api.spotify.com/v1/playlists/${spotifyPlaylistId}/items`, {
         method: "POST",
         headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
         body: JSON.stringify({ uris: batch }),

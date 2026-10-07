@@ -114,7 +114,7 @@ Deno.serve(async (req) => {
     if (pl?.is_exported_to_spotify && pl.spotify_playlist_id) {
       const accessToken = await refreshToken(supabase, user.id);
       if (accessToken) {
-        const r = await fetch(`https://api.spotify.com/v1/playlists/${pl.spotify_playlist_id}/tracks`, {
+        const r = await fetch(`https://api.spotify.com/v1/playlists/${pl.spotify_playlist_id}/items`, {
           method: "POST",
           headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
           body: JSON.stringify({ uris: [`spotify:track:${rec.spotify_track_id}`] }),
