@@ -1,0 +1,3 @@
+alter table public.track_ai_classification add column if not exists family text, add column if not exists family_checked boolean not null default false;
+alter table public.library_enrichment add column if not exists genre_requests_day date, add column if not exists genre_requests_today int not null default 0, add column if not exists user_action_until timestamptz;
+alter table public.generated_playlists add column if not exists track_ids text[];

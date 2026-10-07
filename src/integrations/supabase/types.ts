@@ -759,6 +759,7 @@ export type Database = {
           spotify_playlist_id: string | null
           spotify_url: string | null
           status: string
+          track_ids: string[] | null
           updated_at: string
           user_id: string
           vibe: string | null
@@ -786,6 +787,7 @@ export type Database = {
           spotify_playlist_id?: string | null
           spotify_url?: string | null
           status?: string
+          track_ids?: string[] | null
           updated_at?: string
           user_id: string
           vibe?: string | null
@@ -813,6 +815,7 @@ export type Database = {
           spotify_playlist_id?: string | null
           spotify_url?: string | null
           status?: string
+          track_ids?: string[] | null
           updated_at?: string
           user_id?: string
           vibe?: string | null
@@ -875,6 +878,8 @@ export type Database = {
           artists_done: number
           artists_total: number
           error: string | null
+          genre_requests_day: string | null
+          genre_requests_today: number
           last_retry_after: number | null
           last_spotify_status: number | null
           lease_until: string | null
@@ -884,12 +889,15 @@ export type Database = {
           tracks_done: number
           tracks_total: number
           updated_at: string
+          user_action_until: string | null
           user_id: string
         }
         Insert: {
           artists_done?: number
           artists_total?: number
           error?: string | null
+          genre_requests_day?: string | null
+          genre_requests_today?: number
           last_retry_after?: number | null
           last_spotify_status?: number | null
           lease_until?: string | null
@@ -899,12 +907,15 @@ export type Database = {
           tracks_done?: number
           tracks_total?: number
           updated_at?: string
+          user_action_until?: string | null
           user_id: string
         }
         Update: {
           artists_done?: number
           artists_total?: number
           error?: string | null
+          genre_requests_day?: string | null
+          genre_requests_today?: number
           last_retry_after?: number | null
           last_spotify_status?: number | null
           lease_until?: string | null
@@ -914,6 +925,7 @@ export type Database = {
           tracks_done?: number
           tracks_total?: number
           updated_at?: string
+          user_action_until?: string | null
           user_id?: string
         }
         Relationships: []
@@ -2215,6 +2227,8 @@ export type Database = {
           created_at: string
           danceability: number
           energy: number
+          family: string | null
+          family_checked: boolean
           lang: string
           mood: string
           original_year: number | null
@@ -2228,6 +2242,8 @@ export type Database = {
           created_at?: string
           danceability: number
           energy: number
+          family?: string | null
+          family_checked?: boolean
           lang: string
           mood: string
           original_year?: number | null
@@ -2241,6 +2257,8 @@ export type Database = {
           created_at?: string
           danceability?: number
           energy?: number
+          family?: string | null
+          family_checked?: boolean
           lang?: string
           mood?: string
           original_year?: number | null
