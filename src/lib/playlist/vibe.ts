@@ -3,6 +3,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import type { Lang, Mood, TrackProfile } from "./features";
 import { compatibility, sequence } from "./organize";
+import { askCurator } from "./curate";
 
 export interface VibeSpec {
   energy_min: number; energy_max: number;
@@ -188,6 +189,16 @@ export async function buildVibePlaylist(
   const approved = candidates.filter((c) => (scores.get(c.id) ?? 0) >= MIN_SCORE);
 
   onStep("Ordering the playlist");
-  const tracks = cohere(approved, scores, seeds);
+  let tracks = cohere(approved, scores, seeds);
+  if (tracks.length > seeds.length) {
+    onStep("Final listen by the curator");
+    const verdict = await askCurator(tracks, { vibe, seeds });
+    if (verdict?.remove.length) {
+      const seedIds = new Set(seeds.map((t) => t.id));
+      const drop = new Set(verdict.remove.map((r) => r.id).filter((id) => !seedIds.has(id)));
+      const left = tracks.filter((t) => !drop.has(t.id));
+      tracks = seeds.length ? sequence(left, seeds[0].id) : sequence(left);
+    }
+  }
   return { spec, lang, tracks, candidates: candidates.length, approved: approved.length };
 }

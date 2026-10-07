@@ -1,5 +1,5 @@
 import { spotifyPausedMessage } from "@/lib/spotify-paused";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Loader2, Check, X, ChevronDown, ExternalLink, Wand2 } from "lucide-react";
 import AnalysisNote from "@/components/app/AnalysisNote";
 import { Button } from "@/components/ui/button";
@@ -9,7 +9,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { buildProfiles, type SpotifyTrack, type TrackProfile } from "@/lib/playlist/features";
 import { enrichWithAI, isAiEnabled } from "@/lib/playlist/ai";
-import { organizeLibrary, sequence, type PlaylistDraft } from "@/lib/playlist/organize";
+import { organizeLibrary, curateLibrary, sequence, type PlaylistDraft } from "@/lib/playlist/organize";
+import { askCurator } from "@/lib/playlist/curate";
 
 type Step = { label: string; done: number; total: number };
 
@@ -82,6 +83,26 @@ export default function OrganizeLibraryPanel({ onSaved }: { onSaved: () => void 
   const [open, setOpen] = useState<string | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
   const [saved, setSaved] = useState<Record<string, string>>({});
+  const [coverage, setCoverage] = useState<{ done: number; total: number } | null>(null);
+
+  // Results only appear once ≥90% of songs have a style from the background analysis.
+  useEffect(() => {
+    if (!user) return;
+    let alive = true;
+    const check = async () => {
+      const [{ count: total }, { count: styled }] = await Promise.all([
+        supabase.from("liked_songs").select("spotify_track_id", { count: "exact", head: true })
+          .eq("user_id", user.id).eq("is_active", true).eq("is_available", true),
+        supabase.from("track_ai_classification").select("spotify_track_id", { count: "exact", head: true })
+          .eq("user_id", user.id).not("style", "is", null),
+      ]);
+      if (alive) setCoverage({ done: Math.min(styled ?? 0, total ?? 0), total: total ?? 0 });
+    };
+    check();
+    const t = setInterval(check, 15000);
+    return () => { alive = false; clearInterval(t); };
+  }, [user]);
+  const ready = !!coverage && coverage.total > 0 && coverage.done / coverage.total >= 0.9;
 
   async function analyze() {
     if (!user) return;
@@ -112,7 +133,11 @@ export default function OrganizeLibraryPanel({ onSaved }: { onSaved: () => void 
 
       setStep({ label: "Building your playlists", done: 0, total: 0 });
       await new Promise((r) => setTimeout(r, 50));
-      const result = organizeLibrary(profiles);
+      const draft = organizeLibrary(profiles);
+      setStep({ label: "Curator is listening to each playlist", done: 0, total: draft.playlists.length });
+      const result = await curateLibrary(draft, (tracks) => askCurator(tracks), (done, total) =>
+        setStep({ label: "Curator is listening to each playlist", done, total }),
+      );
       setPlaylists(result.playlists);
       setUnsorted(result.unsorted);
     } catch (e) {
@@ -180,7 +205,15 @@ export default function OrganizeLibraryPanel({ onSaved }: { onSaved: () => void 
           Songs are grouped by language, sound and mood, then ordered so each playlist flows. Songs that don't fit
           anywhere stay out instead of being forced in.
         </p>
-        <Button variant="hero" onClick={analyze} disabled={!!step}>
+        {coverage && !ready && (
+          <div className="space-y-2" aria-live="polite">
+            <p className="text-sm text-muted-foreground">
+              Analyzing your library · {coverage.done.toLocaleString()} of {coverage.total.toLocaleString()} songs
+            </p>
+            <Progress value={coverage.total ? (coverage.done / coverage.total) * 100 : 0} />
+          </div>
+        )}
+        <Button variant="hero" onClick={analyze} disabled={!!step || !ready}>
           {step ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Wand2 className="w-4 h-4 mr-2" />}
           {playlists.length ? "Analyze again" : "Analyze my Liked Songs"}
         </Button>

@@ -50,6 +50,13 @@
       "when": 1791340460478,
       "tag": "0006_migration",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1791341452021,
+      "tag": "0007_style_and_curator_cache",
+      "breakpoints": true
     }
   ]
 }

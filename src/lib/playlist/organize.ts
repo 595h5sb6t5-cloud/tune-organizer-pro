@@ -43,6 +43,60 @@ const MOOD_NEIGHBORS: Record<Mood, Mood[]> = {
   empowering: ["upbeat", "intense", "party"],
 };
 
+// Styles that can share a playlist (curator judgement). Symmetric.
+const STYLE_LINKS: [string, string[]][] = [
+  ["melodic-house", ["afro-house", "deep-house", "indie-dance"]],
+  ["afro-house", ["deep-house", "indie-dance"]],
+  ["deep-house", ["indie-dance", "tech-house", "nu-disco"]],
+  ["tech-house", ["techno"]],
+  ["indie-dance", ["nu-disco", "synth-pop"]],
+  ["nu-disco", ["classic-disco", "funk"]],
+  ["classic-disco", ["funk"]],
+  ["techno", ["trance"]],
+  ["trance", ["edm-festival"]],
+  ["edm-festival", ["drum-and-bass"]],
+  ["ambient-electronic", ["lo-fi", "soundtrack"]],
+  ["classic-soul", ["funk", "neo-soul", "blues"]],
+  ["funk", ["neo-soul"]],
+  ["neo-soul", ["alt-rnb", "modern-rnb", "jazz"]],
+  ["alt-rnb", ["modern-rnb", "bedroom-pop"]],
+  ["trap", ["pop-rap", "latin-trap"]],
+  ["boom-bap", ["conscious-rap"]],
+  ["conscious-rap", ["pop-rap"]],
+  ["mainstream-pop", ["pop-rap", "synth-pop", "latin-pop", "k-pop"]],
+  ["indie-pop", ["bedroom-pop", "synth-pop", "indie-rock"]],
+  ["bedroom-pop", ["synth-pop", "lo-fi"]],
+  ["indie-rock", ["alt-rock"]],
+  ["alt-rock", ["classic-rock", "punk"]],
+  ["classic-rock", ["blues"]],
+  ["punk", ["metal"]],
+  ["folk", ["country"]],
+  ["jazz", ["blues"]],
+  ["reggaeton", ["latin-trap"]],
+  ["corridos", ["banda-norteno"]],
+  ["salsa", ["bachata", "cumbia"]],
+  ["bachata", ["cumbia"]],
+  ["latin-pop", ["rock-en-espanol"]],
+  ["k-pop", ["j-pop"]],
+  ["classical", ["soundtrack"]],
+];
+const STYLE_NEIGHBORS = new Map<string, Set<string>>();
+for (const [a, list] of STYLE_LINKS) for (const b of list) {
+  if (!STYLE_NEIGHBORS.has(a)) STYLE_NEIGHBORS.set(a, new Set());
+  if (!STYLE_NEIGHBORS.has(b)) STYLE_NEIGHBORS.set(b, new Set());
+  STYLE_NEIGHBORS.get(a)!.add(b);
+  STYLE_NEIGHBORS.get(b)!.add(a);
+}
+
+function styleMatch(a: TrackProfile, b: TrackProfile): number | null {
+  if (!a.style || !b.style) return null;
+  if (a.style === b.style) return 1;
+  return STYLE_NEIGHBORS.get(a.style)?.has(b.style) ? 0.6 : 0;
+}
+
+/** A song needs a style or a genre family before it can join any playlist. */
+export const isPlaceable = (t: TrackProfile) => !!t.style || t.families.length > 0;
+
 function jaccard(a: string[], b: string[]): number {
   if (!a.length && !b.length) return 0.5; // nothing known → neutral
   const setB = new Set(b);
@@ -72,7 +126,9 @@ function languagesCompatible(a: TrackProfile, b: TrackProfile): boolean {
 export function compatibility(a: TrackProfile, b: TrackProfile): number {
   if (!languagesCompatible(a, b)) return 0;
 
+  const style = styleMatch(a, b);
   const parts: [number | null, number][] = [
+    [style, 0.35],
     [jaccard(a.families, b.families) * 0.75 + jaccard(a.genres, b.genres) * 0.25, 0.32],
     [closeness(a.energy, b.energy, 0.45), 0.2],
     [a.mood && b.mood ? (a.mood === b.mood ? 1 : MOOD_NEIGHBORS[a.mood].includes(b.mood) ? 0.6 : 0) : null, 0.12],
@@ -95,6 +151,7 @@ export function compatibility(a: TrackProfile, b: TrackProfile): number {
   // A strong clash in energy is a skip, no matter how similar the genre is.
   if (a.energy !== null && b.energy !== null && Math.abs(a.energy - b.energy) > 0.55) score *= 0.5;
   if (a.year && b.year && Math.abs(a.year - b.year) > 25) score *= 0.6;
+  if (style === 0) score *= 0.3; // different sound worlds
   if (a.artistIds.some((id) => b.artistIds.includes(id))) score = Math.min(1, score + 0.08);
   return score;
 }
@@ -177,7 +234,7 @@ function clusterBucket(tracks: TrackProfile[], minSize: number, maxSize: number,
   return { groups: groups.map((g) => g.map((i) => tracks[i])), leftovers: [...free].map((i) => tracks[i]) };
 }
 
-function averageFit(track: TrackProfile, group: TrackProfile[]): number {
+export function averageFit(track: TrackProfile, group: TrackProfile[]): number {
   if (!group.length) return 0;
   let s = 0;
   for (const t of group) s += compatibility(track, t);
@@ -306,10 +363,12 @@ function nameFor(tracks: TrackProfile[], lang: string, used: Set<string>): strin
 // ---------- Main entry ----------
 
 export function organizeLibrary(all: TrackProfile[], options: OrganizeOptions = {}): OrganizeResult {
-  const { minSize = 8, maxSize = 60, threshold = 0.55 } = options;
+  const { minSize = 8, maxSize = 40, threshold = 0.55 } = options;
 
   const buckets = new Map<string, TrackProfile[]>();
+  const notReady: TrackProfile[] = [];
   for (const t of all) {
+    if (!isPlaceable(t)) { notReady.push(t); continue; }
     const key = bucketOf(t);
     buckets.set(key, [...(buckets.get(key) ?? []), t]);
   }
@@ -370,5 +429,65 @@ export function organizeLibrary(all: TrackProfile[], options: OrganizeOptions = 
       };
     });
 
-  return { playlists, unsorted: leftovers };
+  return { playlists, unsorted: [...leftovers, ...notReady] };
+}
+// ---------- Final AI curator (skip test) ----------
+
+export interface CuratorVerdict { remove: { id: string; reason: string }[]; name: string }
+export type Curator = (tracks: TrackProfile[]) => Promise<CuratorVerdict | null>;
+
+/**
+ * Runs the curator on every playlist: removed songs move to another playlist where they
+ * fit (≥ 0.6) or to unsorted; playlists under minSize are dissolved; the rest is re-sequenced.
+ */
+export async function curateLibrary(
+  result: OrganizeResult,
+  curator: Curator,
+  onProgress?: (done: number, total: number) => void,
+  minSize = 8,
+  maxSize = 40,
+): Promise<OrganizeResult & { reasons: Record<string, string> }> {
+  const reasons: Record<string, string> = {};
+  const kept: PlaylistDraft[] = [];
+  const removed: TrackProfile[] = [];
+  let done = 0;
+  for (const p of result.playlists) {
+    const verdict = await curator(p.tracks).catch(() => null);
+    onProgress?.(++done, result.playlists.length);
+    const drop = new Set(verdict?.remove.map((r) => r.id) ?? []);
+    verdict?.remove.forEach((r) => (reasons[r.id] = r.reason));
+    const tracks = p.tracks.filter((t) => !drop.has(t.id));
+    removed.push(...p.tracks.filter((t) => drop.has(t.id)));
+    const name = verdict?.name || p.name;
+    kept.push({ ...p, name, tracks });
+  }
+
+  const unsorted = [...result.unsorted];
+  for (const t of removed) {
+    let best: PlaylistDraft | null = null;
+    let bestFit = 0.6;
+    for (const p of kept) {
+      if (p.tracks.length >= maxSize || p.tracks.length < minSize) continue;
+      if (!(p.lang === t.lang || t.lang === "instrumental")) continue;
+      const fit = averageFit(t, p.tracks);
+      if (fit >= bestFit) { bestFit = fit; best = p; }
+    }
+    if (best) best.tracks.push(t);
+    else unsorted.push(t);
+  }
+
+  const used = new Set<string>();
+  const playlists: PlaylistDraft[] = [];
+  for (const p of kept) {
+    if (p.tracks.length < minSize) { unsorted.push(...p.tracks); continue; }
+    const ordered = sequence(p.tracks);
+    let name = p.name;
+    for (let i = 2; used.has(name); i++) name = `${p.name} ${i}`;
+    used.add(name);
+    playlists.push({
+      ...p, name, tracks: ordered, cohesion: cohesionOf(ordered),
+      description: `Organized by Tempo from your Liked Songs · ${ordered.length} songs`,
+    });
+  }
+  return { playlists, unsorted, reasons };
 }

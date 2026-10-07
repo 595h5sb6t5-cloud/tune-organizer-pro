@@ -10,3 +10,6 @@ verify_jwt = true
 
 [functions.library-enrich]
 verify_jwt = false
+
+[functions.curate-playlist]
+verify_jwt = true

@@ -45,6 +45,7 @@ export interface TrackProfile {
   danceability: number | null; // 0–1
   tempo: number | null; // approx. BPM
   mood: Mood | null;
+  style: string | null; // specific sound (e.g. melodic-house), from AI
 }
 
 // ---------- Genre families ----------
@@ -228,6 +229,7 @@ export function buildProfiles(
       danceability: null,
       tempo: null,
       mood: null,
+      style: null,
     };
   });
 }

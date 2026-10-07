@@ -633,6 +633,27 @@ export type Database = {
           },
         ]
       }
+      curator_cache: {
+        Row: {
+          cache_key: string
+          created_at: string
+          result: Json
+          user_id: string
+        }
+        Insert: {
+          cache_key: string
+          created_at?: string
+          result: Json
+          user_id: string
+        }
+        Update: {
+          cache_key?: string
+          created_at?: string
+          result?: Json
+          user_id?: string
+        }
+        Relationships: []
+      }
       diagnostic_samples: {
         Row: {
           created_at: string
@@ -2233,6 +2254,8 @@ export type Database = {
           mood: string
           original_year: number | null
           spotify_track_id: string
+          style: string | null
+          style_checked: boolean
           tempo: number
           user_id: string
           valence: number
@@ -2248,6 +2271,8 @@ export type Database = {
           mood: string
           original_year?: number | null
           spotify_track_id: string
+          style?: string | null
+          style_checked?: boolean
           tempo: number
           user_id: string
           valence: number
@@ -2263,6 +2288,8 @@ export type Database = {
           mood?: string
           original_year?: number | null
           spotify_track_id?: string
+          style?: string | null
+          style_checked?: boolean
           tempo?: number
           user_id?: string
           valence?: number
