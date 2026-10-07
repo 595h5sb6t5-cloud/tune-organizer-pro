@@ -1,3 +1,4 @@
 - Playlist building lives only in src/lib/playlist (organize.ts for whole-library grouping, vibe.ts for single vibe playlists, both reusing compatibility()/sequence()); no other playlist engine — avoids engines with conflicting rules.
 - Spotify access goes only through the server connection (spotify-auth-start/callback, tokens in spotify_connections); no browser-side Spotify client — one token source, no client secret exposure.
 - Spotify calls follow the Feb 2026 Development Mode API (/me/playlists, /playlists/{id}/items, single-item GETs, no audio-features/top-tracks/popularity) — those endpoints/fields are gone.
+- Artist genres and AI track classification are filled only by the library-enrich background function (started after each sync, pauses on long Spotify waits); the browser only reads stored data — keeps playlist creation instant and avoids blocking on Spotify rate limits.
