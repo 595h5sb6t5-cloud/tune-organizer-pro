@@ -71,7 +71,7 @@ export function ArtistTracksDialog({ open, onOpenChange, artist }: Props) {
   }, [open, artist, user]);
 
   if (!artist) return null;
-  const pending = (artist.top_tracks_count ?? 0) === 0 && !artist.top_tracks_synced_at;
+  const pending = false; // Spotify removed artist top tracks (2026)
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
