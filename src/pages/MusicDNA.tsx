@@ -6,6 +6,7 @@ import {
   AlertCircle, CheckCircle2, RefreshCw, Timer,
 } from "lucide-react";
 import AppLayout from "@/components/app/AppLayout";
+import VibePlaylistPanel from "@/components/app/VibePlaylistPanel";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
 import { useMusicDna } from "@/hooks/use-music-dna";
@@ -14,7 +15,7 @@ import { useDeepAnalysisProgress, STAGE_LABEL } from "@/hooks/use-deep-analysis-
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
 
-type Step = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+type Step = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 const STEPS: { key: Step; label: string }[] = [
   { key: 0, label: "Welcome" },
   { key: 1, label: "Library Scan" },
@@ -25,6 +26,7 @@ const STEPS: { key: Step; label: string }[] = [
   { key: 6, label: "Language" },
   { key: 7, label: "Top Artists" },
   { key: 8, label: "Hidden Patterns" },
+  { key: 9, label: "Vibe Playlist" },
 ];
 
 const MusicDNA = () => {
@@ -75,7 +77,7 @@ const MusicDNA = () => {
     );
   }
 
-  const next = () => setStep(s => (Math.min(8, s + 1) as Step));
+  const next = () => setStep(s => (Math.min(9, s + 1) as Step));
   const prev = () => setStep(s => (Math.max(0, s - 1) as Step));
 
   return (
@@ -106,6 +108,7 @@ const MusicDNA = () => {
           {step === 6 && <LanguageStep dna={dna} />}
           {step === 7 && <ArtistsStep dna={dna} />}
           {step === 8 && <PatternsStep dna={dna} />}
+          {step === 9 && <VibePlaylistPanel />}
         </div>
 
         {/* Nav */}
@@ -114,7 +117,7 @@ const MusicDNA = () => {
             <ArrowLeft className="w-4 h-4 mr-2" /> Back
           </Button>
           <span className="text-xs text-muted-foreground">{STEPS[step].label} · {step + 1}/{STEPS.length}</span>
-          {step < 8 ? (
+          {step < 9 ? (
             <Button variant="hero" onClick={next}>
               Continue <ArrowRight className="w-4 h-4 ml-2" />
             </Button>
