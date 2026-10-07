@@ -8,26 +8,6 @@ export interface DnaArtist {
   genres: string[];
 }
 
-export interface PlaylistConcept {
-  id: string;
-  name: string;
-  tagline: string;
-  description: string;
-  match: number;
-  filter: (s: AnalyzedTrack) => boolean;
-}
-
-interface AnalyzedTrack {
-  energy: number | null;
-  valence: number | null;
-  tempo: number | null;
-  tempoFeel?: string | null;
-  danceFeel?: number | null;
-  mood: string | null;
-  energy_label: string | null;
-  genres: string[];
-}
-
 export interface MusicDna {
   loading: boolean;
   totals: {
@@ -50,21 +30,7 @@ export interface MusicDna {
   topArtists: DnaArtist[];
   languageMix: { name: string; count: number; pct: number }[];
   patterns: string[];
-  suggestions: PlaylistConcept[];
 }
-
-const CONCEPTS: Omit<PlaylistConcept, "match">[] = [
-  { id: "late-night-drive", name: "Late Night Drive", tagline: "Headlights and basslines", description: "Mid-tempo, moody, atmospheric tracks for empty highways after midnight.", filter: (s) => (s.energy ?? 0) > 0.4 && (s.energy ?? 0) < 0.75 && (s.valence ?? 0) < 0.5 },
-  { id: "tropical-sunset", name: "Tropical Sunset", tagline: "Salt air and golden light", description: "Warm, breezy grooves with a coastal pulse.", filter: (s) => (s.valence ?? 0) > 0.55 && (s.energy ?? 0) > 0.4 && (s.energy ?? 0) < 0.8 },
-  { id: "soft-indie-mood", name: "Soft Indie Mood", tagline: "Gentle, intimate, honest", description: "Tender indie textures for slow afternoons.", filter: (s) => (s.energy ?? 0) < 0.5 && s.genres.some(g => g.includes("indie")) },
-  { id: "poolside-grooves", name: "Poolside Grooves", tagline: "Light, easy, sun-soaked", description: "Smooth rhythms made for floating.", filter: (s) => (s.valence ?? 0) > 0.6 && (s.tempo ?? 0) > 95 && (s.tempo ?? 0) < 120 },
-  { id: "old-school-soul", name: "Old School Soul", tagline: "Vinyl warmth, deep groove", description: "Classic soul, funk, and R&B with feeling.", filter: (s) => s.genres.some(g => /soul|funk|motown|r&b|rnb/.test(g)) },
-  { id: "dance-clean-energy", name: "Dance Clean Energy", tagline: "Lift without the noise", description: "High-energy dance tracks with a bright, clean pulse.", filter: (s) => (s.energy ?? 0) > 0.7 && (s.valence ?? 0) > 0.5 },
-  { id: "main-character-walk", name: "Main Character Walk", tagline: "Confidence soundtrack", description: "Bold, cinematic, swagger-filled tracks for your own movie.", filter: (s) => (s.energy ?? 0) > 0.65 && (s.tempo ?? 0) > 100 },
-  { id: "sunday-morning-calm", name: "Sunday Morning Calm", tagline: "Slow start, soft light", description: "Quiet, unhurried songs for slow mornings.", filter: (s) => (s.energy ?? 0) < 0.4 && (s.valence ?? 0) > 0.3 },
-  { id: "beach-club-chill", name: "Beach Club Chill", tagline: "Loungey, deep, sunlit", description: "Sun-drenched downtempo and deep house textures.", filter: (s) => s.genres.some(g => /house|chill|lounge|deep/.test(g)) || ((s.energy ?? 0) > 0.45 && (s.energy ?? 0) < 0.7 && (s.tempo ?? 0) > 100 && (s.tempo ?? 0) < 122) },
-  { id: "golden-hour-grooves", name: "Golden Hour Grooves", tagline: "Warm, hazy, alive", description: "Mellow grooves with a hopeful glow.", filter: (s) => (s.valence ?? 0) > 0.55 && (s.energy ?? 0) > 0.45 && (s.energy ?? 0) < 0.75 },
-];
 
 function topN<T>(map: Map<string, number>, n: number): { name: string; count: number; pct: number }[] {
   const total = Array.from(map.values()).reduce((a, b) => a + b, 0) || 1;
@@ -115,7 +81,7 @@ export function useMusicDna(): MusicDna & { refresh: () => Promise<void> } {
     avgEnergy: 0, avgValence: 0, avgTempo: 0,
     calmVsEnergetic: { calm: 50, energetic: 50 },
     topMoods: [], topGenres: [], topVibes: [], contexts: [],
-    topArtists: [], languageMix: [], patterns: [], suggestions: [],
+    topArtists: [], languageMix: [], patterns: [],
   });
 
   const load = useCallback(async () => {
@@ -248,29 +214,6 @@ export function useMusicDna(): MusicDna & { refresh: () => Promise<void> } {
     const avgTempo = analysisTempoCount ? analysisTempoSum / analysisTempoCount : audioCount ? tempoSum / audioCount : 0;
     const totalCE = calm + energetic || 1;
 
-    // Build analyzed track set for concept matching
-    const analyzed: AnalyzedTrack[] = liked.map(t => ({
-      energy: typeof analysisBySpotifyId.get(t.spotify_track_id)?.energy_score === "number" ? analysisBySpotifyId.get(t.spotify_track_id).energy_score : typeof t.audio_energy === "number" ? t.audio_energy : null,
-      valence: brightnessFromAnalysis(analysisBySpotifyId.get(t.spotify_track_id)) ?? (typeof t.audio_valence === "number" ? t.audio_valence : null),
-      tempo: tempoFromFeel(analysisBySpotifyId.get(t.spotify_track_id)?.tempo_feel) ?? (typeof t.audio_tempo === "number" ? t.audio_tempo : null),
-      tempoFeel: analysisBySpotifyId.get(t.spotify_track_id)?.tempo_feel ?? null,
-      danceFeel: analysisBySpotifyId.get(t.spotify_track_id)?.dance_feel ?? null,
-      mood: analysisBySpotifyId.get(t.spotify_track_id)?.main_mood ?? t.mood ?? null,
-      energy_label: t.energy ?? null,
-      genres: [
-        ...((t.genre_tags ?? []) as string[]),
-        analysisBySpotifyId.get(t.spotify_track_id)?.main_genre,
-        ...((analysisBySpotifyId.get(t.spotify_track_id)?.secondary_genres_v2 ?? []) as string[]),
-      ].filter(Boolean).map(g => String(g).toLowerCase()),
-    }));
-
-    const suggestions = CONCEPTS.map(c => {
-      const matches = analyzed.filter(c.filter).length;
-      return { ...c, match: matches };
-    })
-      .filter(s => s.match >= 5 || analyzed.length < 20)
-      .sort((a, b) => b.match - a.match)
-      .slice(0, 6);
 
     const topGenresArr = topN(genreMap, 6);
     const topMoodsArr = topN(moodMap, 6);
@@ -315,7 +258,6 @@ export function useMusicDna(): MusicDna & { refresh: () => Promise<void> } {
       topArtists: (artistsRes.data ?? []).map(a => ({ name: a.artist_name, image_url: a.image_url, genres: a.genres ?? [] })),
       languageMix: topN(langMap, 5),
       patterns,
-      suggestions,
     });
   }, [user]);
 
