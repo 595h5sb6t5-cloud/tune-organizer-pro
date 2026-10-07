@@ -20,6 +20,8 @@ import MusicDNA from "./pages/MusicDNA.tsx";
 
 import Settings from "./pages/Settings.tsx";
 import SpotifyCallback from "./pages/SpotifyCallback.tsx";
+import SpotifyServerCallback from "./pages/SpotifyServerCallback.tsx";
+import Organize from "./pages/Organize.tsx";
 import NotFound from "./pages/NotFound.tsx";
 
 const queryClient = new QueryClient();
@@ -46,7 +48,9 @@ const App = () => (
                 <Route path="/playlists/:id" element={<PlaylistDetail />} />
                 <Route path="/discover" element={<Navigate to="/ai-playlists" replace />} />
                 <Route path="/settings" element={<Settings />} />
-                <Route path="/spotify-callback" element={<SpotifyCallback />} />
+                <Route path="/spotify-callback" element={<SpotifyServerCallback />} />
+                <Route path="/callback" element={<SpotifyCallback />} />
+                <Route path="/organize" element={<Organize />} />
                 <Route path="/sync" element={<Navigate to="/dashboard" replace />} />
                 <Route path="/history" element={<Navigate to="/discover" replace />} />
                 <Route path="/liked-intelligence" element={<Navigate to="/liked-songs" replace />} />
