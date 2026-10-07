@@ -22,6 +22,13 @@
       "when": 1791336524782,
       "tag": "0002_track_original_year",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1791338432389,
+      "tag": "0003_vibe_select_cache",
+      "breakpoints": true
     }
   ]
 }
