@@ -92,7 +92,7 @@ async function existing(admin: any, table: string, col: string, ids: string[], u
   return known;
 }
 
-async function runHop(admin: any, userId: string, started: number) {
+async function runHop(admin: any, userId: string, started: number, skipSpotify = false) {
   const liked = await likedRows(admin, userId);
   const allArtists = [...new Set(liked.flatMap((r) => ((r.artists ?? []) as any[]).map((a) => a?.id).filter(Boolean)))] as string[];
   const genres = await existing(admin, "artist_genres", "artist_id", allArtists);
@@ -105,11 +105,11 @@ async function runHop(admin: any, userId: string, started: number) {
     admin.from("library_enrichment").update({ ...patch, updated_at: new Date().toISOString() }).eq("user_id", userId);
   let artistsDone = allArtists.length - artistQueue.length;
   let tracksDone = trackIds.length - trackQueue.length;
-  await save({ status: "running", artists_total: allArtists.length, artists_done: artistsDone, tracks_total: trackIds.length, tracks_done: tracksDone, paused_until: null, pause_reason: null, error: null });
+  await save({ status: "running", artists_total: allArtists.length, artists_done: artistsDone, tracks_total: trackIds.length, tracks_done: tracksDone, error: null, ...(skipSpotify ? {} : { paused_until: null, pause_reason: null }) });
 
   // 1) Artist genres from Spotify.
   let spotifyPause: Pause | null = null;
-  if (artistQueue.length) {
+  if (artistQueue.length && !skipSpotify) {
     const token = await getToken(admin, userId);
     const rows: any[] = [];
     let pause: Pause | null = null;
@@ -224,7 +224,9 @@ async function process(admin: any, userId: string, depth: number, force: boolean
   const now = Date.now();
   await admin.from("library_enrichment").upsert({ user_id: userId }, { onConflict: "user_id", ignoreDuplicates: true });
   const { data: st } = await admin.from("library_enrichment").select("*").eq("user_id", userId).single();
-  if (st.paused_until && new Date(st.paused_until).getTime() > now) return { status: "paused", paused_until: st.paused_until };
+  const pausedFor = st.paused_until && new Date(st.paused_until).getTime() > now ? st.pause_reason : null;
+  if (pausedFor === "ai_rate_limit") return { status: "paused", paused_until: st.paused_until };
+  const skipSpotify = !!pausedFor; // Spotify asked to wait: still classify songs with the data we have
   if (!force && st.lease_until && new Date(st.lease_until).getTime() > now) return { status: "busy" };
   // Single-flight lease.
   const leaseUntil = new Date(now + 90_000).toISOString();
@@ -236,7 +238,13 @@ async function process(admin: any, userId: string, depth: number, force: boolean
   const started = Date.now();
   await admin.rpc("enrich_resume_arm", { _on: true }); // backstop while work is pending
   try {
-    const r = await runHop(admin, userId, started);
+    const r = await runHop(admin, userId, started, skipSpotify);
+    if (skipSpotify) {
+      const tracksLeft = r.tracksDone < (await admin.from("library_enrichment").select("tracks_total").eq("user_id", userId).single()).data.tracks_total;
+      await admin.from("library_enrichment").update({ status: "paused", lease_until: null, updated_at: new Date().toISOString() }).eq("user_id", userId);
+      if (tracksLeft && depth > 0) kick(userId, depth - 1);
+      return { status: "paused", ...r };
+    }
     const done = r.remaining === 0;
     await admin.from("library_enrichment").update({
       status: done ? "done" : "running", lease_until: null, updated_at: new Date().toISOString(),
