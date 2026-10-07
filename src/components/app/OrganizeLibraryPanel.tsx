@@ -27,7 +27,7 @@ async function fetchAll<T>(build: (from: number, to: number) => any): Promise<T[
 }
 
 /** Liked Songs from the synced library, in the shape Spotify returns them. */
-async function loadLikedTracks(userId: string): Promise<SpotifyTrack[]> {
+export async function loadLikedTracks(userId: string): Promise<SpotifyTrack[]> {
   const rows = await fetchAll<any>((a, b) =>
     supabase.from("liked_songs")
       .select("spotify_track_id, track_name, artist_name, album_name, image_url, explicit, duration_ms, artists, album_id, album_release_date, isrc")
@@ -57,7 +57,7 @@ async function loadLikedTracks(userId: string): Promise<SpotifyTrack[]> {
 }
 
 /** Runs the genre lookup in chunks until every artist is stored. */
-async function loadArtistGenres(
+export async function loadArtistGenres(
   artistIds: string[],
   onProgress: (done: number, total: number) => void,
 ): Promise<Record<string, string[]>> {

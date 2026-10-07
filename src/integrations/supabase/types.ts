@@ -2607,6 +2607,30 @@ export type Database = {
           },
         ]
       }
+      vibe_select_cache: {
+        Row: {
+          created_at: string
+          score: number
+          spotify_track_id: string
+          user_id: string
+          vibe_key: string
+        }
+        Insert: {
+          created_at?: string
+          score: number
+          spotify_track_id: string
+          user_id: string
+          vibe_key: string
+        }
+        Update: {
+          created_at?: string
+          score?: number
+          spotify_track_id?: string
+          user_id?: string
+          vibe_key?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
