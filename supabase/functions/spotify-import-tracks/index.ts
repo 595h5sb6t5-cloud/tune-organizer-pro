@@ -196,10 +196,16 @@ type TrackRow = {
   album_name: string | null;
   image_url: string | null;
   added_at: string | null;
+  explicit: boolean | null;
+  duration_ms: number | null;
+  artists: { id: string; name: string }[];
+  album_id: string | null;
+  album_release_date: string | null;
+  isrc: string | null;
 };
 
 function extractTrack(item: any, userId: string, userMarket = ""): TrackRow | null {
-  const track = item?.track;
+  const track = item?.track ?? item?.item;
   if (!track || typeof track.id !== "string") return null;
   // Local files are not available through Spotify Web API playback/export.
   if (track.is_local === true) return null;
@@ -225,6 +231,14 @@ function extractTrack(item: any, userId: string, userMarket = ""): TrackRow | nu
     album_name: album?.name || null,
     image_url: img?.url || null,
     added_at: typeof item.added_at === "string" ? item.added_at : null,
+    explicit: typeof track.explicit === "boolean" ? track.explicit : null,
+    duration_ms: typeof track.duration_ms === "number" ? track.duration_ms : null,
+    artists: Array.isArray(track.artists)
+      ? track.artists.filter((a: any) => a?.id).map((a: any) => ({ id: a.id, name: a.name ?? "" }))
+      : [],
+    album_id: album?.id || null,
+    album_release_date: album?.release_date || null,
+    isrc: track.external_ids?.isrc || null,
   };
 }
 
@@ -344,7 +358,7 @@ async function syncLikedSongs(
     const items = data.items || [];
 
     for (const item of items) {
-      const hadTrack = !!item?.track?.id;
+      const hadTrack = !!(item?.track?.id ?? item?.item?.id);
       const t = extractTrack(item, userId, userMarket);
       if (!t) {
         if (hadTrack) hiddenOrUnavailable++;
@@ -439,8 +453,9 @@ async function syncLikedSongs(
       adminClient.from("liked_songs").upsert(batch, { onConflict: "user_id,spotify_track_id" }),
       "upsert_liked_songs",
     );
+    const importedBatch = batch.map(({ explicit, duration_ms, artists, album_id, album_release_date, isrc, ...rest }) => rest);
     await ensureDbWrite(
-      adminClient.from("imported_tracks").upsert(batch, { onConflict: "user_id,spotify_track_id" }),
+      adminClient.from("imported_tracks").upsert(importedBatch, { onConflict: "user_id,spotify_track_id" }),
       "upsert_imported_tracks",
     );
   }
