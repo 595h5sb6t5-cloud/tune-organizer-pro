@@ -199,7 +199,7 @@ export default function OrganizeLibraryPanel({ onSaved }: { onSaved: () => void 
         await supabase.from("generated_playlists").delete().eq("id", gp.id);
         throw new Error(data?.error ?? error?.message ?? "The playlist couldn't be saved.");
       }
-      setSaved((s) => ({ ...s, [p.key]: data?.spotify_url ?? data?.url ?? "https://open.spotify.com" }));
+      setSaved((s) => ({ ...s, [p.key]: data?.spotify_playlist_url ?? "https://open.spotify.com" }));
       onSaved();
     } catch (e) {
       setError(e instanceof Error ? e.message : "The playlist couldn't be saved.");
