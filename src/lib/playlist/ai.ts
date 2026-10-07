@@ -144,7 +144,6 @@ export async function enrichWithAI(
 
   // Songs never classified, or classified before original_year existed, go to the AI once.
   const missing = profiles.filter((p) => !stored.get(p.id)?.year_checked);
-  // Songs without a year check yet go once to the AI to get their original release year.
   let done = 0;
 
   for (let i = 0; i < missing.length; i += BATCH_SIZE) {
