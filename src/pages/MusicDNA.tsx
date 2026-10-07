@@ -8,14 +8,13 @@ import {
 import AppLayout from "@/components/app/AppLayout";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
-import { useMusicDna, type PlaylistConcept } from "@/hooks/use-music-dna";
+import { useMusicDna } from "@/hooks/use-music-dna";
 import { useSpotifyLibrary } from "@/hooks/use-spotify-library";
 import { useDeepAnalysisProgress, STAGE_LABEL } from "@/hooks/use-deep-analysis-progress";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
-import { toast } from "sonner";
 
-type Step = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
+type Step = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
 const STEPS: { key: Step; label: string }[] = [
   { key: 0, label: "Welcome" },
   { key: 1, label: "Library Scan" },
@@ -26,7 +25,6 @@ const STEPS: { key: Step; label: string }[] = [
   { key: 6, label: "Language" },
   { key: 7, label: "Top Artists" },
   { key: 8, label: "Hidden Patterns" },
-  { key: 9, label: "Playlists" },
 ];
 
 const MusicDNA = () => {
@@ -77,7 +75,7 @@ const MusicDNA = () => {
     );
   }
 
-  const next = () => setStep(s => (Math.min(9, s + 1) as Step));
+  const next = () => setStep(s => (Math.min(8, s + 1) as Step));
   const prev = () => setStep(s => (Math.max(0, s - 1) as Step));
 
   return (
@@ -108,7 +106,6 @@ const MusicDNA = () => {
           {step === 6 && <LanguageStep dna={dna} />}
           {step === 7 && <ArtistsStep dna={dna} />}
           {step === 8 && <PatternsStep dna={dna} />}
-          {step === 9 && <SuggestionsStep dna={dna} />}
         </div>
 
         {/* Nav */}
@@ -117,7 +114,7 @@ const MusicDNA = () => {
             <ArrowLeft className="w-4 h-4 mr-2" /> Back
           </Button>
           <span className="text-xs text-muted-foreground">{STEPS[step].label} · {step + 1}/{STEPS.length}</span>
-          {step < 9 ? (
+          {step < 8 ? (
             <Button variant="hero" onClick={next}>
               Continue <ArrowRight className="w-4 h-4 ml-2" />
             </Button>
@@ -498,60 +495,5 @@ function PatternsStep({ dna }: { dna: ReturnType<typeof useMusicDna> }) {
   );
 }
 
-function SuggestionsStep({ dna }: { dna: ReturnType<typeof useMusicDna> }) {
-  const navigate = useNavigate();
-  return (
-    <StepShell eyebrow="Suggested AI Playlists" title="Playlists pensadas a partir de tu DNA." subtitle="Conceptos basados en tus patrones reales. Edita o crea cuando quieras.">
-      {dna.suggestions.length === 0 ? (
-        <div className="rounded-2xl border border-border/50 bg-card/50 p-8 flex items-start gap-4">
-          <Wand2 className="w-6 h-6 text-accent shrink-0 mt-1" />
-          <div>
-            <p className="font-medium mb-1">El análisis profundo está en proceso</p>
-            <p className="text-sm text-muted-foreground">Necesitamos más señales de audio para sugerir playlists con precisión. Vuelve en unos minutos.</p>
-          </div>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {dna.suggestions.map(c => <ConceptCard key={c.id} concept={c} />)}
-        </div>
-      )}
-
-      <div className="flex flex-wrap gap-3 pt-2">
-        <Button variant="ghost" onClick={() => navigate("/dashboard")}>
-          <SkipForward className="w-4 h-4 mr-2" /> Saltar por ahora
-        </Button>
-        <Button variant="hero" onClick={() => navigate("/ai-playlists")}>
-          <Plus className="w-4 h-4 mr-2" /> Ir a AI Playlists
-        </Button>
-      </div>
-    </StepShell>
-  );
-}
-
-function ConceptCard({ concept }: { concept: PlaylistConcept }) {
-  const navigate = useNavigate();
-  const create = () => {
-    toast.success(`"${concept.name}" listo para construirse`, { description: "Llévalo al editor en AI Playlists." });
-    navigate("/ai-playlists");
-  };
-  return (
-    <div className="rounded-2xl border border-border/50 bg-card/50 p-6 flex flex-col justify-between gap-4 hover:border-accent/50 transition-colors">
-      <div>
-        <p className="text-xs uppercase tracking-wider text-accent mb-2">{concept.tagline}</p>
-        <h3 className="font-heading text-xl mb-2">{concept.name}</h3>
-        <p className="text-sm text-muted-foreground">{concept.description}</p>
-        <p className="text-xs text-muted-foreground mt-3">~{concept.match} canciones de tu biblioteca encajan</p>
-      </div>
-      <div className="flex gap-2">
-        <Button variant="hero" size="sm" onClick={create} className="flex-1">
-          <Plus className="w-3.5 h-3.5 mr-1.5" /> Crear
-        </Button>
-        <Button variant="outline" size="sm" onClick={create}>
-          <Pencil className="w-3.5 h-3.5 mr-1.5" /> Editar
-        </Button>
-      </div>
-    </div>
-  );
-}
 
 export default MusicDNA;
