@@ -22,7 +22,7 @@ const MODEL = "gpt-4o-mini";
 const SYSTEM_PROMPT = `You are Tempo — a world-class music analyst. Given ONE track, return a strict JSON object with its sonic DNA. Analyze the ACTUAL musical qualities, not surface labels.
 
 Rules of curation (never violate):
-- Language IS a grouping axis, but only in this specific way: English tracks group only with other English tracks. Spanish, Portuguese, Italian and French (Romance languages) can share a playlist together. Instrumental / no-lyrics tracks are language-neutral and can sit anywhere. Never mix English with Romance languages in the same playlist.
+- Language matters only as a label here: report the sung language accurately. Playlist grouping is done elsewhere (each language stays separate; instrumentals are neutral).
 - Beyond that language rule, judge each song by its own energy, darkness, dance feel, softness, aggressiveness, and emotional weight — not by decade or genre label alone.
 - Melodic rap ≠ dark aggressive rap. Soft rock ≠ heavy rock. Same artist can span multiple worlds.
 - Numeric fields are 0.0–1.0 continuous values. Use the full range, not just 0/0.5/1.

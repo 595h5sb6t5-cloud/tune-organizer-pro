@@ -126,7 +126,6 @@ function EmptyConnect() {
   );
 }
 
-}
 
 function Stat({ label, value }: { label: string; value: number | string }) {
   return (
