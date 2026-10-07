@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
 import { useSpotifyLibrary } from "@/hooks/use-spotify-library";
 import { toast } from "sonner";
+import AnalysisProgressCard from "@/components/app/AnalysisProgressCard";
 
 function StatCard({
   icon: Icon, label, value, to,
@@ -88,6 +89,8 @@ const Dashboard = () => {
             </div>
           </div>
         </div>
+
+        <AnalysisProgressCard />
 
         {/* Stats grid */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

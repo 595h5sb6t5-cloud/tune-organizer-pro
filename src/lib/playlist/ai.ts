@@ -8,7 +8,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import type { Lang, Mood, TrackProfile } from "./features";
 
-const BATCH_SIZE = 40;
 
 export interface AiTrackInfo {
   id: string;
@@ -140,11 +139,9 @@ export async function enrichWithAI(
   if (!user) return profiles;
 
   const [deep, stored] = await Promise.all([loadDeepAnalysis(user.id), loadStoredClassifications(user.id)]);
-  const complete = (d?: Partial3) => !!d && !!d.lang && d.energy != null && !!d.mood;
 
   // Missing songs are classified in the background (library-enrich); use stored data now.
   onProgress?.(0, 0);
-  void complete;
 
   return profiles.map((p) => {
     const d = deep.get(p.id);

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Loader2, Check, X, ChevronDown, ExternalLink, Wand2 } from "lucide-react";
+import AnalysisNote from "@/components/app/AnalysisNote";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
@@ -96,15 +97,15 @@ export default function OrganizeLibraryPanel({ onSaved }: { onSaved: () => void 
       }
 
       const artistIds = tracks.flatMap((t) => t.artists.map((a) => a.id));
-      setStep({ label: "Looking up artist genres", done: 0, total: 0 });
+      setStep({ label: "Reading artist genres", done: 0, total: 0 });
       const genres = await loadArtistGenres(artistIds, (done, total) =>
-        setStep({ label: "Looking up artist genres", done, total }),
+        setStep({ label: "Reading artist genres", done, total }),
       );
 
       let profiles = buildProfiles(tracks, genres);
       if (isAiEnabled()) {
         profiles = await enrichWithAI(profiles, (done, total) =>
-          setStep({ label: "Listening for language, energy and mood", done, total }),
+          setStep({ label: "Reading language, energy and mood", done, total }),
         );
       }
 
@@ -181,6 +182,7 @@ export default function OrganizeLibraryPanel({ onSaved }: { onSaved: () => void 
           {playlists.length ? "Analyze again" : "Analyze my Liked Songs"}
         </Button>
 
+        <AnalysisNote />
         {step && (
           <div className="space-y-2 pt-2" aria-live="polite">
             <p className="text-sm text-muted-foreground">

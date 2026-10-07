@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Loader2, Check, X, ExternalLink, Sparkles } from "lucide-react";
+import AnalysisNote from "@/components/app/AnalysisNote";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
@@ -81,9 +82,9 @@ export default function VibePlaylistPanel() {
     setLiked(liked);
     if (!liked.length) throw new Error("Your Liked Songs list is empty. Sync your library first.");
     const genres = await loadArtistGenres(liked.flatMap((t) => t.artists.map((a) => a.id)), (done, total) =>
-      setStep({ label: "Looking up artist genres", done, total }));
+      setStep({ label: "Reading artist genres", done, total }));
     const p = await enrichWithAI(buildProfiles(liked, genres), (done, total) =>
-      setStep({ label: "Listening for language, energy and mood", done, total }));
+      setStep({ label: "Reading language, energy and mood", done, total }));
     setProfiles(p);
     return p;
   }
@@ -194,6 +195,7 @@ export default function VibePlaylistPanel() {
             <Progress value={step.total ? ((step.done ?? 0) / step.total) * 100 : undefined} />
           </div>
         )}
+        <AnalysisNote />
         {error && <p role="alert" className="text-sm text-destructive border border-destructive/40 rounded-lg p-3">{error}</p>}
       </div>
 
