@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Loader2, Check, X, ExternalLink, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,6 +10,8 @@ import { enrichWithAI } from "@/lib/playlist/ai";
 import { sequence } from "@/lib/playlist/organize";
 import { buildVibePlaylist } from "@/lib/playlist/vibe";
 import { loadLikedTracks, loadArtistGenres } from "@/components/app/OrganizeLibraryPanel";
+import type { SpotifyTrack } from "@/lib/playlist/features";
+import { findSeedMatches, leftoverKeywords, type SeedMatch } from "@/components/app/seedMatch";
 
 const LANG_LABEL: Record<string, string> = {
   es: "Español", en: "English", pt: "Português", fr: "Français", it: "Italiano", de: "Deutsch",
@@ -30,6 +32,30 @@ export default function VibePlaylistPanel() {
   const [tracks, setTracks] = useState<TrackProfile[] | null>(null);
   const [saving, setSaving] = useState(false);
   const [savedUrl, setSavedUrl] = useState<string | null>(null);
+  const [liked, setLiked] = useState<SpotifyTrack[] | null>(null);
+  const [seeds, setSeeds] = useState<SeedMatch[]>([]);
+  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (user) loadLikedTracks(user.id).then(setLiked).catch(() => setLiked([]));
+  }, [user]);
+
+  const matches = useMemo(() => {
+    if (!liked || seeds.length >= 3) return [];
+    const chosen = new Set(seeds.map((s) => s.track.id));
+    return findSeedMatches(vibe, liked).filter((m) => !chosen.has(m.track.id));
+  }, [vibe, liked, seeds]);
+
+  // Auto-pick a single clear match (title + artist).
+  useEffect(() => {
+    const clear = matches.filter((m) => m.artistHit.length);
+    if (clear.length === 1 && !dismissed.has(clear[0].track.id) && seeds.length < 3) {
+      setSeeds((s) => [...s, clear[0]]);
+    }
+  }, [matches, dismissed, seeds.length]);
+
+  const keywords = leftoverKeywords(vibe, seeds);
+  const canCreate = !!vibe.trim() || seeds.length > 0;
 
   // Languages present in the library (from stored AI data).
   useEffect(() => {
@@ -52,6 +78,7 @@ export default function VibePlaylistPanel() {
     if (profiles) return profiles;
     setStep({ label: "Reading your Liked Songs" });
     const liked = await loadLikedTracks(user!.id);
+    setLiked(liked);
     if (!liked.length) throw new Error("Your Liked Songs list is empty. Sync your library first.");
     const genres = await loadArtistGenres(liked.flatMap((t) => t.artists.map((a) => a.id)), (done, total) =>
       setStep({ label: "Looking up artist genres", done, total }));
@@ -62,11 +89,13 @@ export default function VibePlaylistPanel() {
   }
 
   async function create() {
-    if (!user || !vibe.trim()) return;
+    if (!user || !canCreate) return;
     setError(null); setTracks(null); setSavedUrl(null);
     try {
       const p = await getProfiles();
-      const res = await buildVibePlaylist(user.id, vibe.trim(), p, lang, (label, done, total) => setStep({ label, done, total }));
+      const seedProfiles = seeds.map((s) => p.find((x) => x.id === s.track.id)).filter((x): x is TrackProfile => !!x);
+      const words = seeds.length ? keywords : vibe.trim();
+      const res = await buildVibePlaylist(user.id, words, p, lang, (label, done, total) => setStep({ label, done, total }), seedProfiles);
       setName(res.spec.name);
       setTracks(res.tracks);
     } catch (e) {
@@ -114,6 +143,36 @@ export default function VibePlaylistPanel() {
           aria-label="Vibe keywords"
           onKeyDown={(e) => e.key === "Enter" && !step && create()}
         />
+        {matches.length > 0 && (
+          <ul className="rounded-xl border border-border/50 divide-y divide-border/40" aria-label="Songs from your Liked Songs">
+            {matches.map((m) => (
+              <li key={m.track.id}>
+                <button type="button" className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm hover:bg-muted/40"
+                  onClick={() => setSeeds((s) => [...s, m].slice(0, 3))}>
+                  {m.track.album.images[0]?.url && <img src={m.track.album.images[0].url} alt="" className="w-8 h-8 rounded" />}
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate">{m.track.name}</span>
+                    <span className="block truncate text-muted-foreground">{m.track.artists.map((a) => a.name).join(", ")}</span>
+                  </span>
+                  <span className="text-xs text-muted-foreground">Use as base</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {seeds.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {seeds.map((s) => (
+              <span key={s.track.id} className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-muted/40 px-3 py-1 text-sm">
+                Based on: {s.track.name} · {s.track.artists.map((a) => a.name).join(", ")}
+                <button type="button" aria-label={`Remove ${s.track.name}`} className="ml-1 text-muted-foreground hover:text-foreground"
+                  onClick={() => { setSeeds((all) => all.filter((x) => x.track.id !== s.track.id)); setDismissed((d) => new Set(d).add(s.track.id)); }}>
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
         <div className="flex flex-wrap items-center gap-3">
           <select
             value={lang}
@@ -124,7 +183,7 @@ export default function VibePlaylistPanel() {
             <option value="auto">Auto</option>
             {langs.map((l) => <option key={l} value={l}>{LANG_LABEL[l]}</option>)}
           </select>
-          <Button variant="hero" onClick={create} disabled={!!step || !vibe.trim()}>
+          <Button variant="hero" onClick={create} disabled={!!step || !canCreate}>
             {step ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
             Create playlist
           </Button>
@@ -169,7 +228,11 @@ export default function VibePlaylistPanel() {
                     </div>
                     {!savedUrl && (
                       <Button variant="ghost" size="icon" aria-label={`Remove ${t.name}`}
-                        onClick={() => setTracks((all) => sequence((all ?? []).filter((x) => x.id !== t.id)))}>
+                        onClick={() => setTracks((all) => {
+                          const rest = (all ?? []).filter((x) => x.id !== t.id);
+                          const first = seeds.find((s) => rest.some((x) => x.id === s.track.id))?.track.id;
+                          return sequence(rest, first);
+                        })}>
                         <X className="w-4 h-4" />
                       </Button>
                     )}
