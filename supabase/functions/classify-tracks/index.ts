@@ -22,7 +22,8 @@ Each object has exactly these keys:
 - "valence": 0 to 1 (0 = sad/dark, 1 = happy/bright)
 - "danceability": 0 to 1
 - "tempo": approximate BPM as a number
-- "mood": one of "chill","melancholic","romantic","upbeat","party","intense","dreamy","empowering"`;
+- "mood": one of "chill","melancholic","romantic","upbeat","party","intense","dreamy","empowering"
+- "original_year": the year the song was FIRST released (not a remaster, compilation or reissue year). If you are not sure, return the album year you received.`;
 
 interface InputTrack {
   id: string;
@@ -81,7 +82,11 @@ Deno.serve(async (req) => {
     const parsed = JSON.parse(text);
     const validIds = new Set(tracks.map((t) => t.id));
     const arr = Array.isArray(parsed) ? parsed : parsed?.results;
-    const results = Array.isArray(arr) ? arr.filter((r) => r && validIds.has(r.id)) : [];
+    const maxYear = new Date().getFullYear();
+    const results = (Array.isArray(arr) ? arr.filter((r) => r && validIds.has(r.id)) : []).map((r) => {
+      const y = Number(r.original_year);
+      return { ...r, original_year: Number.isInteger(y) && y >= 1900 && y <= maxYear ? y : null };
+    });
     return json({ results });
   } catch (err) {
     return json({ error: err instanceof Error ? err.message : "Unknown error" }, 500);

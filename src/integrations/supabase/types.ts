@@ -2169,10 +2169,12 @@ export type Database = {
           energy: number
           lang: string
           mood: string
+          original_year: number | null
           spotify_track_id: string
           tempo: number
           user_id: string
           valence: number
+          year_checked: boolean
         }
         Insert: {
           created_at?: string
@@ -2180,10 +2182,12 @@ export type Database = {
           energy: number
           lang: string
           mood: string
+          original_year?: number | null
           spotify_track_id: string
           tempo: number
           user_id: string
           valence: number
+          year_checked?: boolean
         }
         Update: {
           created_at?: string
@@ -2191,10 +2195,12 @@ export type Database = {
           energy?: number
           lang?: string
           mood?: string
+          original_year?: number | null
           spotify_track_id?: string
           tempo?: number
           user_id?: string
           valence?: number
+          year_checked?: boolean
         }
         Relationships: []
       }

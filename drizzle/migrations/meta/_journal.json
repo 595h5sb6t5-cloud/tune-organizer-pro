@@ -15,6 +15,13 @@
       "when": 1791336028270,
       "tag": "0001_track_ai_classification",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791336524782,
+      "tag": "0002_track_original_year",
+      "breakpoints": true
     }
   ]
 }
