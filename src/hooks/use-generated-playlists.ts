@@ -158,7 +158,7 @@ export function useGeneratedPlaylistDetail(playlistId: string | null) {
       }
       return reordered;
     });
-  }, []);
+  }, [playlistId]);
 
   const updateMeta = useCallback(async (patch: { name?: string; description?: string | null }) => {
     if (!playlistId) return;
