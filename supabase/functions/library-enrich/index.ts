@@ -86,7 +86,7 @@ async function likedRows(admin: any, userId: string) {
 async function existing(admin: any, table: string, col: string, ids: string[], userId?: string) {
   const known = new Map<string, any>();
   for (let i = 0; i < ids.length; i += 300) {
-    let q = admin.from(table).select(table === "artist_genres" ? "artist_id, genres" : "spotify_track_id, year_checked").in(col, ids.slice(i, i + 300));
+    let q = admin.from(table).select(table === "artist_genres" ? "artist_id, genres" : "spotify_track_id, year_checked, family, family_checked").in(col, ids.slice(i, i + 300));
     if (userId) q = q.eq("user_id", userId);
     const { data } = await q;
     for (const r of data ?? []) known.set(r[col], r);
@@ -94,68 +94,25 @@ async function existing(admin: any, table: string, col: string, ids: string[], u
   return known;
 }
 
+const DAILY_GENRE_CAP = 250;
+const utcDay = () => new Date().toISOString().slice(0, 10);
+const nextUtcMidnight = () => { const d = new Date(); d.setUTCHours(24, 0, 0, 0); return d.getTime(); };
+
 async function runHop(admin: any, userId: string, started: number, skipSpotify = false) {
   const liked = await likedRows(admin, userId);
-  const allArtists = [...new Set(liked.flatMap((r) => ((r.artists ?? []) as any[]).map((a) => a?.id).filter(Boolean)))] as string[];
-  const genres = await existing(admin, "artist_genres", "artist_id", allArtists);
-  const artistQueue = allArtists.filter((id) => !genres.has(id));
   const trackIds = liked.map((r) => r.spotify_track_id);
   const cls = await existing(admin, "track_ai_classification", "spotify_track_id", trackIds, userId);
-  const trackQueue = liked.filter((r) => !cls.get(r.spotify_track_id)?.year_checked);
+  const trackQueue = liked.filter((r) => { const c = cls.get(r.spotify_track_id); return !c?.year_checked || !c?.family_checked; });
+  const allArtists = [...new Set(liked.flatMap((r) => ((r.artists ?? []) as any[]).map((a) => a?.id).filter(Boolean)))] as string[];
 
   const save = (patch: Record<string, unknown>) =>
     admin.from("library_enrichment").update({ ...patch, updated_at: new Date().toISOString() }).eq("user_id", userId);
-  let artistsDone = allArtists.length - artistQueue.length;
   let tracksDone = trackIds.length - trackQueue.length;
-  await save({ status: "running", artists_total: allArtists.length, artists_done: artistsDone, tracks_total: trackIds.length, tracks_done: tracksDone, error: null, ...(skipSpotify ? {} : { paused_until: null, pause_reason: null }) });
+  await save({ status: "running", tracks_total: trackIds.length, tracks_done: tracksDone, error: null, ...(skipSpotify ? {} : { paused_until: null, pause_reason: null }) });
 
-  // 1) Artist genres from Spotify.
-  let spotifyPause: Pause | null = null;
-  if (artistQueue.length && !skipSpotify) {
-    const token = await getToken(admin, userId);
-    const rows: any[] = [];
-    let pause: Pause | null = null;
-    const flush = async () => {
-      if (!rows.length) return;
-      await admin.from("artist_genres").upsert(rows.splice(0, rows.length), { onConflict: "artist_id" });
-      await save({ artists_done: artistsDone });
-    };
-    const worker = async () => {
-      while (artistQueue.length && !pause && Date.now() - started < HOP_BUDGET_MS) {
-        const id = artistQueue.shift()!;
-        const r = await fetch(`https://api.spotify.com/v1/artists/${id}`, { headers: { Authorization: `Bearer ${token}` } });
-        if (r.status === 429) {
-          const raHeader = r.headers.get("retry-after");
-          const ra = Number(raHeader ?? "5");
-          const text = await r.text().catch(() => "");
-          console.log(`[library-enrich] Spotify 429 retry-after=${raHeader} body=${text.slice(0, 200)}`);
-          artistQueue.unshift(id);
-          const quota = /QUOTA_EXCEEDED/i.test(text);
-          const wait = Number.isFinite(ra) ? ra : 5;
-          if (quota || wait > MAX_WAIT_S) {
-            pause = new Pause(Date.now() + Math.max(wait, quota ? 3600 : 0) * 1000, quota ? "quota" : "rate_limit", 429, Number.isFinite(ra) ? ra : null);
-            return;
-          }
-          await sleep(wait * 1000);
-          continue;
-        }
-        if (r.status === 401) throw new Error("Spotify session expired. Reconnect Spotify in Settings.");
-        if (!r.ok) console.log(`[library-enrich] Spotify ${r.status} for artist ${id}`);
-        const body = r.ok ? await r.json().catch(() => null) : null;
-        rows.push({ artist_id: id, genres: Array.isArray(body?.genres) ? body.genres : [], updated_at: new Date().toISOString() });
-        artistsDone++;
-        if (rows.length >= 25) await flush();
-        await sleep(GAP_MS);
-      }
-    };
-    await Promise.all(Array.from({ length: CONCURRENCY }, worker));
-    await flush();
-    spotifyPause = pause;
-  }
-
-  // 2) AI classification (only songs with no data). Uses whatever genres exist.
+  // 1) AI classification first (no Spotify requests). Uses whatever genres exist.
   const apiKey = Deno.env.get("OPENAI_API_KEY");
-  if (trackQueue.length && apiKey && Date.now() - started < HOP_BUDGET_MS) {
+  if (trackQueue.length && apiKey) {
     const genreMap = await existing(admin, "artist_genres", "artist_id", allArtists);
     const maxYear = new Date().getFullYear();
     const batches: any[][] = [];
@@ -193,9 +150,14 @@ async function runHop(admin: any, userId: string, started: number, skipSpotify =
             mood: MOODS.includes(r.mood) ? r.mood : "chill",
             original_year: Number.isInteger(y) && y >= 1900 && y <= maxYear ? y : null,
             year_checked: true,
+            family: FAMILIES.includes(r.family) ? r.family : null,
+            family_checked: true,
           };
         });
-        if (rows.length) await admin.from("track_ai_classification").upsert(rows, { onConflict: "user_id,spotify_track_id" });
+        if (rows.length) {
+          await admin.from("track_ai_classification").upsert(rows, { onConflict: "user_id,spotify_track_id" });
+          for (const r of rows) cls.set(r.spotify_track_id, r);
+        }
         tracksDone += rows.length;
         await save({ tracks_done: tracksDone });
         await sleep(GAP_MS);
@@ -203,10 +165,82 @@ async function runHop(admin: any, userId: string, started: number, skipSpotify =
     };
     await Promise.all(Array.from({ length: CONCURRENCY }, worker));
   }
+  const tracksLeft = Math.max(0, trackIds.length - tracksDone);
 
-  if (spotifyPause) throw spotifyPause; // AI step above still ran with the genres we have
-  const remaining = artistQueue.length + Math.max(0, trackIds.length - tracksDone);
-  return { remaining, artistsDone, tracksDone };
+  // 2) Artist genres from Spotify: most-liked artists first; skip one-song artists whose song has an AI family.
+  const songCount = new Map<string, number>();
+  const oneSong = new Map<string, string>();
+  for (const r of liked) for (const a of (r.artists ?? []) as any[]) if (a?.id) {
+    songCount.set(a.id, (songCount.get(a.id) ?? 0) + 1);
+    oneSong.set(a.id, r.spotify_track_id);
+  }
+  const eligible = allArtists.filter((id) => !(songCount.get(id) === 1 && cls.get(oneSong.get(id)!)?.family))
+    .sort((x, y) => songCount.get(y)! - songCount.get(x)!);
+  const genres = await existing(admin, "artist_genres", "artist_id", eligible);
+  const artistQueue = eligible.filter((id) => !genres.has(id));
+  let artistsDone = eligible.length - artistQueue.length;
+  await save({ artists_total: eligible.length, artists_done: artistsDone });
+
+  let spotifyPause: Pause | null = null;
+  if (artistQueue.length && !skipSpotify && Date.now() - started < HOP_BUDGET_MS) {
+    const { data: st } = await admin.from("library_enrichment").select("genre_requests_day, genre_requests_today, user_action_until").eq("user_id", userId).single();
+    let used = st.genre_requests_day === utcDay() ? st.genre_requests_today : 0;
+    let userActionUntil = st.user_action_until ? new Date(st.user_action_until).getTime() : 0;
+    if (userActionUntil > Date.now()) throw new Pause(userActionUntil, "user_action", 0, null);
+    if (used >= DAILY_GENRE_CAP) throw new Pause(nextUtcMidnight(), "daily_cap", 0, null);
+
+    const token = await getToken(admin, userId);
+    const rows: any[] = [];
+    let pause: Pause | null = null;
+    let sinceCheck = 0;
+    const flush = async () => {
+      if (rows.length) await admin.from("artist_genres").upsert(rows.splice(0, rows.length), { onConflict: "artist_id" });
+      await save({ artists_done: artistsDone, genre_requests_day: utcDay(), genre_requests_today: used });
+    };
+    const worker = async () => {
+      while (artistQueue.length && !pause && Date.now() - started < HOP_BUDGET_MS) {
+        if (used >= DAILY_GENRE_CAP) { pause = new Pause(nextUtcMidnight(), "daily_cap", 0, null); return; }
+        if (++sinceCheck >= 10) {
+          sinceCheck = 0;
+          const { data } = await admin.from("library_enrichment").select("user_action_until").eq("user_id", userId).single();
+          userActionUntil = data?.user_action_until ? new Date(data.user_action_until).getTime() : 0;
+        }
+        if (userActionUntil > Date.now()) { pause = new Pause(userActionUntil, "user_action", 0, null); return; }
+        const id = artistQueue.shift()!;
+        used++;
+        const r = await fetch(`https://api.spotify.com/v1/artists/${id}`, { headers: { Authorization: `Bearer ${token}` } });
+        if (r.status === 429) {
+          const raHeader = r.headers.get("retry-after");
+          const ra = Number(raHeader ?? "5");
+          const text = await r.text().catch(() => "");
+          console.log(`[library-enrich] Spotify 429 retry-after=${raHeader} body=${text.slice(0, 200)}`);
+          artistQueue.unshift(id);
+          const quota = /QUOTA_EXCEEDED/i.test(text);
+          const wait = Number.isFinite(ra) ? ra : 5;
+          if (quota || wait > MAX_WAIT_S) {
+            pause = new Pause(Date.now() + Math.max(wait, quota ? 3600 : 0) * 1000, quota ? "quota" : "rate_limit", 429, Number.isFinite(ra) ? ra : null);
+            return;
+          }
+          await sleep(wait * 1000);
+          continue;
+        }
+        if (r.status === 401) throw new Error("Spotify session expired. Reconnect Spotify in Settings.");
+        if (!r.ok) console.log(`[library-enrich] Spotify ${r.status} for artist ${id}`);
+        const body = r.ok ? await r.json().catch(() => null) : null;
+        rows.push({ artist_id: id, genres: Array.isArray(body?.genres) ? body.genres : [], updated_at: new Date().toISOString() });
+        artistsDone++;
+        if (rows.length >= 25) await flush();
+        await sleep(GAP_MS);
+      }
+    };
+    await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+    await flush();
+    spotifyPause = pause;
+  }
+
+  if (spotifyPause) throw spotifyPause;
+  const remaining = artistQueue.length + tracksLeft;
+  return { remaining, artistsDone, tracksDone, tracksLeft };
 }
 
 function kick(userId: string, depth: number) {
@@ -242,7 +276,7 @@ async function process(admin: any, userId: string, depth: number, force: boolean
   try {
     const r = await runHop(admin, userId, started, skipSpotify);
     if (skipSpotify) {
-      const tracksLeft = r.tracksDone < (await admin.from("library_enrichment").select("tracks_total").eq("user_id", userId).single()).data.tracks_total;
+      const tracksLeft = r.tracksLeft > 0;
       await admin.from("library_enrichment").update({ status: "paused", lease_until: null, updated_at: new Date().toISOString() }).eq("user_id", userId);
       if (tracksLeft && depth > 0) kick(userId, depth - 1);
       return { status: "paused", ...r };
