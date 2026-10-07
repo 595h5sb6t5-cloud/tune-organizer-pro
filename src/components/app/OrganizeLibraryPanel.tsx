@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
-import { buildProfiles, type Lang, type Mood, type SpotifyTrack, type TrackProfile } from "@/lib/playlist/features";
+import { buildProfiles, type SpotifyTrack, type TrackProfile } from "@/lib/playlist/features";
 import { enrichWithAI, isAiEnabled } from "@/lib/playlist/ai";
 import { organizeLibrary, sequence, type PlaylistDraft } from "@/lib/playlist/organize";
 
@@ -78,38 +78,6 @@ async function loadArtistGenres(
   return out;
 }
 
-const LANG_MAP: Record<string, Lang> = {
-  english: "en", spanish: "es", portuguese: "pt", french: "fr", italian: "it", german: "de",
-  korean: "ko", japanese: "ja", chinese: "zh", instrumental: "instrumental",
-};
-const MOODS: Mood[] = ["chill", "melancholic", "romantic", "upbeat", "party", "intense", "dreamy", "empowering"];
-const TEMPO_BPM: Record<string, number> = { slow: 75, mid: 105, driving: 122, fast: 140 };
-
-/** Adds the Deep Analysis results already stored for each song (language, energy, mood). */
-async function withStoredAnalysis(userId: string, profiles: TrackProfile[]): Promise<TrackProfile[]> {
-  const rows = await fetchAll<any>((a, b) =>
-    supabase.from("ai_track_analysis")
-      .select("spotify_track_id, language, energy_score, dance_feel, main_mood, tempo_feel, darkness")
-      .eq("user_id", userId).range(a, b));
-  const map = new Map(rows.map((r) => [r.spotify_track_id, r]));
-  return profiles.map((p) => {
-    const an = map.get(p.id);
-    if (!an) return p;
-    const lang = an.language ? LANG_MAP[String(an.language).toLowerCase()] : undefined;
-    const mood = MOODS.find((m) => String(an.main_mood ?? "").toLowerCase().includes(m)) ?? p.mood;
-    return {
-      ...p,
-      lang: lang ?? p.lang,
-      langConfidence: lang ? Math.max(p.langConfidence, 0.9) : p.langConfidence,
-      energy: an.energy_score ?? p.energy,
-      danceability: an.dance_feel ?? p.danceability,
-      valence: an.darkness != null ? Math.max(0, Math.min(1, 1 - an.darkness)) : p.valence,
-      tempo: an.tempo_feel ? TEMPO_BPM[an.tempo_feel] ?? p.tempo : p.tempo,
-      mood,
-    };
-  });
-}
-
 export default function OrganizeLibraryPanel({ onSaved }: { onSaved: () => void }) {
   const { user } = useAuth();
   const [step, setStep] = useState<Step | null>(null);
@@ -141,7 +109,6 @@ export default function OrganizeLibraryPanel({ onSaved }: { onSaved: () => void 
       );
 
       let profiles = buildProfiles(tracks, genres);
-      profiles = await withStoredAnalysis(user.id, profiles);
       if (isAiEnabled()) {
         profiles = await enrichWithAI(profiles, (done, total) =>
           setStep({ label: "Listening for language, energy and mood", done, total }),

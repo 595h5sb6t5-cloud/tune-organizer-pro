@@ -1,13 +1,13 @@
-// Optional AI enrichment. Spotify no longer exposes audio features (energy, tempo,
-// valence…) to new apps, so we ask an LLM, through YOUR backend, to estimate them
-// and to confirm the language the song is actually sung in.
-// If VITE_CLASSIFY_ENDPOINT is not set, this step is skipped and Tempo uses heuristics only.
+// AI enrichment. Spotify no longer exposes audio features (energy, tempo,
+// valence…), so Tempo fills them from:
+//   1. the Deep Analysis already stored for the song (ai_track_analysis), or
+//   2. a previous classify-tracks result stored in track_ai_classification, or
+//   3. a new classify-tracks call (batches of 40), whose results are stored.
+// If anything fails, the songs keep their heuristic values.
 
+import { supabase } from "@/integrations/supabase/client";
 import type { Lang, Mood, TrackProfile } from "./features";
 
-const ENDPOINT = import.meta.env.VITE_CLASSIFY_ENDPOINT as string | undefined;
-const ENDPOINT_KEY = import.meta.env.VITE_CLASSIFY_API_KEY as string | undefined;
-const CACHE_KEY = "tempo.aiTrackInfo.v1";
 const BATCH_SIZE = 40;
 
 export interface AiTrackInfo {
@@ -22,8 +22,13 @@ export interface AiTrackInfo {
 
 const LANGS: Lang[] = ["es", "en", "pt", "fr", "it", "de", "ko", "ja", "zh", "instrumental", "other"];
 const MOODS: Mood[] = ["chill", "melancholic", "romantic", "upbeat", "party", "intense", "dreamy", "empowering"];
+const LANG_NAMES: Record<string, Lang> = {
+  english: "en", spanish: "es", portuguese: "pt", french: "fr", italian: "it", german: "de",
+  korean: "ko", japanese: "ja", chinese: "zh", instrumental: "instrumental",
+};
+const TEMPO_BPM: Record<string, number> = { slow: 75, mid: 105, driving: 122, fast: 140 };
 
-export const isAiEnabled = () => Boolean(ENDPOINT);
+export const isAiEnabled = () => true;
 
 function clamp01(n: unknown): number {
   const v = Number(n);
@@ -44,34 +49,99 @@ function sanitize(raw: any): AiTrackInfo | null {
   };
 }
 
-function readCache(): Record<string, AiTrackInfo> {
-  try {
-    return JSON.parse(localStorage.getItem(CACHE_KEY) ?? "{}");
-  } catch {
-    return {};
+async function fetchAll<T>(build: (from: number, to: number) => any): Promise<T[]> {
+  const out: T[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await build(from, from + 999);
+    if (error) return out;
+    out.push(...(data ?? []));
+    if (!data || data.length < 1000) return out;
   }
+}
+
+function toLang(raw: unknown): Lang | null {
+  const s = String(raw ?? "").toLowerCase().trim();
+  if (!s) return null;
+  if (LANGS.includes(s as Lang)) return s as Lang;
+  return LANG_NAMES[s] ?? null;
+}
+
+function toMood(raw: unknown): Mood | null {
+  const s = String(raw ?? "").toLowerCase();
+  return MOODS.find((m) => s.includes(m)) ?? null;
+}
+
+type Partial3 = Partial<Omit<AiTrackInfo, "id">>;
+
+/** Deep Analysis values already stored for the user's songs. */
+async function loadDeepAnalysis(userId: string): Promise<Map<string, Partial3>> {
+  const rows = await fetchAll<any>((a, b) =>
+    supabase.from("ai_track_analysis")
+      .select("spotify_track_id, language, energy_score, dance_feel, main_mood, tempo_feel, darkness")
+      .eq("user_id", userId).range(a, b));
+  const map = new Map<string, Partial3>();
+  for (const r of rows) {
+    if (!r.spotify_track_id) continue;
+    map.set(r.spotify_track_id, {
+      lang: toLang(r.language) ?? undefined,
+      energy: typeof r.energy_score === "number" ? r.energy_score : undefined,
+      mood: toMood(r.main_mood) ?? undefined,
+      danceability: typeof r.dance_feel === "number" ? r.dance_feel : undefined,
+      valence: typeof r.darkness === "number" ? clamp01(1 - r.darkness) : undefined,
+      tempo: r.tempo_feel ? TEMPO_BPM[r.tempo_feel] : undefined,
+    });
+  }
+  return map;
+}
+
+async function loadStoredClassifications(userId: string): Promise<Map<string, AiTrackInfo>> {
+  const rows = await fetchAll<any>((a, b) =>
+    supabase.from("track_ai_classification")
+      .select("spotify_track_id, lang, energy, valence, danceability, tempo, mood")
+      .eq("user_id", userId).range(a, b));
+  const map = new Map<string, AiTrackInfo>();
+  for (const r of rows) {
+    const info = sanitize({ ...r, id: r.spotify_track_id });
+    if (info) map.set(info.id, info);
+  }
+  return map;
+}
+
+function apply(p: TrackProfile, info: Partial3, fromAi: boolean): TrackProfile {
+  const lang = info.lang
+    ? fromAi && p.langConfidence >= 0.85 && info.lang !== "instrumental" ? p.lang : info.lang
+    : p.lang;
+  return {
+    ...p,
+    lang,
+    langConfidence: info.lang ? Math.max(p.langConfidence, 0.8) : p.langConfidence,
+    energy: info.energy ?? p.energy,
+    valence: info.valence ?? p.valence,
+    danceability: info.danceability ?? p.danceability,
+    tempo: info.tempo ?? p.tempo,
+    mood: info.mood ?? p.mood,
+  };
 }
 
 export async function enrichWithAI(
   profiles: TrackProfile[],
   onProgress?: (done: number, total: number) => void,
 ): Promise<TrackProfile[]> {
-  if (!ENDPOINT) return profiles;
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return profiles;
 
-  const cache = readCache();
-  const missing = profiles.filter((p) => !cache[p.id]);
+  const [deep, stored] = await Promise.all([loadDeepAnalysis(user.id), loadStoredClassifications(user.id)]);
+  const complete = (d?: Partial3) => !!d && !!d.lang && d.energy != null && !!d.mood;
+
+  // Only songs missing language, energy or mood (and not classified before) go to the AI.
+  const missing = profiles.filter((p) => !complete(deep.get(p.id)) && !stored.has(p.id));
   let done = 0;
 
   for (let i = 0; i < missing.length; i += BATCH_SIZE) {
     const batch = missing.slice(i, i + BATCH_SIZE);
     try {
-      const res = await fetch(ENDPOINT, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(ENDPOINT_KEY ? { Authorization: `Bearer ${ENDPOINT_KEY}`, apikey: ENDPOINT_KEY } : {}),
-        },
-        body: JSON.stringify({
+      const { data, error } = await supabase.functions.invoke("classify-tracks", {
+        body: {
           tracks: batch.map((p) => ({
             id: p.id,
             name: p.name,
@@ -80,15 +150,22 @@ export async function enrichWithAI(
             year: p.year,
             genres: p.genres.slice(0, 6),
           })),
-        }),
+        },
       });
-      if (res.ok) {
-        const { results } = await res.json();
-        for (const r of results ?? []) {
+      if (!error && Array.isArray(data?.results)) {
+        const rows = [];
+        for (const r of data.results) {
           const info = sanitize(r);
-          if (info) cache[info.id] = info;
+          if (!info) continue;
+          stored.set(info.id, info);
+          rows.push({
+            user_id: user.id, spotify_track_id: info.id, lang: info.lang, energy: info.energy,
+            valence: info.valence, danceability: info.danceability, tempo: info.tempo, mood: info.mood,
+          });
         }
-        localStorage.setItem(CACHE_KEY, JSON.stringify(cache));
+        if (rows.length) {
+          await supabase.from("track_ai_classification").upsert(rows, { onConflict: "user_id,spotify_track_id" });
+        }
       }
     } catch {
       // A failed batch just falls back to heuristics for those songs.
@@ -98,19 +175,11 @@ export async function enrichWithAI(
   }
 
   return profiles.map((p) => {
-    const ai = cache[p.id];
-    if (!ai) return p;
-    return {
-      ...p,
-      // The AI knows the sung language better than a title heuristic,
-      // unless the heuristic is very sure (e.g. Korean script in the title).
-      lang: p.langConfidence >= 0.85 && ai.lang !== "instrumental" ? p.lang : ai.lang,
-      langConfidence: Math.max(p.langConfidence, 0.8),
-      energy: ai.energy,
-      valence: ai.valence,
-      danceability: ai.danceability,
-      tempo: ai.tempo,
-      mood: ai.mood,
-    };
+    const d = deep.get(p.id);
+    const ai = stored.get(p.id);
+    let out = p;
+    if (ai) out = apply(out, ai, true);
+    if (d) out = apply(out, d, false); // Deep Analysis wins where present
+    return out;
   });
 }

@@ -8,6 +8,13 @@
       "when": 1791335608575,
       "tag": "0000_liked_songs_full_metadata_and_artist_genres",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1791336028270,
+      "tag": "0001_track_ai_classification",
+      "breakpoints": true
     }
   ]
 }

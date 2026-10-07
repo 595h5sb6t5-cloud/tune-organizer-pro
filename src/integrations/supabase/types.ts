@@ -2162,6 +2162,42 @@ export type Database = {
         }
         Relationships: []
       }
+      track_ai_classification: {
+        Row: {
+          created_at: string
+          danceability: number
+          energy: number
+          lang: string
+          mood: string
+          spotify_track_id: string
+          tempo: number
+          user_id: string
+          valence: number
+        }
+        Insert: {
+          created_at?: string
+          danceability: number
+          energy: number
+          lang: string
+          mood: string
+          spotify_track_id: string
+          tempo: number
+          user_id: string
+          valence: number
+        }
+        Update: {
+          created_at?: string
+          danceability?: number
+          energy?: number
+          lang?: string
+          mood?: string
+          spotify_track_id?: string
+          tempo?: number
+          user_id?: string
+          valence?: number
+        }
+        Relationships: []
+      }
       tracks: {
         Row: {
           album_id: string | null
