@@ -24,6 +24,7 @@ export interface VibeResult {
 }
 
 const E_TOL = 0.08;
+const MIN_SEED_COMPAT = 0.6;
 const MAX_CANDIDATES = 120;
 const MIN_SCORE = 8;
 const MIN_COHESION = 0.55;
@@ -61,10 +62,18 @@ function passesHardRules(t: TrackProfile, s: VibeSpec): boolean {
 }
 
 /** Step 2: local filter. `langChoice` = "auto" or a language code. */
-export function filterCandidates(profiles: TrackProfile[], spec: VibeSpec, langChoice: string) {
-  const passing = profiles.filter((t) => passesHardRules(t, spec));
+export function filterCandidates(profiles: TrackProfile[], spec: VibeSpec, langChoice: string, seeds: TrackProfile[] = []) {
+  const seedIds = new Set(seeds.map((x) => x.id));
+  const passing = profiles.filter((t) => !seedIds.has(t.id) && passesHardRules(t, spec));
+  const seedLang = seeds.find((x) => x.lang !== "instrumental" && x.lang !== "unknown" && x.lang !== "other")?.lang;
   let lang: Lang;
   if (langChoice !== "auto") lang = langChoice as Lang;
+  else if (seedLang) lang = seedLang;
+  else if (seeds.length) {
+    const counts = new Map<Lang, number>();
+    for (const t of passing) if (t.lang !== "unknown" && t.lang !== "other") counts.set(t.lang, (counts.get(t.lang) ?? 0) + 1);
+    lang = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "instrumental";
+  }
   else if (spec.language) lang = spec.language;
   else {
     const counts = new Map<Lang, number>();
@@ -73,6 +82,16 @@ export function filterCandidates(profiles: TrackProfile[], spec: VibeSpec, langC
   }
   // One language only (instrumentals only when the vibe itself is instrumental).
   const inLang = passing.filter((t) => t.lang === lang);
+  if (seeds.length) {
+    const seedFit = (t: TrackProfile) => seeds.reduce((a, x) => a + compatibility(t, x), 0) / seeds.length;
+    const candidates = inLang
+      .map((t) => ({ t, c: seedFit(t) }))
+      .filter((x) => x.c >= MIN_SEED_COMPAT)
+      .sort((a, b) => b.c - a.c)
+      .slice(0, MAX_CANDIDATES)
+      .map((x) => x.t);
+    return { lang, candidates };
+  }
   const candidates = inLang
     .map((t) => ({ t, d: distance(t, spec) }))
     .sort((a, b) => a.d - b.d)
@@ -84,8 +103,13 @@ export function filterCandidates(profiles: TrackProfile[], spec: VibeSpec, langC
 const vibeKey = (v: string) => v.toLowerCase().replace(/\s+/g, " ").trim();
 
 /** Step 3: AI review with per-(vibe, song) cache. */
-async function scoreCandidates(userId: string, vibe: string, cands: TrackProfile[], onProgress?: (d: number, t: number) => void) {
-  const key = vibeKey(vibe);
+const brief = (t: TrackProfile) => ({
+  id: t.id, name: t.name, artists: t.artists, year: t.year, genres: t.genres.slice(0, 5),
+  energy: t.energy !== null ? Math.round(t.energy * 100) / 100 : null, mood: t.mood,
+});
+
+async function scoreCandidates(userId: string, vibe: string, cands: TrackProfile[], seeds: TrackProfile[], onProgress?: (d: number, t: number) => void) {
+  const key = vibeKey(vibe) + (seeds.length ? ` |seed:${seeds.map((x) => x.id).join(",")}` : "");
   const scores = new Map<string, number>();
   const ids = cands.map((c) => c.id);
   for (let i = 0; i < ids.length; i += 200) {
@@ -101,10 +125,8 @@ async function scoreCandidates(userId: string, vibe: string, cands: TrackProfile
     const { data, error } = await supabase.functions.invoke("vibe-select", {
       body: {
         vibe,
-        tracks: batch.map((t) => ({
-          id: t.id, name: t.name, artists: t.artists, year: t.year, genres: t.genres.slice(0, 5),
-          energy: t.energy !== null ? Math.round(t.energy * 100) / 100 : null, mood: t.mood,
-        })),
+        tracks: batch.map(brief),
+        seeds: seeds.map(brief),
       },
     });
     if (error || data?.error) throw new Error(data?.error ?? error?.message ?? "The AI review failed.");
@@ -121,7 +143,7 @@ async function scoreCandidates(userId: string, vibe: string, cands: TrackProfile
 }
 
 /** Step 4: drop songs that don't cohere with the rest, cap, sequence. */
-function cohere(tracks: TrackProfile[], scores: Map<string, number>): TrackProfile[] {
+function cohere(tracks: TrackProfile[], scores: Map<string, number>, seeds: TrackProfile[] = []): TrackProfile[] {
   let pool = [...tracks];
   // Iteratively remove the weakest song until everyone averages >= MIN_COHESION.
   while (pool.length > 1) {
@@ -135,8 +157,10 @@ function cohere(tracks: TrackProfile[], scores: Map<string, number>): TrackProfi
     if (avgs[worst] >= MIN_COHESION) break;
     pool.splice(worst, 1);
   }
-  pool = pool.sort((a, b) => (scores.get(b.id) ?? 0) - (scores.get(a.id) ?? 0)).slice(0, MAX_TRACKS);
-  return sequence(pool);
+  pool = pool.sort((a, b) => (scores.get(b.id) ?? 0) - (scores.get(a.id) ?? 0)).slice(0, MAX_TRACKS - seeds.length);
+  if (!seeds.length) return sequence(pool);
+  // First seed opens; other seeds are placed wherever they flow best.
+  return sequence([...seeds, ...pool], seeds[0].id);
 }
 
 export async function buildVibePlaylist(
@@ -145,20 +169,25 @@ export async function buildVibePlaylist(
   profiles: TrackProfile[],
   langChoice: string,
   onStep: (label: string, done?: number, total?: number) => void,
+  seeds: TrackProfile[] = [],
 ): Promise<VibeResult> {
   onStep("Reading your vibe");
-  const { data, error } = await supabase.functions.invoke("vibe-spec", { body: { vibe } });
+  const seedBody = seeds.map((t) => ({
+    name: t.name, artists: t.artists, year: t.year, genres: t.genres.slice(0, 6), lang: t.lang,
+    energy: t.energy, valence: t.valence, danceability: t.danceability, tempo: t.tempo, mood: t.mood,
+  }));
+  const { data, error } = await supabase.functions.invoke("vibe-spec", { body: { vibe, seeds: seedBody } });
   if (error || data?.error) throw new Error(data?.error ?? error?.message ?? "Couldn't read the vibe.");
   const spec = data as VibeSpec;
 
   onStep("Filtering your Liked Songs");
-  const { lang, candidates } = filterCandidates(profiles, spec, langChoice);
-  if (!candidates.length) return { spec, lang, tracks: [], candidates: 0, approved: 0 };
+  const { lang, candidates } = filterCandidates(profiles, spec, langChoice, seeds);
+  if (!candidates.length) return { spec, lang, tracks: seeds.length ? sequence(seeds, seeds[0].id) : [], candidates: 0, approved: 0 };
 
-  const scores = await scoreCandidates(userId, vibe, candidates, (d, t) => onStep("Listening to every candidate", d, t));
+  const scores = await scoreCandidates(userId, vibe, candidates, seeds, (d, t) => onStep("Listening to every candidate", d, t));
   const approved = candidates.filter((c) => (scores.get(c.id) ?? 0) >= MIN_SCORE);
 
   onStep("Ordering the playlist");
-  const tracks = cohere(approved, scores);
+  const tracks = cohere(approved, scores, seeds);
   return { spec, lang, tracks, candidates: candidates.length, approved: approved.length };
 }
