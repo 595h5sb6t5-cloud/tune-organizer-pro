@@ -320,6 +320,14 @@ async function runPipeline(supabaseUrl: string, anonKey: string, svc: any, auth:
       error_message: null,
       summary: finalSummary,
     });
+
+    // Start background library analysis (genres + AI classification).
+    const svcKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    await fetch(`${supabaseUrl}/functions/v1/library-enrich`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${svcKey}`, apikey: svcKey, "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: userId }),
+    }).catch((err) => console.error("[spotify-sync-library] library-enrich start failed", err));
   } catch (e: any) {
     const message = String(e?.message || e);
     await svc.from("spotify_connections").update({ sync_status: "error", sync_error: message }).eq("user_id", userId);
