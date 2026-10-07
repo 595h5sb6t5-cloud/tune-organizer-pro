@@ -1,3 +1,4 @@
+import { spotifyPausedMessage } from "@/lib/spotify-paused";
 import { useEffect, useMemo, useState } from "react";
 import { Loader2, Check, X, ExternalLink, Sparkles } from "lucide-react";
 import AnalysisNote from "@/components/app/AnalysisNote";
@@ -111,12 +112,14 @@ export default function VibePlaylistPanel() {
     setSaving(true); setError(null);
     try {
       const { data: gp, error: gpErr } = await supabase.from("generated_playlists").insert({
-        user_id: user.id, name, description: `Vibe: ${vibe}`, status: "draft", created_by_ai: true,
+        user_id: user.id, name, description: `Vibe: ${vibe}`, status: "draft", created_by_ai: true, track_ids: tracks.map((t) => t.id),
       }).select("id").single();
       if (gpErr) throw new Error(gpErr.message);
       const { data, error } = await supabase.functions.invoke("spotify-export-playlist", {
         body: { generated_playlist_id: gp.id, name, description: `Vibe: ${vibe}`, track_ids: tracks.map((t) => t.id), is_public: false },
       });
+      const paused = spotifyPausedMessage(data);
+      if (paused) throw new Error(`${paused} Your playlist is saved in Playlists so you can send it then.`);
       if (error || data?.error) {
         await supabase.from("generated_playlists").delete().eq("id", gp.id);
         throw new Error(data?.error ?? error?.message ?? "The playlist couldn't be saved.");

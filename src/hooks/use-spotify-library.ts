@@ -1,3 +1,4 @@
+import { spotifyPausedMessage } from "@/lib/spotify-paused";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "./use-auth";
@@ -246,6 +247,8 @@ export function useSpotifyLibrary(options: UseSpotifyLibraryOptions = {}) {
     const headers = await getFunctionAuthHeaders();
     const res = await supabase.functions.invoke(name, { body, headers });
     if (res.error) throw new Error(res.error.message || "No pudimos sincronizar.");
+    const paused = spotifyPausedMessage(res.data);
+    if (paused) throw new Error(paused);
     if ((res.data as any)?.error) throw new Error((res.data as any).error);
     return (res.data ?? {}) as T;
   }, [getFunctionAuthHeaders]);
@@ -408,9 +411,13 @@ export function useSpotifyLibrary(options: UseSpotifyLibraryOptions = {}) {
     if (!user || !spotifyConnected) return;
     setSyncing(true);
     setLastSyncResult(null);
-    const res = await invokeFunction<{ run_id: string; run: any; stages: any[]; reused?: boolean }>("spotify-sync-library", {
-      mode: forceFullSync ? "full" : "quick",
-    });
+    let res: { run_id: string; run: any; stages: any[]; reused?: boolean };
+    try {
+      res = await invokeFunction("spotify-sync-library", { mode: forceFullSync ? "full" : "quick" });
+    } catch (e) {
+      setSyncing(false);
+      throw e;
+    }
     setActiveRunId(res.run_id);
     setLastRunStatus(res.run?.status ?? "running");
     setSyncStages(mapStages(res.stages));

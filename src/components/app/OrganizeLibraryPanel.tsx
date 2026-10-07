@@ -1,3 +1,4 @@
+import { spotifyPausedMessage } from "@/lib/spotify-paused";
 import { useState } from "react";
 import { Loader2, Check, X, ChevronDown, ExternalLink, Wand2 } from "lucide-react";
 import AnalysisNote from "@/components/app/AnalysisNote";
@@ -142,7 +143,7 @@ export default function OrganizeLibraryPanel({ onSaved }: { onSaved: () => void 
     setError(null);
     try {
       const { data: gp, error: gpErr } = await supabase.from("generated_playlists").insert({
-        user_id: user.id, name: p.name, description: p.description, status: "draft", created_by_ai: true,
+        user_id: user.id, name: p.name, description: p.description, status: "draft", created_by_ai: true, track_ids: p.tracks.map((t) => t.id),
         avg_compat: p.cohesion,
       }).select("id").single();
       if (gpErr) throw new Error(gpErr.message);
@@ -156,6 +157,8 @@ export default function OrganizeLibraryPanel({ onSaved }: { onSaved: () => void 
           is_public: false,
         },
       });
+      const paused = spotifyPausedMessage(data);
+      if (paused) throw new Error(`${paused} Your playlist is saved in Playlists so you can send it then.`);
       if (error || data?.error) {
         await supabase.from("generated_playlists").delete().eq("id", gp.id);
         throw new Error(data?.error ?? error?.message ?? "The playlist couldn't be saved.");
