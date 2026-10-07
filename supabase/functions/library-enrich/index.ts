@@ -5,6 +5,7 @@
 // resumes it after paused_until.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
+const FAMILIES = ["regional-mexicano","urbano-latino","tropical","brasil","rock-en-espanol","latin-pop","k-pop","j-music","hip-hop","rnb-soul","electronic","metal","indie-alt","rock","folk-acoustic","jazz-blues","classical-score","pop"];
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
@@ -38,7 +39,8 @@ Each object has exactly these keys:
 - "danceability": 0 to 1
 - "tempo": approximate BPM as a number
 - "mood": one of "chill","melancholic","romantic","upbeat","party","intense","dreamy","empowering"
-- "original_year": the year the song was FIRST released (not a remaster, compilation or reissue year). If you are not sure, return the album year you received.`;
+- "original_year": the year the song was FIRST released (not a remaster, compilation or reissue year). If you are not sure, return the album year you received.
+- "family": the song's genre family, ONLY one of: "regional-mexicano","urbano-latino","tropical","brasil","rock-en-espanol","latin-pop","k-pop","j-music","hip-hop","rnb-soul","electronic","metal","indie-alt","rock","folk-acoustic","jazz-blues","classical-score","pop"`;
 
 const LANGS = ["es", "en", "pt", "fr", "it", "de", "ko", "ja", "zh", "instrumental", "other"];
 const MOODS = ["chill", "melancholic", "romantic", "upbeat", "party", "intense", "dreamy", "empowering"];

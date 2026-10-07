@@ -3,6 +3,7 @@
 // Secret needed:  supabase secrets set OPENAI_API_KEY=sk-...
 // Deploy:         supabase functions deploy classify-tracks
 
+const FAMILIES = ["regional-mexicano","urbano-latino","tropical","brasil","rock-en-espanol","latin-pop","k-pop","j-music","hip-hop","rnb-soul","electronic","metal","indie-alt","rock","folk-acoustic","jazz-blues","classical-score","pop"];
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -23,7 +24,8 @@ Each object has exactly these keys:
 - "danceability": 0 to 1
 - "tempo": approximate BPM as a number
 - "mood": one of "chill","melancholic","romantic","upbeat","party","intense","dreamy","empowering"
-- "original_year": the year the song was FIRST released (not a remaster, compilation or reissue year). If you are not sure, return the album year you received.`;
+- "original_year": the year the song was FIRST released (not a remaster, compilation or reissue year). If you are not sure, return the album year you received.
+- "family": the song's genre family, ONLY one of: "regional-mexicano","urbano-latino","tropical","brasil","rock-en-espanol","latin-pop","k-pop","j-music","hip-hop","rnb-soul","electronic","metal","indie-alt","rock","folk-acoustic","jazz-blues","classical-score","pop"`;
 
 interface InputTrack {
   id: string;
@@ -85,7 +87,7 @@ Deno.serve(async (req) => {
     const maxYear = new Date().getFullYear();
     const results = (Array.isArray(arr) ? arr.filter((r) => r && validIds.has(r.id)) : []).map((r) => {
       const y = Number(r.original_year);
-      return { ...r, original_year: Number.isInteger(y) && y >= 1900 && y <= maxYear ? y : null };
+      return { ...r, original_year: Number.isInteger(y) && y >= 1900 && y <= maxYear ? y : null, family: FAMILIES.includes(r.family) ? r.family : null };
     });
     return json({ results });
   } catch (err) {
