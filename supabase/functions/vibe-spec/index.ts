@@ -21,7 +21,8 @@ Return ONLY JSON with exactly these keys:
 - "preferred_families","excluded_families": arrays using ONLY: ${FAMILIES.join(", ")}
 - "language": one of ${LANGS.join(", ")} ONLY if the keywords imply it, otherwise null
 - "era_min","era_max": years ONLY if the keywords imply an era, otherwise null
-- "name": a short, beautiful playlist name (2–5 words) that captures the vibe. Do NOT copy the keywords literally.`;
+- "name": a short, beautiful playlist name (2–5 words) that captures the vibe. Do NOT copy the keywords literally.
+If SEED SONGS are given: the recipe must describe the sound and feeling of the seeds; the keywords only adjust it and must never contradict the seeds. Center the ranges on the seeds' values: energy within ±0.15 of the seeds, tempo within ±12 BPM of the seeds (half/double time counts as the same feel). "language" = the seeds' language (null if instrumental). The name must reflect the seeds' vibe and must NEVER contain a seed's title or artist.`;
 
 const clamp01 = (n: unknown, d: number) => {
   const v = Number(n);
@@ -40,9 +41,14 @@ Deno.serve(async (req) => {
     new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
   try {
-    const { vibe } = (await req.json()) as { vibe?: string };
+    const { vibe, seeds } = (await req.json()) as { vibe?: string; seeds?: any[] };
     const text = String(vibe ?? "").trim();
-    if (!text || text.length > 300) return json({ error: "Write between 1 and 300 characters." }, 400);
+    const seedList = Array.isArray(seeds) ? seeds.slice(0, 3) : [];
+    if (text.length > 300 || (!text && !seedList.length)) return json({ error: "Write between 1 and 300 characters." }, 400);
+    const seedText = seedList.map((t, i) =>
+      `${i + 1}. "${String(t.name).slice(0, 200)}" by ${(t.artists ?? []).slice(0, 4).join(", ")} | year: ${t.year ?? "?"} | genres: ${(t.genres ?? []).slice(0, 6).join(", ") || "none"} | language: ${t.lang ?? "?"} | energy: ${t.energy ?? "?"} | valence: ${t.valence ?? "?"} | danceability: ${t.danceability ?? "?"} | tempo: ${t.tempo ?? "?"} | mood: ${t.mood ?? "?"}`
+    ).join("\n");
+    const userMsg = `Vibe keywords: ${text || "(none — use only the seeds)"}` + (seedText ? `\n\nSEED SONGS:\n${seedText}` : "");
 
     const apiKey = Deno.env.get("OPENAI_API_KEY");
     if (!apiKey) return json({ error: "OPENAI_API_KEY is not set." }, 500);
@@ -53,7 +59,7 @@ Deno.serve(async (req) => {
       body: JSON.stringify({
         model: "gpt-4.1-mini",
         response_format: { type: "json_object" },
-        messages: [{ role: "system", content: SYSTEM }, { role: "user", content: `Vibe: ${text}` }],
+        messages: [{ role: "system", content: SYSTEM }, { role: "user", content: userMsg }],
       }),
     });
     if (!res.ok) return json({ error: `AI request failed (${res.status})` }, 502);

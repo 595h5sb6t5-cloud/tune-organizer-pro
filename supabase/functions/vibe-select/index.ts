@@ -22,9 +22,10 @@ Deno.serve(async (req) => {
     new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
   try {
-    const { vibe, tracks } = (await req.json()) as { vibe?: string; tracks?: Cand[] };
+    const { vibe, tracks, seeds } = (await req.json()) as { vibe?: string; tracks?: Cand[]; seeds?: Cand[] };
     const v = String(vibe ?? "").trim();
-    if (!v || v.length > 300) return json({ error: "Invalid vibe." }, 400);
+    const seedList = Array.isArray(seeds) ? seeds.slice(0, 3) : [];
+    if (v.length > 300 || (!v && !seedList.length)) return json({ error: "Invalid vibe." }, 400);
     if (!Array.isArray(tracks) || tracks.length === 0 || tracks.length > 60) {
       return json({ error: "Send between 1 and 60 tracks." }, 400);
     }
@@ -35,6 +36,11 @@ Deno.serve(async (req) => {
       `${i + 1}. id=${String(t.id).slice(0, 64)} | "${String(t.name).slice(0, 200)}" by ${(t.artists ?? []).slice(0, 4).join(", ")} | year: ${t.year ?? "?"} | genres: ${(t.genres ?? []).slice(0, 5).join(", ") || "none"} | energy: ${t.energy ?? "?"} | mood: ${t.mood ?? "?"}`
     ).join("\n");
 
+    const seedText = seedList.map((t) => `"${String(t.name).slice(0, 200)}" by ${(t.artists ?? []).slice(0, 4).join(", ")}`).join("; ");
+    const seedRule = seedText
+      ? `\n\nRate how well each song would flow in a playlist that starts with ${seedText}. Think about sound, production, energy, emotion and listening context. A song of the same genre but with a different energy or feeling is NOT an 8.\nSeed details:\n` +
+        seedList.map((t) => `- "${t.name}" | year: ${t.year ?? "?"} | genres: ${(t.genres ?? []).slice(0, 5).join(", ") || "none"} | energy: ${t.energy ?? "?"} | mood: ${t.mood ?? "?"}`).join("\n")
+      : "";
     const res = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
@@ -43,7 +49,7 @@ Deno.serve(async (req) => {
         response_format: { type: "json_object" },
         messages: [
           { role: "system", content: SYSTEM },
-          { role: "user", content: `Vibe: ${v}\n\nSongs:\n${list}` },
+          { role: "user", content: `Vibe: ${v || "(defined by the seed songs)"}${seedRule}\n\nSongs:\n${list}` },
         ],
       }),
     });

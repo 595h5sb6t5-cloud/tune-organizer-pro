@@ -211,8 +211,11 @@ function energyTarget(position: number, lo: number, hi: number) {
   return lo + (hi - lo) * curve;
 }
 
-export function sequence(tracks: TrackProfile[]): TrackProfile[] {
-  if (tracks.length <= 2) return tracks;
+export function sequence(tracks: TrackProfile[], startId?: string): TrackProfile[] {
+  if (tracks.length <= 2) {
+    const first = tracks.find((t) => t.id === startId);
+    return first ? [first, ...tracks.filter((t) => t !== first)] : tracks;
+  }
 
   const energies = tracks.map((t) => t.energy).filter((e): e is number => e !== null);
   const hasEnergy = energies.length >= tracks.length * 0.6;
@@ -221,6 +224,8 @@ export function sequence(tracks: TrackProfile[]): TrackProfile[] {
 
   const remaining = [...tracks];
   const ordered: TrackProfile[] = [];
+  const startIndex = startId ? remaining.findIndex((t) => t.id === startId) : -1;
+  if (startIndex >= 0) ordered.push(remaining.splice(startIndex, 1)[0]);
 
   const stepCost = (candidate: TrackProfile) => {
     const position = ordered.length / (tracks.length - 1);
