@@ -6,7 +6,7 @@ export const norm = (s: string) =>
     .replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
 
 export const cleanTitle = (t: string) =>
-  norm(t.replace(/\(.*?\)|\[.*?\]/g, " ").split(" - ")[0]);
+  norm(t.replace(/\(.*?\)|\[.*?\]/g, " ").split(" - ")[0].replace(/\s(feat|ft|featuring|with)\.?\s.*$/i, ""));
 
 function lev(a: string, b: string): number {
   const d = Array.from({ length: b.length + 1 }, (_, i) => i);
@@ -38,20 +38,30 @@ function findTitle(text: string, title: string): string | null {
   return null;
 }
 
-export interface SeedMatch { track: SpotifyTrack; span: string; artistHit: string[] }
+export interface SeedMatch { track: SpotifyTrack; span: string; artistHit: string[]; score: number }
 
 export function findSeedMatches(text: string, liked: SpotifyTrack[], limit = 5): SeedMatch[] {
   const t = norm(text);
   if (t.length < 3) return [];
   const out: SeedMatch[] = [];
+  const words = t.split(" ");
   for (const track of liked) {
-    const span = findTitle(t, cleanTitle(track.name));
+    const title = cleanTitle(track.name);
+    const span = findTitle(t, title);
     if (!span) continue;
-    const artistHit = track.artists.map((a) => norm(a.name)).filter((a) => a.length >= 2 && has(t, a));
-    out.push({ track, span, artistHit });
+    const artistNames = track.artists.map((a) => norm(a.name)).filter((a) => a.length >= 2);
+    const artistHit = artistNames.filter((a) => has(t, a));
+    if (title.split(" ").length < 2) {
+      // One-word titles only count when the rest of the text is just this song's artist(s).
+      const artistWords = new Set(artistNames.join(" ").split(" "));
+      const rest = ` ${t} `.replace(` ${span} `, " ").trim().split(" ").filter(Boolean);
+      if (rest.some((w) => !artistWords.has(w))) continue;
+    }
+    const exact = span === title ? 1 : 0;
+    out.push({ track, span, artistHit, score: artistHit.length * 10 + span.split(" ").length * 2 + exact + span.length / words.join(" ").length });
   }
   return out
-    .sort((a, b) => b.artistHit.length - a.artistHit.length || b.span.length - a.span.length)
+    .sort((a, b) => b.score - a.score)
     .slice(0, limit);
 }
 

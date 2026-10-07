@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Loader2, Check, X, ChevronDown, ExternalLink, Wand2 } from "lucide-react";
+import AnalysisNote from "@/components/app/AnalysisNote";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
@@ -61,14 +62,7 @@ export async function loadArtistGenres(
   artistIds: string[],
   onProgress: (done: number, total: number) => void,
 ): Promise<Record<string, string[]>> {
-  for (let guard = 0; guard < 40; guard++) {
-    const { data, error } = await supabase.functions.invoke("spotify-artist-genres", { body: {} });
-    if (error) throw new Error(error.message);
-    if (data?.error) throw new Error(data.error);
-    onProgress(data.done ?? 0, data.total ?? 0);
-    if (!data.remaining) break;
-    if (data.retry_after_ms) await new Promise((r) => setTimeout(r, Math.min(data.retry_after_ms, 60_000)));
-  }
+  // Genres are filled in the background (library-enrich); use what's stored now.
   const ids = [...new Set(artistIds)];
   const out: Record<string, string[]> = {};
   for (let i = 0; i < ids.length; i += 300) {
@@ -103,15 +97,15 @@ export default function OrganizeLibraryPanel({ onSaved }: { onSaved: () => void 
       }
 
       const artistIds = tracks.flatMap((t) => t.artists.map((a) => a.id));
-      setStep({ label: "Looking up artist genres", done: 0, total: 0 });
+      setStep({ label: "Reading artist genres", done: 0, total: 0 });
       const genres = await loadArtistGenres(artistIds, (done, total) =>
-        setStep({ label: "Looking up artist genres", done, total }),
+        setStep({ label: "Reading artist genres", done, total }),
       );
 
       let profiles = buildProfiles(tracks, genres);
       if (isAiEnabled()) {
         profiles = await enrichWithAI(profiles, (done, total) =>
-          setStep({ label: "Listening for language, energy and mood", done, total }),
+          setStep({ label: "Reading language, energy and mood", done, total }),
         );
       }
 
@@ -188,6 +182,7 @@ export default function OrganizeLibraryPanel({ onSaved }: { onSaved: () => void 
           {playlists.length ? "Analyze again" : "Analyze my Liked Songs"}
         </Button>
 
+        <AnalysisNote />
         {step && (
           <div className="space-y-2 pt-2" aria-live="polite">
             <p className="text-sm text-muted-foreground">

@@ -870,6 +870,54 @@ export type Database = {
         }
         Relationships: []
       }
+      library_enrichment: {
+        Row: {
+          artists_done: number
+          artists_total: number
+          error: string | null
+          last_retry_after: number | null
+          last_spotify_status: number | null
+          lease_until: string | null
+          pause_reason: string | null
+          paused_until: string | null
+          status: string
+          tracks_done: number
+          tracks_total: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          artists_done?: number
+          artists_total?: number
+          error?: string | null
+          last_retry_after?: number | null
+          last_spotify_status?: number | null
+          lease_until?: string | null
+          pause_reason?: string | null
+          paused_until?: string | null
+          status?: string
+          tracks_done?: number
+          tracks_total?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          artists_done?: number
+          artists_total?: number
+          error?: string | null
+          last_retry_after?: number | null
+          last_spotify_status?: number | null
+          lease_until?: string | null
+          pause_reason?: string | null
+          paused_until?: string | null
+          status?: string
+          tracks_done?: number
+          tracks_total?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       liked_song_cluster_tracks: {
         Row: {
           cluster_id: string
@@ -2636,6 +2684,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      enrich_resume_arm: { Args: { _on: boolean }; Returns: undefined }
       reconcile_liked_songs: {
         Args: {
           _full_reconcile?: boolean
