@@ -2684,6 +2684,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      enrich_resume_arm: { Args: { _on: boolean }; Returns: undefined }
       reconcile_liked_songs: {
         Args: {
           _full_reconcile?: boolean
