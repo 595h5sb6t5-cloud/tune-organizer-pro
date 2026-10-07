@@ -232,6 +232,7 @@ async function process(admin: any, userId: string, depth: number, force: boolean
   if (!got?.length) return { status: "busy" };
 
   const started = Date.now();
+  await admin.rpc("enrich_resume_arm", { _on: true }); // backstop while work is pending
   try {
     const r = await runHop(admin, userId, started);
     const done = r.remaining === 0;
@@ -274,6 +275,9 @@ Deno.serve(async (req) => {
         await admin.from("library_enrichment").update({ paused_until: null }).eq("user_id", r.user_id);
         kick(r.user_id, MAX_DEPTH);
       }
+      const { count } = await admin.from("library_enrichment").select("user_id", { count: "exact", head: true })
+        .in("status", ["paused", "running"]);
+      if (!count) await admin.rpc("enrich_resume_arm", { _on: false });
       return json({ resumed: (due ?? []).length });
     }
 
