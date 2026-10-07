@@ -61,14 +61,7 @@ export async function loadArtistGenres(
   artistIds: string[],
   onProgress: (done: number, total: number) => void,
 ): Promise<Record<string, string[]>> {
-  for (let guard = 0; guard < 40; guard++) {
-    const { data, error } = await supabase.functions.invoke("spotify-artist-genres", { body: {} });
-    if (error) throw new Error(error.message);
-    if (data?.error) throw new Error(data.error);
-    onProgress(data.done ?? 0, data.total ?? 0);
-    if (!data.remaining) break;
-    if (data.retry_after_ms) await new Promise((r) => setTimeout(r, Math.min(data.retry_after_ms, 60_000)));
-  }
+  // Genres are filled in the background (library-enrich); use what's stored now.
   const ids = [...new Set(artistIds)];
   const out: Record<string, string[]> = {};
   for (let i = 0; i < ids.length; i += 300) {

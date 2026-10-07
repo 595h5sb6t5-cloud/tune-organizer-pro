@@ -142,47 +142,9 @@ export async function enrichWithAI(
   const [deep, stored] = await Promise.all([loadDeepAnalysis(user.id), loadStoredClassifications(user.id)]);
   const complete = (d?: Partial3) => !!d && !!d.lang && d.energy != null && !!d.mood;
 
-  // Songs never classified, or classified before original_year existed, go to the AI once.
-  const missing = profiles.filter((p) => !stored.get(p.id)?.year_checked);
-  let done = 0;
-
-  for (let i = 0; i < missing.length; i += BATCH_SIZE) {
-    const batch = missing.slice(i, i + BATCH_SIZE);
-    try {
-      const { data, error } = await supabase.functions.invoke("classify-tracks", {
-        body: {
-          tracks: batch.map((p) => ({
-            id: p.id,
-            name: p.name,
-            artists: p.artists,
-            album: p.album,
-            year: p.year,
-            genres: p.genres.slice(0, 6),
-          })),
-        },
-      });
-      if (!error && Array.isArray(data?.results)) {
-        const rows = [];
-        for (const r of data.results) {
-          const info = sanitize({ ...r, year_checked: true });
-          if (!info) continue;
-          stored.set(info.id, info);
-          rows.push({
-            user_id: user.id, spotify_track_id: info.id, lang: info.lang, energy: info.energy,
-            valence: info.valence, danceability: info.danceability, tempo: info.tempo, mood: info.mood,
-            original_year: info.original_year ?? null, year_checked: true,
-          });
-        }
-        if (rows.length) {
-          await supabase.from("track_ai_classification").upsert(rows, { onConflict: "user_id,spotify_track_id" });
-        }
-      }
-    } catch {
-      // A failed batch just falls back to heuristics for those songs.
-    }
-    done += batch.length;
-    onProgress?.(done, missing.length);
-  }
+  // Missing songs are classified in the background (library-enrich); use stored data now.
+  onProgress?.(0, 0);
+  void complete;
 
   return profiles.map((p) => {
     const d = deep.get(p.id);
