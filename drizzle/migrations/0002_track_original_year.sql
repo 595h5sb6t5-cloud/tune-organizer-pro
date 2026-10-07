@@ -1,0 +1,1 @@
+ALTER TABLE public.track_ai_classification ADD COLUMN IF NOT EXISTS original_year integer, ADD COLUMN IF NOT EXISTS year_checked boolean NOT NULL DEFAULT false;
