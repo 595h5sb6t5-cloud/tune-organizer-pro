@@ -1,4 +1,21 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
+import { activeSpotifyPause, markUserAction, pausedBody, recordSpotifyPause } from "../_shared/spotify-pause.ts";
+
+// Any Spotify 429 during export becomes a clear "paused" answer instead of a failure.
+class SpotifyPaused extends Error { constructor(public retryAfter: number, public quota: boolean) { super("spotify_paused"); } }
+const rawFetch = globalThis.fetch.bind(globalThis);
+const spotifyAwareFetch: typeof fetch = async (input, init) => {
+  const res = await rawFetch(input, init);
+  const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+  if (res.status === 429 && url.includes("api.spotify.com")) {
+    const ra = Number(res.headers.get("retry-after") ?? "60");
+    const text = await res.clone().text().catch(() => "");
+    console.log(`[spotify-export-playlist] Spotify 429 retry-after=${ra}`);
+    throw new SpotifyPaused(Number.isFinite(ra) ? ra : 60, /QUOTA_EXCEEDED/i.test(text));
+  }
+  return res;
+};
+globalThis.fetch = spotifyAwareFetch;
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -18,6 +35,7 @@ Deno.serve(async (req) => {
   // Step is updated as we move through the export pipeline so the client
   // (and the DB) can know exactly where we failed.
   let step = "init";
+  let pauseCtx: { supabase: any; userId: string; markStatus: (p: Record<string, unknown>) => Promise<void> } | null = null;
 
   try {
     const authHeader = req.headers.get("Authorization") ?? "";
@@ -62,6 +80,16 @@ Deno.serve(async (req) => {
         .eq("id", generated_playlist_id)
         .eq("user_id", user.id);
     };
+
+    // Keep the exact track order in the app so it can be sent again later.
+    if (generated_playlist_id) await markStatus({ track_ids });
+    const pausedUntil = await activeSpotifyPause(supabase);
+    if (pausedUntil) {
+      await markStatus({ status: "ready_to_export", last_export_error: "Spotify paused requests", last_export_step: "spotify_paused" });
+      return jsonResponse(pausedBody(pausedUntil));
+    }
+    await markUserAction(supabase, user.id);
+    pauseCtx = { supabase, userId: user.id, markStatus };
 
     await markStatus({ status: "exporting", last_export_error: null, last_export_step: step });
 
@@ -278,6 +306,11 @@ Deno.serve(async (req) => {
       tracks_added: track_ids.length,
     });
   } catch (e: any) {
+    if (e instanceof SpotifyPaused && pauseCtx) {
+      const until = await recordSpotifyPause(pauseCtx.supabase, pauseCtx.userId, e.retryAfter, e.quota);
+      await pauseCtx.markStatus({ status: "ready_to_export", last_export_error: "Spotify paused requests", last_export_step: "spotify_paused" });
+      return jsonResponse(pausedBody(until));
+    }
     console.error("[spotify-export-playlist] error:", e, "step:", step);
     return jsonResponse({ error: e?.message ?? "Unknown error", step }, 500);
   }

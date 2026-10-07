@@ -18,7 +18,10 @@ export default function AnalysisProgressCard() {
       <span>{label}</span>
       {paused && (
         <span className="text-muted-foreground">
-          · {state.pause_reason === "ai_rate_limit" ? "Paused briefly" : "Paused by Spotify"}, resuming in {Math.max(1, Math.ceil(pausedMs / 60000))} min
+          · {state.pause_reason === "ai_rate_limit" ? "Paused briefly"
+            : state.pause_reason === "daily_cap" ? "Daily Spotify budget used"
+            : state.pause_reason === "user_action" ? "Waiting while you use Spotify"
+            : "Paused by Spotify"}, resuming in {Math.max(1, Math.ceil(pausedMs / 60000))} min
         </span>
       )}
     </div>

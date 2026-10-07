@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { activeSpotifyPause, markUserAction, pausedBody } from "../_shared/spotify-pause.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -362,6 +363,10 @@ Deno.serve(async (req) => {
         : { data: [] };
       return json({ success: true, run: run ? { ...run, status: mapStageStatus(run.status) } : null, stages: stages ?? [] });
     }
+
+    const pausedUntil = await activeSpotifyPause(svc);
+    if (pausedUntil) return json({ success: false, ...pausedBody(pausedUntil) });
+    await markUserAction(svc, user.id, 15);
 
     const { run, reused } = await createRun(svc, user.id, runType);
     await ensureStages(svc, run.id, user.id);

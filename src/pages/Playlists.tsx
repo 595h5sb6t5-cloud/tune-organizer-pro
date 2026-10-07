@@ -1,3 +1,4 @@
+import { spotifyPausedMessage } from "@/lib/spotify-paused";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import {
@@ -188,6 +189,14 @@ function PlaylistDetail({ playlistId, onBack }: { playlistId: string; onBack: ()
         },
       });
       if (error) throw new Error(error.message);
+      const paused = spotifyPausedMessage(data);
+      if (paused) {
+        jobsApi.failJob(jobId, paused);
+        setExportError({ message: paused });
+        toast.message(paused);
+        await refresh();
+        return;
+      }
       if (data?.error) {
         setExportError({ message: data.error, step: data.step, needsReauth: data.needs_reauth });
         jobsApi.failJob(jobId, data.error, { step: data.step });
