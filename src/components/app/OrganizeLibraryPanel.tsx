@@ -11,6 +11,8 @@ import { buildProfiles, type SpotifyTrack, type TrackProfile } from "@/lib/playl
 import { enrichWithAI, isAiEnabled } from "@/lib/playlist/ai";
 import { organizeLibrary, curateLibrary, sequence, type PlaylistDraft } from "@/lib/playlist/organize";
 import { askCurator } from "@/lib/playlist/curate";
+import { recordRemoval } from "@/lib/playlist/feedback";
+import EditSoundDialog from "@/components/app/EditSoundDialog";
 
 type Step = { label: string; done: number; total: number };
 
@@ -156,7 +158,7 @@ export default function OrganizeLibraryPanel({ onSaved }: { onSaved: () => void 
       all.map((p) => {
         if (p.key !== key) return p;
         const removed = p.tracks.find((t) => t.id === id);
-        if (removed) setUnsorted((u) => [...u, removed]);
+        if (removed) { setUnsorted((u) => [...u, removed]); void recordRemoval(id, { context: `ai-playlist: ${p.name}` }); }
         return { ...p, tracks: sequence(p.tracks.filter((t) => t.id !== id)) };
       }),
     );
@@ -293,6 +295,7 @@ export default function OrganizeLibraryPanel({ onSaved }: { onSaved: () => void 
                             energy {Math.round(t.energy * 10)}/10
                           </span>
                         )}
+                        <EditSoundDialog track={t} onSaved={(nt) => setPlaylists((all) => all.map((x) => x.key === p.key ? { ...x, tracks: x.tracks.map((y) => y.id === nt.id ? nt : y) } : x))} />
                         {!saved[p.key] && (
                           <Button variant="ghost" size="icon" onClick={() => removeTrack(p.key, t.id)} aria-label={`Remove ${t.name}`}>
                             <X className="w-4 h-4" />

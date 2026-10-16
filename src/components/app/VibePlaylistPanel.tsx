@@ -11,6 +11,8 @@ import { buildProfiles, type TrackProfile } from "@/lib/playlist/features";
 import { enrichWithAI } from "@/lib/playlist/ai";
 import { sequence } from "@/lib/playlist/organize";
 import { buildVibePlaylist } from "@/lib/playlist/vibe";
+import { recordRemoval } from "@/lib/playlist/feedback";
+import EditSoundDialog from "@/components/app/EditSoundDialog";
 import { loadLikedTracks, loadArtistGenres } from "@/components/app/OrganizeLibraryPanel";
 import type { SpotifyTrack } from "@/lib/playlist/features";
 import { findSeedMatches, isUniqueFullTitle, leftoverKeywords, type SeedMatch } from "@/components/app/seedMatch";
@@ -95,6 +97,20 @@ export default function VibePlaylistPanel() {
     return p;
   }
 
+  function updateProfile(t: TrackProfile) {
+    setProfiles((all) => all ? all.map((x) => x.id === t.id ? t : x) : all);
+    setTracks((all) => all ? all.map((x) => x.id === t.id ? t : x) : all);
+  }
+
+  function SeedSound({ id }: { id: string }) {
+    const [p, setP] = useState<TrackProfile | null>(profiles?.find((x) => x.id === id) ?? null);
+    if (!p) return (
+      <button type="button" className="ml-1 text-xs text-muted-foreground hover:text-foreground underline"
+        onClick={async () => setP((await getProfiles()).find((x) => x.id === id) ?? null)}>Edit sound</button>
+    );
+    return <EditSoundDialog compact track={p} onSaved={(t) => { setP(t); updateProfile(t); }} />;
+  }
+
   async function create() {
     if (!user || !canCreate) return;
     setError(null); setTracks(null); setSavedUrl(null);
@@ -174,6 +190,7 @@ export default function VibePlaylistPanel() {
             {seeds.map((s) => (
               <span key={s.track.id} className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-muted/40 px-3 py-1 text-sm">
                 Based on: {s.track.name} · {s.track.artists.map((a) => a.name).join(", ")}
+                <SeedSound id={s.track.id} />
                 <button type="button" aria-label={`Remove ${s.track.name}`} className="ml-1 text-muted-foreground hover:text-foreground"
                   onClick={() => { setSeeds((all) => all.filter((x) => x.track.id !== s.track.id)); setDismissed((d) => new Set(d).add(s.track.id)); }}>
                   <X className="w-3 h-3" />
@@ -236,13 +253,14 @@ export default function VibePlaylistPanel() {
                       <p className="truncate">{t.name}</p>
                       <p className="truncate text-muted-foreground">{t.artists.join(", ")}</p>
                     </div>
+                    <EditSoundDialog track={t} onSaved={updateProfile} />
                     {!savedUrl && (
                       <Button variant="ghost" size="icon" aria-label={`Remove ${t.name}`}
-                        onClick={() => setTracks((all) => {
+                        onClick={() => { if (!seeds.some((s) => s.track.id === t.id)) void recordRemoval(t.id, { seedId: seeds[0]?.track.id ?? null, context: `vibe: ${vibe}` }); setTracks((all) => {
                           const rest = (all ?? []).filter((x) => x.id !== t.id);
                           const first = seeds.find((s) => rest.some((x) => x.id === s.track.id))?.track.id;
                           return sequence(rest, first);
-                        })}>
+                        }); }}>
                         <X className="w-4 h-4" />
                       </Button>
                     )}
