@@ -21,6 +21,9 @@ export interface AiTrackInfo {
   year_checked?: boolean;
   family?: string | null;
   style?: string | null;
+  instruments?: string[] | null;
+  texture?: number | null; warmth?: number | null; scale?: number | null;
+  groove?: string | null;
 }
 
 const LANGS: Lang[] = ["es", "en", "pt", "fr", "it", "de", "ko", "ja", "zh", "instrumental", "other"];
@@ -58,6 +61,11 @@ function sanitize(raw: any): AiTrackInfo | null {
     year_checked: !!raw.year_checked,
     family: typeof raw.family === "string" ? raw.family : null,
     style: typeof raw.style === "string" ? raw.style : null,
+    instruments: Array.isArray(raw.instruments) ? raw.instruments : null,
+    texture: typeof raw.texture === "number" ? raw.texture : null,
+    warmth: typeof raw.warmth === "number" ? raw.warmth : null,
+    scale: typeof raw.scale === "number" ? raw.scale : null,
+    groove: typeof raw.groove === "string" ? raw.groove : null,
   };
 }
 
@@ -109,7 +117,7 @@ async function loadDeepAnalysis(userId: string): Promise<Map<string, Partial3>> 
 async function loadStoredClassifications(userId: string): Promise<Map<string, AiTrackInfo>> {
   const rows = await fetchAll<any>((a, b) =>
     supabase.from("track_ai_classification")
-      .select("spotify_track_id, lang, energy, valence, danceability, tempo, mood, original_year, year_checked, family, style")
+      .select("spotify_track_id, lang, energy, valence, danceability, tempo, mood, original_year, year_checked, family, style, instruments, texture, warmth, scale, groove")
       .eq("user_id", userId).range(a, b));
   const map = new Map<string, AiTrackInfo>();
   for (const r of rows) {
@@ -156,6 +164,10 @@ export async function enrichWithAI(
     // only says "instrumental" when there are no vocals at all.
     if (d) out = apply(out, ai ? { ...d, lang: undefined } : d, false);
     if (ai?.style) out = { ...out, style: ai.style };
+    if (ai) out = {
+      ...out, instruments: ai.instruments ?? [], texture: ai.texture ?? null,
+      warmth: ai.warmth ?? null, scale: ai.scale ?? null, groove: ai.groove ?? null,
+    };
     if (ai?.original_year) out = { ...out, year: ai.original_year };
     // Artists with no stored genres: use the AI's genre family for the song.
     if (!out.families.length && ai?.family) out = { ...out, families: [ai.family] };

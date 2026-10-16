@@ -1224,6 +1224,39 @@ export type Database = {
         }
         Relationships: []
       }
+      playlist_feedback: {
+        Row: {
+          action: string
+          context: string | null
+          created_at: string
+          id: string
+          reason: string | null
+          seed_track_id: string | null
+          spotify_track_id: string
+          user_id: string
+        }
+        Insert: {
+          action?: string
+          context?: string | null
+          created_at?: string
+          id?: string
+          reason?: string | null
+          seed_track_id?: string | null
+          spotify_track_id: string
+          user_id: string
+        }
+        Update: {
+          action?: string
+          context?: string | null
+          created_at?: string
+          id?: string
+          reason?: string | null
+          seed_track_id?: string | null
+          spotify_track_id?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       playlist_generation_jobs: {
         Row: {
           assigned_count: number
@@ -2250,15 +2283,21 @@ export type Database = {
           energy: number
           family: string | null
           family_checked: boolean
+          groove: string | null
+          instruments: string[] | null
           lang: string
           mood: string
           original_year: number | null
+          scale: number | null
+          sound_checked: boolean
           spotify_track_id: string
           style: string | null
           style_checked: boolean
           tempo: number
+          texture: number | null
           user_id: string
           valence: number
+          warmth: number | null
           year_checked: boolean
         }
         Insert: {
@@ -2267,15 +2306,21 @@ export type Database = {
           energy: number
           family?: string | null
           family_checked?: boolean
+          groove?: string | null
+          instruments?: string[] | null
           lang: string
           mood: string
           original_year?: number | null
+          scale?: number | null
+          sound_checked?: boolean
           spotify_track_id: string
           style?: string | null
           style_checked?: boolean
           tempo: number
+          texture?: number | null
           user_id: string
           valence: number
+          warmth?: number | null
           year_checked?: boolean
         }
         Update: {
@@ -2284,15 +2329,21 @@ export type Database = {
           energy?: number
           family?: string | null
           family_checked?: boolean
+          groove?: string | null
+          instruments?: string[] | null
           lang?: string
           mood?: string
           original_year?: number | null
+          scale?: number | null
+          sound_checked?: boolean
           spotify_track_id?: string
           style?: string | null
           style_checked?: boolean
           tempo?: number
+          texture?: number | null
           user_id?: string
           valence?: number
+          warmth?: number | null
           year_checked?: boolean
         }
         Relationships: []
