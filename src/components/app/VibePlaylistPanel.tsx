@@ -51,7 +51,11 @@ export default function VibePlaylistPanel() {
   // Auto-pick a single clear match (title + artist).
   useEffect(() => {
     let clear = matches.filter((m) => m.artistHit.length);
-    if (!clear.length && liked) clear = matches.filter((m) => isUniqueFullTitle(m, liked));
+    if (!clear.length && liked) {
+      // Several full titles in the text ("forms of love, late night drive"): the longest title wins; ties pick none.
+      const full = matches.filter((m) => isUniqueFullTitle(m, liked)).sort((a, b) => b.span.split(" ").length - a.span.split(" ").length);
+      clear = full.length > 1 && full[0].span.split(" ").length === full[1].span.split(" ").length ? [] : full.slice(0, 1);
+    }
     if (clear.length === 1 && !dismissed.has(clear[0].track.id) && seeds.length < 3) {
       setSeeds((s) => [...s, clear[0]]);
     }
