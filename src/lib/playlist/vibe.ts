@@ -36,6 +36,9 @@ const FILL_TARGET = 20;
 const MIN_COHESION = 0.55;
 const MIN_SEED_COHESION = 0.5;
 const MAX_TRACKS = 30;
+const FEEL_EXTRA_STYLES = ["ambient-electronic", "indie-dance", "nu-disco", "synth-pop", "indie-pop", "lo-fi", "soundtrack", "classical"];
+/** AI unsure how the song feels: it needs an 8 or more to get in. */
+const lowConfidence = (t: TrackProfile) => t.confidence !== null && t.confidence !== undefined && t.confidence < 0.5;
 const SELECT_BATCH = 40;
 
 const mid = (a: number, b: number) => (a + b) / 2;
@@ -80,7 +83,11 @@ function passesHardRules(t: TrackProfile, s: VibeSpec, seeds: TrackProfile[]): b
   if (t.energy < s.energy_min - E_TOL || t.energy > s.energy_max + E_TOL) return false;
   if (t.families.some((f) => s.excluded_families.includes(f))) return false;
   const seedStyles = seeds.map((x) => x.style).filter(Boolean);
-  if (seedStyles.length && !seedStyles.some((st) => sameOrNeighborStyle(st, t.style))) return false;
+  if (seedStyles.length && !seedStyles.some((st) => sameOrNeighborStyle(st, t.style))) {
+    // Melodic seed: nearby styles may join when they feel the same and energy is within 0.25.
+    const kin = !!t.style && FEEL_EXTRA_STYLES.includes(t.style) && seeds.some((x) => melodicKin(x, t));
+    if (!kin) return false;
+  }
   return true;
 }
 
@@ -225,7 +232,7 @@ export function selectVibeTracks(cands: TrackProfile[], scores: Map<string, numb
     const base = picked;
     const rank = (t: TrackProfile) => seeds.length ? seedFitOf(t, seeds)
       : base.length ? base.reduce((a, o) => a + compatibility(t, o), 0) / base.length : 0;
-    sevens = cands.filter((t) => sc(t) >= FILL_SCORE && sc(t) < MIN_SCORE && coheres(t))
+    sevens = cands.filter((t) => sc(t) >= FILL_SCORE && sc(t) < MIN_SCORE && coheres(t) && !lowConfidence(t))
       .map((t) => ({ t, c: rank(t) })).sort((a, b) => b.c - a.c)
       .slice(0, target - picked.length).map((x) => x.t);
     picked = [...picked, ...sevens];

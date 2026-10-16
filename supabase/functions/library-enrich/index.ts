@@ -7,6 +7,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
 import { SOUND_PROMPT, sanitizeSound } from "../_shared/sound.ts";
 import { classifyScenes, DANCE_STYLES } from "../_shared/scene.ts";
+import { FEEL_EXTRA_STYLES } from "../_shared/sound.ts";
 const FAMILIES = ["regional-mexicano","urbano-latino","tropical","brasil","rock-en-espanol","latin-pop","k-pop","j-music","hip-hop","rnb-soul","electronic","metal","indie-alt","rock","folk-acoustic","jazz-blues","classical-score","pop"];
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -196,6 +197,7 @@ async function runHop(admin: any, userId: string, started: number, skipSpotify =
         if (r.status !== 200) throw new Error(`AI scene request failed (${r.status})`);
         for (const row of r.rows) {
           const { id, ...patch } = row;
+          if (!DANCE_STYLES.includes(job.style)) delete (patch as any).scene; // scenes are for dance songs only
           await admin.from("track_ai_classification").update(patch).eq("user_id", userId).eq("spotify_track_id", id);
           const c = cls.get(id); if (c) { c.scene_checked = true; c.feel_checked = true; }
         }
