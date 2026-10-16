@@ -1,6 +1,7 @@
 // The playlist engine.
 // 1. Language is a hard rule: songs sung in different languages never share a playlist
-//    (instrumentals are the exception: they fit anywhere they match the vibe).
+//    (exceptions: instrumentals fit anywhere they match; electronic dance styles mix
+//    languages as long as the style is the same or a neighbor).
 // 2. Inside each language, songs are grouped by a compatibility score that mixes
 //    genre family, energy, mood, valence, tempo, era and explicitness.
 // 3. A song that doesn't fit anywhere well is NOT forced in: it goes to "unsorted",
@@ -32,7 +33,7 @@ export interface OrganizeResult {
 
 // ---------- Compatibility between two songs ----------
 
-const MOOD_NEIGHBORS: Record<Mood, Mood[]> = {
+export const MOOD_NEIGHBORS: Record<Mood, Mood[]> = {
   chill: ["dreamy", "romantic", "melancholic"],
   melancholic: ["dreamy", "chill", "romantic"],
   romantic: ["chill", "melancholic", "dreamy"],
@@ -88,6 +89,12 @@ for (const [a, list] of STYLE_LINKS) for (const b of list) {
   STYLE_NEIGHBORS.get(b)!.add(a);
 }
 
+/** Electronic dance styles: here the sound matters more than the sung language. */
+export const DANCE_STYLES = new Set(["melodic-house", "afro-house", "deep-house", "tech-house", "indie-dance", "nu-disco", "techno", "trance", "drum-and-bass", "edm-festival"]);
+export const isDance = (t: TrackProfile) => !!t.style && DANCE_STYLES.has(t.style);
+export const sameOrNeighborStyle = (a: string | null | undefined, b: string | null | undefined) =>
+  !!a && !!b && (a === b || !!STYLE_NEIGHBORS.get(a)?.has(b));
+
 function styleMatch(a: TrackProfile, b: TrackProfile): number | null {
   if (!a.style || !b.style) return null;
   if (a.style === b.style) return 1;
@@ -119,6 +126,8 @@ function tempoCloseness(a: number | null, b: number | null): number | null {
 
 function languagesCompatible(a: TrackProfile, b: TrackProfile): boolean {
   if (a.lang === "instrumental" || b.lang === "instrumental") return true;
+  // Dance styles: language is not a hard rule while the style is the same or a neighbor.
+  if (isDance(a) && isDance(b) && sameOrNeighborStyle(a.style, b.style)) return true;
   if (a.lang === "unknown" || b.lang === "unknown") return true; // handled with stricter rules later
   return a.lang === b.lang;
 }
@@ -159,6 +168,7 @@ export function compatibility(a: TrackProfile, b: TrackProfile): number {
 // ---------- Grouping ----------
 
 function bucketOf(t: TrackProfile): string {
+  if (isDance(t)) return "dance";
   return t.lang === "instrumental" || t.lang === "unknown" ? t.lang : `lang:${t.lang}`;
 }
 
@@ -396,6 +406,7 @@ export function organizeLibrary(all: TrackProfile[], options: OrganizeOptions = 
       if (g.tracks.length >= maxSize) continue;
       const langOk =
         g.lang === t.lang ||
+        (g.lang === "dance" && isDance(t)) ||
         t.lang === "instrumental" || // instrumentals can join any vibe they match
         (t.lang === "unknown" && g.lang !== "instrumental");
       if (!langOk) continue;
@@ -468,7 +479,7 @@ export async function curateLibrary(
     let bestFit = 0.6;
     for (const p of kept) {
       if (p.tracks.length >= maxSize || p.tracks.length < minSize) continue;
-      if (!(p.lang === t.lang || t.lang === "instrumental")) continue;
+      if (!(p.lang === t.lang || t.lang === "instrumental" || (p.lang === "dance" && isDance(t)))) continue;
       const fit = averageFit(t, p.tracks);
       if (fit >= bestFit) { bestFit = fit; best = p; }
     }

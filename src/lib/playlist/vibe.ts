@@ -2,7 +2,7 @@
 // Never fills with songs that failed a filter.
 import { supabase } from "@/integrations/supabase/client";
 import type { Lang, Mood, TrackProfile } from "./features";
-import { compatibility, sequence } from "./organize";
+import { compatibility, sequence, isDance, sameOrNeighborStyle, MOOD_NEIGHBORS } from "./organize";
 import { askCurator } from "./curate";
 
 export interface VibeSpec {
@@ -54,51 +54,101 @@ function distance(t: TrackProfile, s: VibeSpec): number {
   return d;
 }
 
-function passesHardRules(t: TrackProfile, s: VibeSpec): boolean {
+const MIN_CANDIDATES = 10;
+
+/** Relaxable rules, dropped in this order by Plan B. */
+type Soft = "mood" | "era" | "tempo";
+const RELAX_ORDER: Soft[] = ["mood", "era", "tempo"];
+
+function inTempo(t: TrackProfile, s: VibeSpec): boolean {
+  if (t.tempo === null) return true;
+  const ok = (x: number) => x >= s.tempo_min && x <= s.tempo_max;
+  return ok(t.tempo) || ok(t.tempo / 2) || ok(t.tempo * 2);
+}
+const inEra = (t: TrackProfile, s: VibeSpec) =>
+  !t.year || ((!s.era_min || t.year >= s.era_min) && (!s.era_max || t.year <= s.era_max));
+
+/** Never relaxed: energy range, excluded families, style (same or neighbor of a seed). */
+function passesHardRules(t: TrackProfile, s: VibeSpec, seeds: TrackProfile[]): boolean {
   if (t.energy === null) return false;
   if (t.energy < s.energy_min - E_TOL || t.energy > s.energy_max + E_TOL) return false;
-  if (t.mood && s.moods_excluded.includes(t.mood)) return false;
   if (t.families.some((f) => s.excluded_families.includes(f))) return false;
+  const seedStyles = seeds.map((x) => x.style).filter(Boolean);
+  if (seedStyles.length && !seedStyles.some((st) => sameOrNeighborStyle(st, t.style))) return false;
   return true;
+}
+
+function passesSoft(t: TrackProfile, s: VibeSpec, active: Set<Soft>): boolean {
+  if (active.has("mood") && t.mood && s.moods_excluded.includes(t.mood)) return false;
+  if (active.has("era") && !inEra(t, s)) return false;
+  if (active.has("tempo") && !inTempo(t, s)) return false;
+  return true;
+}
+
+/** With seeds, mood/era/tempo only nudge the score. */
+function preferenceBonus(t: TrackProfile, s: VibeSpec): number {
+  let b = 0;
+  if (t.mood) b += s.moods_allowed.includes(t.mood) ? 0.04 : s.moods_excluded.includes(t.mood) ? -0.04 : 0;
+  if (t.year && (s.era_min || s.era_max)) b += inEra(t, s) ? 0.03 : -0.03;
+  if (t.tempo !== null) b += inTempo(t, s) ? 0.02 : -0.02;
+  return b;
+}
+
+const ERA_WORDS = /\b(1[89]|20)\d{2}s?\b|\b'?\d0s\b|\b(sixties|seventies|eighties|nineties|dosmil|ochentas?|noventas?|setentas?|sesentas?|oldies|old school|retro|vintage|throwback|classic|clasicos?|modern|new|nuevas?|recent|actual)\b|\ba[nñ]os\s?\d0/i;
+/** Without seeds: era is a filter only if the keywords mention it; allowed moods include neighbors. */
+export function normalizeSpec(spec: VibeSpec, keywords: string, hasSeeds: boolean): VibeSpec {
+  const out = { ...spec };
+  if (!hasSeeds && !ERA_WORDS.test(keywords)) { out.era_min = null; out.era_max = null; }
+  if (!hasSeeds) {
+    const allowed = new Set(out.moods_allowed);
+    for (const m of spec.moods_allowed) for (const n of MOOD_NEIGHBORS[m] ?? []) allowed.add(n);
+    out.moods_allowed = [...allowed];
+    out.moods_excluded = out.moods_excluded.filter((m) => !allowed.has(m));
+  }
+  return out;
 }
 
 /** Step 2: local filter. `langChoice` = "auto" or a language code. */
 export function filterCandidates(profiles: TrackProfile[], spec: VibeSpec, langChoice: string, seeds: TrackProfile[] = []) {
   const seedIds = new Set(seeds.map((x) => x.id));
-  const passing = profiles.filter((t) => !seedIds.has(t.id) && passesHardRules(t, spec));
+  const hard = profiles.filter((t) => !seedIds.has(t.id) && passesHardRules(t, spec, seeds));
+  // Instrumental or dance-style seed: language is not a hard rule (style already is).
+  const langFree = seeds.length > 0 && langChoice === "auto" && seeds.every((x) => x.lang === "instrumental" || isDance(x));
   const seedLang = seeds.find((x) => x.lang !== "instrumental" && x.lang !== "unknown" && x.lang !== "other")?.lang;
+  const topLang = (list: TrackProfile[], fallback: Lang) => {
+    const counts = new Map<Lang, number>();
+    for (const t of list) if (t.lang !== "unknown" && t.lang !== "other") counts.set(t.lang, (counts.get(t.lang) ?? 0) + 1);
+    return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? fallback;
+  };
   let lang: Lang;
   if (langChoice !== "auto") lang = langChoice as Lang;
   else if (seedLang) lang = seedLang;
-  else if (seeds.length) {
-    const counts = new Map<Lang, number>();
-    for (const t of passing) if (t.lang !== "unknown" && t.lang !== "other") counts.set(t.lang, (counts.get(t.lang) ?? 0) + 1);
-    lang = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "instrumental";
-  }
+  else if (seeds.length) lang = topLang(hard, "instrumental");
   else if (spec.language) lang = spec.language;
-  else {
-    const counts = new Map<Lang, number>();
-    for (const t of passing) if (t.lang !== "unknown" && t.lang !== "other") counts.set(t.lang, (counts.get(t.lang) ?? 0) + 1);
-    lang = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "en";
+  else lang = topLang(hard, "en");
+  const langOk = (t: TrackProfile) =>
+    langFree || t.lang === lang || (isDance(t) && seeds.some((x) => isDance(x) && sameOrNeighborStyle(x.style, t.style)));
+  const inLang = hard.filter(langOk);
+
+  const seedFit = (t: TrackProfile) => seeds.reduce((a, x) => a + compatibility(t, x), 0) / seeds.length;
+  const rank = (list: TrackProfile[]) => seeds.length
+    ? list.map((t) => ({ t, c: seedFit(t) })).filter((x) => x.c >= MIN_SEED_COMPAT)
+        .sort((a, b) => (b.c + preferenceBonus(b.t, spec)) - (a.c + preferenceBonus(a.t, spec))).map((x) => x.t)
+    : list.map((t) => ({ t, d: distance(t, spec) })).sort((a, b) => a.d - b.d).map((x) => x.t);
+
+  // Seeds: mood/era/tempo are preferences only. Without seeds they start as filters.
+  const active = new Set<Soft>(seeds.length ? [] : RELAX_ORDER);
+  let candidates = rank(inLang.filter((t) => passesSoft(t, spec, active)));
+  const relaxed: Soft[] = [];
+  // Plan B: too few candidates but enough compatible songs → relax mood, then era, then tempo.
+  const enough = seeds.length ? inLang.filter((t) => seedFit(t) >= MIN_SEED_COMPAT).length >= MIN_CANDIDATES : inLang.length >= MIN_CANDIDATES;
+  for (const r of RELAX_ORDER) {
+    if (candidates.length >= MIN_CANDIDATES || !enough) break;
+    if (!active.has(r)) continue;
+    active.delete(r); relaxed.push(r);
+    candidates = rank(inLang.filter((t) => passesSoft(t, spec, active)));
   }
-  // One language only (instrumentals only when the vibe itself is instrumental).
-  const inLang = passing.filter((t) => t.lang === lang);
-  if (seeds.length) {
-    const seedFit = (t: TrackProfile) => seeds.reduce((a, x) => a + compatibility(t, x), 0) / seeds.length;
-    const candidates = inLang
-      .map((t) => ({ t, c: seedFit(t) }))
-      .filter((x) => x.c >= MIN_SEED_COMPAT)
-      .sort((a, b) => b.c - a.c)
-      .slice(0, MAX_CANDIDATES)
-      .map((x) => x.t);
-    return { lang, candidates };
-  }
-  const candidates = inLang
-    .map((t) => ({ t, d: distance(t, spec) }))
-    .sort((a, b) => a.d - b.d)
-    .slice(0, MAX_CANDIDATES)
-    .map((x) => x.t);
-  return { lang, candidates };
+  return { lang, candidates: candidates.slice(0, MAX_CANDIDATES), relaxed };
 }
 
 const vibeKey = (v: string) => v.toLowerCase().replace(/\s+/g, " ").trim();
@@ -179,7 +229,7 @@ export async function buildVibePlaylist(
   }));
   const { data, error } = await supabase.functions.invoke("vibe-spec", { body: { vibe, seeds: seedBody } });
   if (error || data?.error) throw new Error(data?.error ?? error?.message ?? "Couldn't read the vibe.");
-  const spec = data as VibeSpec;
+  const spec = normalizeSpec(data as VibeSpec, vibe, seeds.length > 0);
 
   onStep("Filtering your Liked Songs");
   const { lang, candidates } = filterCandidates(profiles, spec, langChoice, seeds);

@@ -65,11 +65,36 @@ export function findSeedMatches(text: string, liked: SpotifyTrack[], limit = 5):
     .slice(0, limit);
 }
 
-/** Vibe keywords left once the seed titles/artists are removed. */
-export function leftoverKeywords(text: string, seeds: SeedMatch[]): string {
-  let t = ` ${norm(text)} `;
-  for (const s of seeds) {
-    for (const p of [s.span, ...s.artistHit]) t = t.replace(` ${p} `, " ");
+/** Raw lowercase text without accents, keeping symbols ("&me", "blond:ish"). */
+const rawNorm = (s: string) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim();
+
+/**
+ * Vibe keywords left once the seed titles and artists are removed. Artists written with
+ * symbols ("&ME", "BLOND:ISH", "Lost In Nirāi") are recognized too, including any artist
+ * from the library when the text writes it with its symbols. Under 3 letters → no keywords.
+ */
+export function leftoverKeywords(text: string, seeds: SeedMatch[], library: SpotifyTrack[] = []): string {
+  let raw = ` ${rawNorm(text)} `;
+  const artists = new Set<string>();
+  for (const s of seeds) for (const a of s.track.artists) artists.add(a.name);
+  for (const t of library) for (const a of t.artists) if (/[^a-z0-9\s]/i.test(rawNorm(a.name))) artists.add(a.name);
+  // Symbol-written artist names: remove them exactly as written.
+  for (const a of [...artists].sort((x, y) => y.length - x.length)) {
+    const r = rawNorm(a);
+    if (r.length < 2 || !/[^a-z0-9\s]/.test(r)) continue;
+    const esc = r.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    raw = raw.replace(new RegExp(`(^|[\\s,;/])${esc}(?=$|[\\s,;/.!?])`, "g"), "$1 ");
   }
-  return t.replace(/\s+/g, " ").trim();
+  let t = ` ${norm(raw)} `;
+  const phrases = new Set<string>();
+  for (const s of seeds) {
+    phrases.add(s.span);
+    phrases.add(cleanTitle(s.track.name));
+    for (const a of s.track.artists) phrases.add(norm(a.name));
+  }
+  for (const p of [...phrases].filter((x) => x.length >= 2).sort((a, b) => b.length - a.length)) {
+    while (has(t, p)) t = t.replace(` ${p} `, " ");
+  }
+  t = t.replace(/\s+/g, " ").trim();
+  return t.replace(/[^a-z]/g, "").length < 3 ? "" : t;
 }

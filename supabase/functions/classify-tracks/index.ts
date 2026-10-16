@@ -19,7 +19,7 @@ Return ONLY JSON, no prose and no markdown fences, with this exact shape:
 
 Each object has exactly these keys:
 - "id": the id you received
-- "lang": language the lyrics are SUNG in (not the title language). One of: "es","en","pt","fr","it","de","ko","ja","zh","instrumental","other". Mostly-Spanish songs with a few English words are "es".
+- "lang": language the lyrics are SUNG in (not the title language). One of: "es","en","pt","fr","it","de","ko","ja","zh","instrumental","other". Mostly-Spanish songs with a few English words are "es". Use "instrumental" ONLY if the song has no vocals at all. If it has any vocals, even a few lines, a hook or a vocal sample, use the language of those vocals (e.g. a house track with a short English vocal is "en").
 - "energy": 0 to 1 (0 = very calm, 1 = very intense)
 - "valence": 0 to 1 (0 = sad/dark, 1 = happy/bright)
 - "danceability": 0 to 1

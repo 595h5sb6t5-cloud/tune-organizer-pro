@@ -1,0 +1,1 @@
+UPDATE public.track_ai_classification SET style_checked = false WHERE lang = 'instrumental' AND style IN ('melodic-house','afro-house','deep-house','tech-house','indie-dance','nu-disco','techno','trance','drum-and-bass','edm-festival','ambient-electronic');
