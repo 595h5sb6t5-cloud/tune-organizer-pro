@@ -211,7 +211,7 @@ const isCold = (t: TrackProfile) => (!!t.scene && COLD_SCENES.has(t.scene)) || t
 /** Never mix a warm song with a cold/dark one when warmth differs more than 0.4. */
 export function warmColdClash(a: TrackProfile, b: TrackProfile): boolean {
   if (a.warmth === null || b.warmth === null || Math.abs(a.warmth - b.warmth) <= 0.4) return false;
-  return isCold(a) !== isCold(b) || (isCold(a) && isCold(b) && false);
+  return isCold(a) !== isCold(b);
 }
 
 /** Melodic seed path: both melody-driven (≥0.7), feel the same and energy within 0.25. */
