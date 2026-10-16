@@ -199,11 +199,36 @@ export function soundClash(a: TrackProfile, b: TrackProfile): boolean {
     (!!a.groove && !!b.groove && a.groove !== b.groove);
 }
 
+/** Same (or neighbor) feeling, melodic focus within 0.2 and same arc: they feel the same. */
+export function feelAligned(a: TrackProfile, b: TrackProfile): boolean {
+  if (!a.feeling || !b.feeling || !a.arc || !b.arc || a.melodicFocus === null || b.melodicFocus === null) return false;
+  return (a.feeling === b.feeling || feelingNeighbors(a.feeling, b.feeling)) &&
+    Math.abs(a.melodicFocus - b.melodicFocus) < 0.2 && a.arc === b.arc;
+}
+
+const COLD_SCENES = new Set(["afterlife-melodic-techno"]);
+const isCold = (t: TrackProfile) => (!!t.scene && COLD_SCENES.has(t.scene)) || t.feeling === "dark-tense";
+/** Never mix a warm song with a cold/dark one when warmth differs more than 0.4. */
+export function warmColdClash(a: TrackProfile, b: TrackProfile): boolean {
+  if (a.warmth === null || b.warmth === null || Math.abs(a.warmth - b.warmth) <= 0.4) return false;
+  return isCold(a) !== isCold(b);
+}
+
+/** Melodic seed path: both melody-driven (≥0.7), feel the same and energy within 0.25. */
+export function melodicKin(a: TrackProfile, b: TrackProfile): boolean {
+  return feelAligned(a, b) && (a.melodicFocus ?? 0) >= 0.7 && (b.melodicFocus ?? 0) >= 0.7 &&
+    a.energy !== null && b.energy !== null && Math.abs(a.energy - b.energy) < 0.25;
+}
+
 export function compatibility(a: TrackProfile, b: TrackProfile): number {
   if (!languagesCompatible(a, b)) return 0;
+  if (warmColdClash(a, b)) return 0;
 
-  const style = styleMatch(a, b);
-  const scene = sceneMatch(a, b);
+  const aligned = feelAligned(a, b);
+  let style = styleMatch(a, b);
+  if (style === 0 && melodicKin(a, b)) style = 0.5; // feeling outranks style for melodic songs
+  let scene = sceneMatch(a, b);
+  if (scene === 0 && aligned) scene = 0.5; // feeling outranks scene: count as neighbor
   const parts: [number | null, number][] = [
     [style, 0.35],
     [soundMatch(a, b), 0.35],

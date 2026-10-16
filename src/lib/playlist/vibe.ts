@@ -2,7 +2,7 @@
 // Never fills with songs that failed a filter.
 import { supabase } from "@/integrations/supabase/client";
 import type { Lang, Mood, TrackProfile } from "./features";
-import { compatibility, sequence, isDance, sameOrNeighborStyle, MOOD_NEIGHBORS } from "./organize";
+import { compatibility, sequence, isDance, sameOrNeighborStyle, MOOD_NEIGHBORS, melodicKin } from "./organize";
 import { askCurator } from "./curate";
 import { ensureSeedFeeling } from "./ai";
 
@@ -36,6 +36,9 @@ const FILL_TARGET = 20;
 const MIN_COHESION = 0.55;
 const MIN_SEED_COHESION = 0.5;
 const MAX_TRACKS = 30;
+const FEEL_EXTRA_STYLES = ["ambient-electronic", "indie-dance", "nu-disco", "synth-pop", "indie-pop", "lo-fi", "soundtrack", "classical"];
+/** AI unsure how the song feels: it needs an 8 or more to get in. */
+const lowConfidence = (t: TrackProfile) => t.confidence !== null && t.confidence !== undefined && t.confidence < 0.5;
 const SELECT_BATCH = 40;
 
 const mid = (a: number, b: number) => (a + b) / 2;
@@ -80,7 +83,11 @@ function passesHardRules(t: TrackProfile, s: VibeSpec, seeds: TrackProfile[]): b
   if (t.energy < s.energy_min - E_TOL || t.energy > s.energy_max + E_TOL) return false;
   if (t.families.some((f) => s.excluded_families.includes(f))) return false;
   const seedStyles = seeds.map((x) => x.style).filter(Boolean);
-  if (seedStyles.length && !seedStyles.some((st) => sameOrNeighborStyle(st, t.style))) return false;
+  if (seedStyles.length && !seedStyles.some((st) => sameOrNeighborStyle(st, t.style))) {
+    // Melodic seed: nearby styles may join when they feel the same and energy is within 0.25.
+    const kin = !!t.style && FEEL_EXTRA_STYLES.includes(t.style) && seeds.some((x) => melodicKin(x, t));
+    if (!kin) return false;
+  }
   return true;
 }
 
@@ -173,7 +180,7 @@ export const seedProfile = (t: TrackProfile) => ({
 });
 
 async function scoreCandidates(userId: string, vibe: string, cands: TrackProfile[], seeds: TrackProfile[], onProgress?: (d: number, t: number) => void) {
-  const key = "v5|" + vibeKey(vibe) + (seeds.length ? ` |seed:${seeds.map((x) => `${x.id}~${x.feeling ?? ""}~${x.arc ?? ""}~${x.melodicFocus ?? ""}~${x.scene ?? ""}`).join(",")}` : "");
+  const key = "v6|" + vibeKey(vibe) + (seeds.length ? ` |seed:${seeds.map((x) => `${x.id}~${x.feeling ?? ""}~${x.arc ?? ""}~${x.melodicFocus ?? ""}~${x.scene ?? ""}`).join(",")}` : "");
   const scores = new Map<string, number>();
   const ids = cands.map((c) => c.id);
   for (let i = 0; i < ids.length; i += 200) {
@@ -225,7 +232,7 @@ export function selectVibeTracks(cands: TrackProfile[], scores: Map<string, numb
     const base = picked;
     const rank = (t: TrackProfile) => seeds.length ? seedFitOf(t, seeds)
       : base.length ? base.reduce((a, o) => a + compatibility(t, o), 0) / base.length : 0;
-    sevens = cands.filter((t) => sc(t) >= FILL_SCORE && sc(t) < MIN_SCORE && coheres(t))
+    sevens = cands.filter((t) => sc(t) >= FILL_SCORE && sc(t) < MIN_SCORE && coheres(t) && !lowConfidence(t))
       .map((t) => ({ t, c: rank(t) })).sort((a, b) => b.c - a.c)
       .slice(0, target - picked.length).map((x) => x.t);
     picked = [...picked, ...sevens];
