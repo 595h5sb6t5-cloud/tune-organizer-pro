@@ -52,6 +52,8 @@ export interface TrackProfile {
   warmth: number | null; // 0 cold/dark → 1 warm/sunny
   scale: number | null; // 0 intimate → 1 epic
   groove: string | null; // straight | swung | broken | half-time
+  scene: string | null; // electronic dance scene (e.g. keinemusik-afro-organic)
+  soundEdited?: boolean; // user corrected the sound by hand
 }
 
 // ---------- Genre families ----------
@@ -236,7 +238,7 @@ export function buildProfiles(
       tempo: null,
       mood: null,
       style: null,
-      instruments: [], texture: null, warmth: null, scale: null, groove: null,
+      instruments: [], texture: null, warmth: null, scale: null, groove: null, scene: null,
     };
   });
 }
