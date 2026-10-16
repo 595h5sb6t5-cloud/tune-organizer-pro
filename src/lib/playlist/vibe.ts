@@ -163,6 +163,7 @@ const r2 = (x: number | null) => (x === null ? null : Math.round(x * 100) / 100)
 const brief = (t: TrackProfile) => ({
   id: t.id, name: t.name, artists: t.artists, year: t.year, genres: t.genres.slice(0, 5),
   style: t.style ?? null, lang: t.lang, energy: r2(t.energy), mood: t.mood,
+  instruments: t.instruments, texture: r2(t.texture), warmth: r2(t.warmth), scale: r2(t.scale), groove: t.groove,
 });
 /** Full seed profile for the AI. */
 export const seedProfile = (t: TrackProfile) => ({
@@ -171,7 +172,7 @@ export const seedProfile = (t: TrackProfile) => ({
 });
 
 async function scoreCandidates(userId: string, vibe: string, cands: TrackProfile[], seeds: TrackProfile[], onProgress?: (d: number, t: number) => void) {
-  const key = "v2|" + vibeKey(vibe) + (seeds.length ? ` |seed:${seeds.map((x) => x.id).join(",")}` : "");
+  const key = "v3|" + vibeKey(vibe) + (seeds.length ? ` |seed:${seeds.map((x) => x.id).join(",")}` : "");
   const scores = new Map<string, number>();
   const ids = cands.map((c) => c.id);
   for (let i = 0; i < ids.length; i += 200) {
@@ -245,6 +246,14 @@ export function selectVibeTracks(cands: TrackProfile[], scores: Map<string, numb
   return { tracks, eights, sevens: sevenCount };
 }
 
+/** Songs the user removed from playlists built on these seeds (playlist_feedback). */
+async function removedForSeeds(userId: string, seeds: TrackProfile[]): Promise<Set<string>> {
+  if (!seeds.length) return new Set();
+  const { data } = await supabase.from("playlist_feedback").select("spotify_track_id")
+    .eq("user_id", userId).eq("action", "removed").in("seed_track_id", seeds.map((s) => s.id));
+  return new Set((data ?? []).map((r) => r.spotify_track_id));
+}
+
 export async function buildVibePlaylist(
   userId: string,
   vibe: string,
@@ -263,7 +272,8 @@ export async function buildVibePlaylist(
   const spec = normalizeSpec(data as VibeSpec, vibe, seeds.length > 0);
 
   onStep("Filtering your Liked Songs");
-  const { lang, candidates } = filterCandidates(profiles, spec, langChoice, seeds);
+  const removed = await removedForSeeds(userId, seeds);
+  const { lang, candidates } = filterCandidates(profiles.filter((t) => !removed.has(t.id)), spec, langChoice, seeds);
   if (!candidates.length) return { spec, lang, tracks: seeds.length ? sequence(seeds, seeds[0].id) : [], candidates: 0, approved: 0 };
 
   const scores = await scoreCandidates(userId, vibe, candidates, seeds, (d, t) => onStep("Listening to every candidate", d, t));

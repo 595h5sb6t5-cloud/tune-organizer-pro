@@ -5,6 +5,7 @@
 // resumes it after paused_until.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
+import { SOUND_PROMPT, sanitizeSound } from "../_shared/sound.ts";
 const FAMILIES = ["regional-mexicano","urbano-latino","tropical","brasil","rock-en-espanol","latin-pop","k-pop","j-music","hip-hop","rnb-soul","electronic","metal","indie-alt","rock","folk-acoustic","jazz-blues","classical-score","pop"];
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -41,7 +42,7 @@ Each object has exactly these keys:
 - "mood": one of "chill","melancholic","romantic","upbeat","party","intense","dreamy","empowering"
 - "original_year": the year the song was FIRST released (not a remaster, compilation or reissue year). If you are not sure, return the album year you received.
 - "family": the song's genre family, ONLY one of: "regional-mexicano","urbano-latino","tropical","brasil","rock-en-espanol","latin-pop","k-pop","j-music","hip-hop","rnb-soul","electronic","metal","indie-alt","rock","folk-acoustic","jazz-blues","classical-score","pop"
-- "style": how the song SOUNDS (production, rhythm, scene), not just the artist's genre. A house remix of a pop song is "melodic-house" or "afro-house", not "mainstream-pop". ONLY one of: "melodic-house","afro-house","deep-house","tech-house","indie-dance","nu-disco","classic-disco","techno","trance","edm-festival","drum-and-bass","ambient-electronic","classic-soul","funk","neo-soul","modern-rnb","alt-rnb","trap","boom-bap","conscious-rap","pop-rap","mainstream-pop","indie-pop","bedroom-pop","synth-pop","indie-rock","alt-rock","classic-rock","punk","metal","folk","country","jazz","blues","reggaeton","latin-trap","corridos","banda-norteno","cumbia","salsa","bachata","latin-pop","rock-en-espanol","mpb-bossa","k-pop","j-pop","classical","soundtrack","lo-fi"`;
+- "style": how the song SOUNDS (production, rhythm, scene), not just the artist's genre. A house remix of a pop song is "melodic-house" or "afro-house", not "mainstream-pop". ONLY one of: "melodic-house","afro-house","deep-house","tech-house","indie-dance","nu-disco","classic-disco","techno","trance","edm-festival","drum-and-bass","ambient-electronic","classic-soul","funk","neo-soul","modern-rnb","alt-rnb","trap","boom-bap","conscious-rap","pop-rap","mainstream-pop","indie-pop","bedroom-pop","synth-pop","indie-rock","alt-rock","classic-rock","punk","metal","folk","country","jazz","blues","reggaeton","latin-trap","corridos","banda-norteno","cumbia","salsa","bachata","latin-pop","rock-en-espanol","mpb-bossa","k-pop","j-pop","classical","soundtrack","lo-fi"${SOUND_PROMPT}`;
 
 const STYLES = ["melodic-house","afro-house","deep-house","tech-house","indie-dance","nu-disco","classic-disco","techno","trance","edm-festival","drum-and-bass","ambient-electronic","classic-soul","funk","neo-soul","modern-rnb","alt-rnb","trap","boom-bap","conscious-rap","pop-rap","mainstream-pop","indie-pop","bedroom-pop","synth-pop","indie-rock","alt-rock","classic-rock","punk","metal","folk","country","jazz","blues","reggaeton","latin-trap","corridos","banda-norteno","cumbia","salsa","bachata","latin-pop","rock-en-espanol","mpb-bossa","k-pop","j-pop","classical","soundtrack","lo-fi"];
 const LANGS = ["es", "en", "pt", "fr", "it", "de", "ko", "ja", "zh", "instrumental", "other"];
@@ -88,7 +89,7 @@ async function likedRows(admin: any, userId: string) {
 async function existing(admin: any, table: string, col: string, ids: string[], userId?: string) {
   const known = new Map<string, any>();
   for (let i = 0; i < ids.length; i += 300) {
-    let q = admin.from(table).select(table === "artist_genres" ? "artist_id, genres" : "spotify_track_id, year_checked, family, family_checked, style_checked").in(col, ids.slice(i, i + 300));
+    let q = admin.from(table).select(table === "artist_genres" ? "artist_id, genres" : "spotify_track_id, year_checked, family, family_checked, style_checked, sound_checked").in(col, ids.slice(i, i + 300));
     if (userId) q = q.eq("user_id", userId);
     const { data } = await q;
     for (const r of data ?? []) known.set(r[col], r);
@@ -104,7 +105,7 @@ async function runHop(admin: any, userId: string, started: number, skipSpotify =
   const liked = await likedRows(admin, userId);
   const trackIds = liked.map((r) => r.spotify_track_id);
   const cls = await existing(admin, "track_ai_classification", "spotify_track_id", trackIds, userId);
-  const trackQueue = liked.filter((r) => { const c = cls.get(r.spotify_track_id); return !c?.year_checked || !c?.family_checked || !c?.style_checked; });
+  const trackQueue = liked.filter((r) => { const c = cls.get(r.spotify_track_id); return !c?.year_checked || !c?.family_checked || !c?.style_checked || !c?.sound_checked; });
   const allArtists = [...new Set(liked.flatMap((r) => ((r.artists ?? []) as any[]).map((a) => a?.id).filter(Boolean)))] as string[];
 
   const save = (patch: Record<string, unknown>) =>
@@ -156,6 +157,7 @@ async function runHop(admin: any, userId: string, started: number, skipSpotify =
             family_checked: true,
             style: STYLES.includes(r.style) ? r.style : null,
             style_checked: true,
+            ...sanitizeSound(r),
           };
         });
         if (rows.length) {

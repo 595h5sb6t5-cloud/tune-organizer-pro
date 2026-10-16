@@ -12,6 +12,7 @@ export async function askCurator(
       tracks: tracks.map((t) => ({
         id: t.id, name: t.name, artists: t.artists, year: t.year, style: t.style, lang: t.lang,
         energy: t.energy === null ? null : Math.round(t.energy * 10) / 10, mood: t.mood,
+        instruments: t.instruments, texture: t.texture, warmth: t.warmth, scale: t.scale, groove: t.groove,
       })),
       vibe: extra.vibe,
       seeds: extra.seeds?.map((s) => ({
@@ -20,6 +21,7 @@ export async function askCurator(
         energy: s.energy === null ? null : Math.round(s.energy * 100) / 100,
         valence: s.valence === null ? null : Math.round(s.valence * 100) / 100,
         tempo: s.tempo === null ? null : Math.round(s.tempo),
+        instruments: s.instruments, texture: s.texture, warmth: s.warmth, scale: s.scale, groove: s.groove,
       })),
       nameOnly: !!extra.nameOnly,
     },

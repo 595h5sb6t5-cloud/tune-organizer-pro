@@ -132,15 +132,35 @@ function languagesCompatible(a: TrackProfile, b: TrackProfile): boolean {
   return a.lang === b.lang;
 }
 
+/** Sound palette match 0–1 (null if unknown): 50% instruments, 50% texture/warmth/scale. */
+export function soundMatch(a: TrackProfile, b: TrackProfile): number | null {
+  const inst = a.instruments.length && b.instruments.length ? jaccard(a.instruments, b.instruments) : null;
+  const dims = [closeness(a.texture, b.texture, 0.35), closeness(a.warmth, b.warmth, 0.35), closeness(a.scale, b.scale, 0.35)]
+    .filter((x): x is number => x !== null);
+  const feel = dims.length ? dims.reduce((x, y) => x + y, 0) / dims.length : null;
+  if (inst === null && feel === null) return null;
+  if (inst === null) return feel;
+  if (feel === null) return inst;
+  return inst * 0.5 + feel * 0.5;
+}
+
+/** Hard sound clash: a texture/warmth/scale gap over 0.45 or a different groove. */
+export function soundClash(a: TrackProfile, b: TrackProfile): boolean {
+  const gap = (x: number | null, y: number | null) => x !== null && y !== null && Math.abs(x - y) > 0.45;
+  return gap(a.texture, b.texture) || gap(a.warmth, b.warmth) || gap(a.scale, b.scale) ||
+    (!!a.groove && !!b.groove && a.groove !== b.groove);
+}
+
 export function compatibility(a: TrackProfile, b: TrackProfile): number {
   if (!languagesCompatible(a, b)) return 0;
 
   const style = styleMatch(a, b);
   const parts: [number | null, number][] = [
     [style, 0.35],
+    [soundMatch(a, b), 0.35],
     [jaccard(a.families, b.families) * 0.75 + jaccard(a.genres, b.genres) * 0.25, 0.32],
-    [closeness(a.energy, b.energy, 0.45), 0.2],
-    [a.mood && b.mood ? (a.mood === b.mood ? 1 : MOOD_NEIGHBORS[a.mood].includes(b.mood) ? 0.6 : 0) : null, 0.12],
+    [closeness(a.energy, b.energy, 0.45), 0.12],
+    [a.mood && b.mood ? (a.mood === b.mood ? 1 : MOOD_NEIGHBORS[a.mood].includes(b.mood) ? 0.6 : 0) : null, 0.08],
     [closeness(a.valence, b.valence, 0.5), 0.1],
     [tempoCloseness(a.tempo, b.tempo), 0.08],
     [closeness(a.danceability, b.danceability, 0.5), 0.05],
@@ -161,6 +181,7 @@ export function compatibility(a: TrackProfile, b: TrackProfile): number {
   if (a.energy !== null && b.energy !== null && Math.abs(a.energy - b.energy) > 0.55) score *= 0.5;
   if (a.year && b.year && Math.abs(a.year - b.year) > 25) score *= 0.6;
   if (style === 0) score *= 0.3; // different sound worlds
+  if (soundClash(a, b)) score *= 0.5; // different instrument palette / groove
   if (a.artistIds.some((id) => b.artistIds.includes(id))) score = Math.min(1, score + 0.08);
   return score;
 }
@@ -299,6 +320,11 @@ export function sequence(tracks: TrackProfile[], startId?: string): TrackProfile
     const prev = ordered.at(-1);
     const prev2 = ordered.at(-2);
     let cost = prev ? 1 - compatibility(prev, candidate) : 0;
+    // Gradual sound changes: penalize jumps in palette, texture, warmth and scale.
+    if (prev) {
+      const sm = soundMatch(prev, candidate);
+      if (sm !== null) cost += 0.5 * (1 - sm);
+    }
 
     if (hasEnergy && candidate.energy !== null) {
       cost += 0.8 * Math.abs(candidate.energy - energyTarget(position, lo, hi));

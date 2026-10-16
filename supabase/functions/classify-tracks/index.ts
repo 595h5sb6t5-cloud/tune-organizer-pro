@@ -3,6 +3,8 @@
 // Secret needed:  supabase secrets set OPENAI_API_KEY=sk-...
 // Deploy:         supabase functions deploy classify-tracks
 
+import { SOUND_PROMPT, sanitizeSound } from "../_shared/sound.ts";
+
 const FAMILIES = ["regional-mexicano","urbano-latino","tropical","brasil","rock-en-espanol","latin-pop","k-pop","j-music","hip-hop","rnb-soul","electronic","metal","indie-alt","rock","folk-acoustic","jazz-blues","classical-score","pop"];
 const STYLES = ["melodic-house","afro-house","deep-house","tech-house","indie-dance","nu-disco","classic-disco","techno","trance","edm-festival","drum-and-bass","ambient-electronic","classic-soul","funk","neo-soul","modern-rnb","alt-rnb","trap","boom-bap","conscious-rap","pop-rap","mainstream-pop","indie-pop","bedroom-pop","synth-pop","indie-rock","alt-rock","classic-rock","punk","metal","folk","country","jazz","blues","reggaeton","latin-trap","corridos","banda-norteno","cumbia","salsa","bachata","latin-pop","rock-en-espanol","mpb-bossa","k-pop","j-pop","classical","soundtrack","lo-fi"];
 const corsHeaders = {
@@ -27,7 +29,7 @@ Each object has exactly these keys:
 - "mood": one of "chill","melancholic","romantic","upbeat","party","intense","dreamy","empowering"
 - "original_year": the year the song was FIRST released (not a remaster, compilation or reissue year). If you are not sure, return the album year you received.
 - "family": the song's genre family, ONLY one of: "regional-mexicano","urbano-latino","tropical","brasil","rock-en-espanol","latin-pop","k-pop","j-music","hip-hop","rnb-soul","electronic","metal","indie-alt","rock","folk-acoustic","jazz-blues","classical-score","pop"
-- "style": how the song SOUNDS (production, rhythm, scene), not just the artist's genre. A house remix of a pop song is "melodic-house" or "afro-house", not "mainstream-pop". ONLY one of: "melodic-house","afro-house","deep-house","tech-house","indie-dance","nu-disco","classic-disco","techno","trance","edm-festival","drum-and-bass","ambient-electronic","classic-soul","funk","neo-soul","modern-rnb","alt-rnb","trap","boom-bap","conscious-rap","pop-rap","mainstream-pop","indie-pop","bedroom-pop","synth-pop","indie-rock","alt-rock","classic-rock","punk","metal","folk","country","jazz","blues","reggaeton","latin-trap","corridos","banda-norteno","cumbia","salsa","bachata","latin-pop","rock-en-espanol","mpb-bossa","k-pop","j-pop","classical","soundtrack","lo-fi"`;
+- "style": how the song SOUNDS (production, rhythm, scene), not just the artist's genre. A house remix of a pop song is "melodic-house" or "afro-house", not "mainstream-pop". ONLY one of: "melodic-house","afro-house","deep-house","tech-house","indie-dance","nu-disco","classic-disco","techno","trance","edm-festival","drum-and-bass","ambient-electronic","classic-soul","funk","neo-soul","modern-rnb","alt-rnb","trap","boom-bap","conscious-rap","pop-rap","mainstream-pop","indie-pop","bedroom-pop","synth-pop","indie-rock","alt-rock","classic-rock","punk","metal","folk","country","jazz","blues","reggaeton","latin-trap","corridos","banda-norteno","cumbia","salsa","bachata","latin-pop","rock-en-espanol","mpb-bossa","k-pop","j-pop","classical","soundtrack","lo-fi"${SOUND_PROMPT}`;
 
 interface InputTrack {
   id: string;
@@ -89,7 +91,7 @@ Deno.serve(async (req) => {
     const maxYear = new Date().getFullYear();
     const results = (Array.isArray(arr) ? arr.filter((r) => r && validIds.has(r.id)) : []).map((r) => {
       const y = Number(r.original_year);
-      return { ...r, original_year: Number.isInteger(y) && y >= 1900 && y <= maxYear ? y : null, family: FAMILIES.includes(r.family) ? r.family : null, style: STYLES.includes(r.style) ? r.style : null };
+      return { ...r, original_year: Number.isInteger(y) && y >= 1900 && y <= maxYear ? y : null, family: FAMILIES.includes(r.family) ? r.family : null, style: STYLES.includes(r.style) ? r.style : null, ...sanitizeSound(r) };
     });
     return json({ results });
   } catch (err) {

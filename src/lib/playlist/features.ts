@@ -46,6 +46,12 @@ export interface TrackProfile {
   tempo: number | null; // approx. BPM
   mood: Mood | null;
   style: string | null; // specific sound (e.g. melodic-house), from AI
+  // Sound palette from AI (null/empty = unknown)
+  instruments: string[];
+  texture: number | null; // 0 organic → 1 synthetic
+  warmth: number | null; // 0 cold/dark → 1 warm/sunny
+  scale: number | null; // 0 intimate → 1 epic
+  groove: string | null; // straight | swung | broken | half-time
 }
 
 // ---------- Genre families ----------
@@ -230,6 +236,7 @@ export function buildProfiles(
       tempo: null,
       mood: null,
       style: null,
+      instruments: [], texture: null, warmth: null, scale: null, groove: null,
     };
   });
 }
