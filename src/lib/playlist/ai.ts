@@ -25,11 +25,13 @@ export interface AiTrackInfo {
   texture?: number | null; warmth?: number | null; scale?: number | null;
   groove?: string | null;
   scene?: string | null;
+  feeling?: string | null; melodic_focus?: number | null; arc?: string | null; confidence?: number | null;
   manual_sound?: ManualSound | null;
 }
 
 export interface ManualSound {
-  scene?: string | null; instruments?: string[]; texture?: number | null; warmth?: number | null; scale?: number | null;
+  scene?: string | null; instruments?: string[];
+  feeling?: string | null; melodic_focus?: number | null; arc?: string | null; texture?: number | null; warmth?: number | null; scale?: number | null;
 }
 
 const LANGS: Lang[] = ["es", "en", "pt", "fr", "it", "de", "ko", "ja", "zh", "instrumental", "other"];
@@ -73,6 +75,10 @@ function sanitize(raw: any): AiTrackInfo | null {
     scale: typeof raw.scale === "number" ? raw.scale : null,
     groove: typeof raw.groove === "string" ? raw.groove : null,
     scene: typeof raw.scene === "string" ? raw.scene : null,
+    feeling: typeof raw.feeling === "string" ? raw.feeling : null,
+    melodic_focus: typeof raw.melodic_focus === "number" ? raw.melodic_focus : null,
+    arc: typeof raw.arc === "string" ? raw.arc : null,
+    confidence: typeof raw.confidence === "number" ? raw.confidence : null,
     manual_sound: raw.manual_sound && typeof raw.manual_sound === "object" ? raw.manual_sound : null,
   };
 }
@@ -125,7 +131,7 @@ async function loadDeepAnalysis(userId: string): Promise<Map<string, Partial3>> 
 async function loadStoredClassifications(userId: string): Promise<Map<string, AiTrackInfo>> {
   const rows = await fetchAll<any>((a, b) =>
     supabase.from("track_ai_classification")
-      .select("spotify_track_id, lang, energy, valence, danceability, tempo, mood, original_year, year_checked, family, style, instruments, texture, warmth, scale, groove, scene, manual_sound")
+      .select("spotify_track_id, lang, energy, valence, danceability, tempo, mood, original_year, year_checked, family, style, instruments, texture, warmth, scale, groove, scene, feeling, melodic_focus, arc, confidence, manual_sound")
       .eq("user_id", userId).range(a, b));
   const map = new Map<string, AiTrackInfo>();
   for (const r of rows) {
@@ -175,6 +181,7 @@ export async function enrichWithAI(
     if (ai) out = {
       ...out, instruments: ai.instruments ?? [], texture: ai.texture ?? null,
       warmth: ai.warmth ?? null, scale: ai.scale ?? null, groove: ai.groove ?? null, scene: ai.scene ?? null,
+      feeling: ai.feeling ?? null, melodicFocus: ai.melodic_focus ?? null, arc: ai.arc ?? null, confidence: ai.confidence ?? null,
     };
     // Hand corrections always win over AI values.
     if (ai?.manual_sound) out = applyManualSound(out, ai.manual_sound);
@@ -191,6 +198,10 @@ export function applyManualSound(p: TrackProfile, m: ManualSound): TrackProfile 
     scene: m.scene !== undefined ? m.scene : p.scene,
     instruments: m.instruments ?? p.instruments,
     texture: m.texture ?? p.texture, warmth: m.warmth ?? p.warmth, scale: m.scale ?? p.scale,
+    feeling: m.feeling !== undefined ? m.feeling : p.feeling,
+    melodicFocus: m.melodic_focus ?? p.melodicFocus,
+    arc: m.arc !== undefined ? m.arc : p.arc,
+    confidence: 1,
   };
 }
 
@@ -208,4 +219,25 @@ export async function saveManualSound(p: TrackProfile, m: ManualSound): Promise<
     });
     if (e2) throw new Error(e2.message);
   }
+}
+
+/** Makes sure seeds have a listener-feeling description (strong model), then returns updated seeds. */
+export async function ensureSeedFeeling(seeds: TrackProfile[]): Promise<TrackProfile[]> {
+  const missing = seeds.filter((s) => !s.feeling && !s.soundEdited);
+  if (!missing.length) return seeds;
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return seeds;
+  await supabase.functions.invoke("library-enrich", { body: { feel_ids: missing.map((s) => s.id) } }).catch(() => null);
+  const { data } = await supabase.from("track_ai_classification")
+    .select("spotify_track_id, scene, instruments, texture, warmth, scale, feeling, melodic_focus, arc, confidence")
+    .eq("user_id", user.id).in("spotify_track_id", missing.map((s) => s.id));
+  return seeds.map((s) => {
+    const r: any = data?.find((x) => x.spotify_track_id === s.id);
+    if (!r) return s;
+    return {
+      ...s, scene: r.scene ?? s.scene, instruments: r.instruments ?? s.instruments,
+      texture: r.texture ?? s.texture, warmth: r.warmth ?? s.warmth, scale: r.scale ?? s.scale,
+      feeling: r.feeling, melodicFocus: r.melodic_focus, arc: r.arc, confidence: r.confidence,
+    };
+  });
 }

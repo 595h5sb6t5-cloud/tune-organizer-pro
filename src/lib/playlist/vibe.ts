@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import type { Lang, Mood, TrackProfile } from "./features";
 import { compatibility, sequence, isDance, sameOrNeighborStyle, MOOD_NEIGHBORS } from "./organize";
 import { askCurator } from "./curate";
+import { ensureSeedFeeling } from "./ai";
 
 export interface VibeSpec {
   energy_min: number; energy_max: number;
@@ -163,7 +164,7 @@ const r2 = (x: number | null) => (x === null ? null : Math.round(x * 100) / 100)
 const brief = (t: TrackProfile) => ({
   id: t.id, name: t.name, artists: t.artists, year: t.year, genres: t.genres.slice(0, 5),
   style: t.style ?? null, lang: t.lang, energy: r2(t.energy), mood: t.mood,
-  instruments: t.instruments, texture: r2(t.texture), warmth: r2(t.warmth), scale: r2(t.scale), groove: t.groove, scene: t.scene,
+  instruments: t.instruments, texture: r2(t.texture), warmth: r2(t.warmth), scale: r2(t.scale), groove: t.groove, scene: t.scene, feeling: t.feeling, melodic_focus: r2(t.melodicFocus), arc: t.arc,
 });
 /** Full seed profile for the AI. */
 export const seedProfile = (t: TrackProfile) => ({
@@ -172,7 +173,7 @@ export const seedProfile = (t: TrackProfile) => ({
 });
 
 async function scoreCandidates(userId: string, vibe: string, cands: TrackProfile[], seeds: TrackProfile[], onProgress?: (d: number, t: number) => void) {
-  const key = "v4|" + vibeKey(vibe) + (seeds.length ? ` |seed:${seeds.map((x) => x.id).join(",")}` : "");
+  const key = "v5|" + vibeKey(vibe) + (seeds.length ? ` |seed:${seeds.map((x) => x.id).join(",")}` : "");
   const scores = new Map<string, number>();
   const ids = cands.map((c) => c.id);
   for (let i = 0; i < ids.length; i += 200) {
@@ -263,6 +264,11 @@ export async function buildVibePlaylist(
   seeds: TrackProfile[] = [],
 ): Promise<VibeResult> {
   onStep("Reading your vibe");
+  if (seeds.length) {
+    const fresh = await ensureSeedFeeling(seeds);
+    seeds = fresh;
+    profiles = profiles.map((p) => fresh.find((x) => x.id === p.id) ?? p);
+  }
   const seedBody = seeds.map((t) => ({
     name: t.name, artists: t.artists, year: t.year, genres: t.genres.slice(0, 6), lang: t.lang,
     energy: t.energy, valence: t.valence, danceability: t.danceability, tempo: t.tempo, mood: t.mood,

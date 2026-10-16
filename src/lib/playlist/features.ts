@@ -53,6 +53,10 @@ export interface TrackProfile {
   scale: number | null; // 0 intimate → 1 epic
   groove: string | null; // straight | swung | broken | half-time
   scene: string | null; // electronic dance scene (e.g. keinemusik-afro-organic)
+  feeling: string | null; // listener emotion (e.g. inspirational)
+  melodicFocus: number | null; // 0 rhythm-driven → 1 melody-driven
+  arc: string | null; // steady-groove | slow-build-climax | peaks-and-drops | floating-ambient
+  confidence: number | null; // AI confidence in the sound description
   soundEdited?: boolean; // user corrected the sound by hand
 }
 
@@ -238,7 +242,7 @@ export function buildProfiles(
       tempo: null,
       mood: null,
       style: null,
-      instruments: [], texture: null, warmth: null, scale: null, groove: null, scene: null,
+      instruments: [], texture: null, warmth: null, scale: null, groove: null, scene: null, feeling: null, melodicFocus: null, arc: null, confidence: null,
     };
   });
 }

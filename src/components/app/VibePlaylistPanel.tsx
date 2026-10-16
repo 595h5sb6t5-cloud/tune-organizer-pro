@@ -108,7 +108,14 @@ export default function VibePlaylistPanel() {
       <button type="button" className="ml-1 text-xs text-muted-foreground hover:text-foreground underline"
         onClick={async () => setP((await getProfiles()).find((x) => x.id === id) ?? null)}>Edit sound</button>
     );
-    return <EditSoundDialog compact track={p} onSaved={(t) => { setP(t); updateProfile(t); }} />;
+    return (
+      <>
+        <EditSoundDialog compact track={p} onSaved={(t) => { setP(t); updateProfile(t); }} />
+        {!p.soundEdited && p.confidence !== null && p.confidence < 0.5 && (
+          <span className="basis-full text-xs text-muted-foreground">We're not sure how this song sounds. Edit sound for better results.</span>
+        )}
+      </>
+    );
   }
 
   async function create() {
@@ -188,7 +195,7 @@ export default function VibePlaylistPanel() {
         {seeds.length > 0 && (
           <div className="flex flex-wrap gap-2">
             {seeds.map((s) => (
-              <span key={s.track.id} className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-muted/40 px-3 py-1 text-sm">
+              <span key={s.track.id} className="inline-flex flex-wrap items-center gap-1 rounded-full border border-border/60 bg-muted/40 px-3 py-1 text-sm">
                 Based on: {s.track.name} · {s.track.artists.map((a) => a.name).join(", ")}
                 <SeedSound id={s.track.id} />
                 <button type="button" aria-label={`Remove ${s.track.name}`} className="ml-1 text-muted-foreground hover:text-foreground"

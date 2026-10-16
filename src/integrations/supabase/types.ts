@@ -2278,15 +2278,20 @@ export type Database = {
       }
       track_ai_classification: {
         Row: {
+          arc: string | null
+          confidence: number | null
           created_at: string
           danceability: number
           energy: number
           family: string | null
           family_checked: boolean
+          feel_checked: boolean
+          feeling: string | null
           groove: string | null
           instruments: string[] | null
           lang: string
           manual_sound: Json | null
+          melodic_focus: number | null
           mood: string
           original_year: number | null
           scale: number | null
@@ -2304,15 +2309,20 @@ export type Database = {
           year_checked: boolean
         }
         Insert: {
+          arc?: string | null
+          confidence?: number | null
           created_at?: string
           danceability: number
           energy: number
           family?: string | null
           family_checked?: boolean
+          feel_checked?: boolean
+          feeling?: string | null
           groove?: string | null
           instruments?: string[] | null
           lang: string
           manual_sound?: Json | null
+          melodic_focus?: number | null
           mood: string
           original_year?: number | null
           scale?: number | null
@@ -2330,15 +2340,20 @@ export type Database = {
           year_checked?: boolean
         }
         Update: {
+          arc?: string | null
+          confidence?: number | null
           created_at?: string
           danceability?: number
           energy?: number
           family?: string | null
           family_checked?: boolean
+          feel_checked?: boolean
+          feeling?: string | null
           groove?: string | null
           instruments?: string[] | null
           lang?: string
           manual_sound?: Json | null
+          melodic_focus?: number | null
           mood?: string
           original_year?: number | null
           scale?: number | null

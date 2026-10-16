@@ -90,7 +90,7 @@ async function likedRows(admin: any, userId: string) {
 async function existing(admin: any, table: string, col: string, ids: string[], userId?: string) {
   const known = new Map<string, any>();
   for (let i = 0; i < ids.length; i += 300) {
-    let q = admin.from(table).select(table === "artist_genres" ? "artist_id, genres" : "spotify_track_id, year_checked, family, family_checked, style_checked, sound_checked, style, scene_checked").in(col, ids.slice(i, i + 300));
+    let q = admin.from(table).select(table === "artist_genres" ? "artist_id, genres" : "spotify_track_id, year_checked, family, family_checked, style_checked, sound_checked, style, scene_checked, feel_checked").in(col, ids.slice(i, i + 300));
     if (userId) q = q.eq("user_id", userId);
     const { data } = await q;
     for (const r of data ?? []) known.set(r[col], r);
@@ -102,7 +102,7 @@ const DAILY_GENRE_CAP = 250;
 const utcDay = () => new Date().toISOString().slice(0, 10);
 const nextUtcMidnight = () => { const d = new Date(); d.setUTCHours(24, 0, 0, 0); return d.getTime(); };
 
-async function runHop(admin: any, userId: string, started: number, skipSpotify = false) {
+async function runHop(admin: any, userId: string, started: number, skipSpotify = false, forceIds: Set<string> = new Set()) {
   const liked = await likedRows(admin, userId);
   const trackIds = liked.map((r) => r.spotify_track_id);
   const cls = await existing(admin, "track_ai_classification", "spotify_track_id", trackIds, userId);
@@ -178,8 +178,8 @@ async function runHop(admin: any, userId: string, started: number, skipSpotify =
     const byStyle = new Map<string, any[]>();
     for (const t of liked) {
       const c = cls.get(t.spotify_track_id);
-      if (!c?.style || !DANCE_STYLES.includes(c.style) || c.scene_checked) continue;
-      byStyle.set(c.style, [...(byStyle.get(c.style) ?? []), t]);
+      if (!c || c.feel_checked || !(forceIds.has(t.spotify_track_id) || (c.style && DANCE_STYLES.includes(c.style)))) continue;
+      byStyle.set(c.style ?? "other", [...(byStyle.get(c.style) ?? []), t]);
     }
     const jobs: { style: string; songs: any[] }[] = [];
     for (const [style, list] of byStyle) for (let i = 0; i < list.length; i += 25) jobs.push({ style, songs: list.slice(i, i + 25) });
@@ -197,12 +197,12 @@ async function runHop(admin: any, userId: string, started: number, skipSpotify =
         for (const row of r.rows) {
           const { id, ...patch } = row;
           await admin.from("track_ai_classification").update(patch).eq("user_id", userId).eq("spotify_track_id", id);
-          const c = cls.get(id); if (c) c.scene_checked = true;
+          const c = cls.get(id); if (c) { c.scene_checked = true; c.feel_checked = true; }
         }
         // Songs the model skipped: mark checked so the pass never loops on them.
         const got = new Set(r.rows.map((x: any) => x.id));
         const missed = songs.map((x) => x.id).filter((id) => !got.has(id));
-        if (missed.length) await admin.from("track_ai_classification").update({ scene_checked: true }).eq("user_id", userId).in("spotify_track_id", missed);
+        if (missed.length) await admin.from("track_ai_classification").update({ scene_checked: true, feel_checked: true }).eq("user_id", userId).in("spotify_track_id", missed);
         scenesLeft -= job.songs.length;
         await sleep(GAP_MS);
       }
@@ -379,6 +379,26 @@ Deno.serve(async (req) => {
     }
     if (!userId) return json({ error: "Unauthorized" }, 401);
     const depth = Math.max(0, Math.min(MAX_DEPTH, Number.isFinite(Number(body.depth)) ? Number(body.depth) : MAX_DEPTH));
+    // Seeds: describe specific songs right away with the strong model (any style).
+    if (Array.isArray(body.feel_ids) && body.feel_ids.length) {
+      const ids = body.feel_ids.filter((x: unknown) => typeof x === "string").slice(0, 3);
+      const apiKey = Deno.env.get("OPENAI_API_KEY");
+      if (!apiKey) return json({ error: "OPENAI_API_KEY is not set." }, 500);
+      const { data: rows } = await admin.from("liked_songs").select("spotify_track_id, track_name, album_name, artists")
+        .eq("user_id", userId).in("spotify_track_id", ids);
+      const { data: cl } = await admin.from("track_ai_classification").select("spotify_track_id, style, feel_checked").eq("user_id", userId).in("spotify_track_id", ids);
+      const todo = (rows ?? []).filter((r: any) => !cl?.find((c: any) => c.spotify_track_id === r.spotify_track_id)?.feel_checked);
+      for (const t of todo) {
+        const style = cl?.find((c: any) => c.spotify_track_id === t.spotify_track_id)?.style ?? "unknown";
+        const r = await classifyScenes(apiKey, style, [{ id: t.spotify_track_id, line: `"${t.track_name}" by ${((t.artists ?? []) as any[]).map((a) => a?.name).join(", ")} | album: ${t.album_name ?? ""}` }]);
+        for (const row of r.rows) {
+          const { id, ...patch } = row;
+          if (!DANCE_STYLES.includes(style)) delete (patch as any).scene;
+          await admin.from("track_ai_classification").update(patch).eq("user_id", userId).eq("spotify_track_id", id);
+        }
+      }
+      return json({ done: todo.length });
+    }
     return json(await process(admin, userId, depth, false));
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : "Unknown error" }, 500);
