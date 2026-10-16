@@ -199,6 +199,10 @@ async function runHop(admin: any, userId: string, started: number, skipSpotify =
           await admin.from("track_ai_classification").update(patch).eq("user_id", userId).eq("spotify_track_id", id);
           const c = cls.get(id); if (c) c.scene_checked = true;
         }
+        // Songs the model skipped: mark checked so the pass never loops on them.
+        const got = new Set(r.rows.map((x: any) => x.id));
+        const missed = songs.map((x) => x.id).filter((id) => !got.has(id));
+        if (missed.length) await admin.from("track_ai_classification").update({ scene_checked: true }).eq("user_id", userId).in("spotify_track_id", missed);
         scenesLeft -= job.songs.length;
         await sleep(GAP_MS);
       }
