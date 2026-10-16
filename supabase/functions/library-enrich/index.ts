@@ -179,7 +179,7 @@ async function runHop(admin: any, userId: string, started: number, skipSpotify =
     const byStyle = new Map<string, any[]>();
     for (const t of liked) {
       const c = cls.get(t.spotify_track_id);
-      if (!c || c.feel_checked || !(forceIds.has(t.spotify_track_id) || (c.style && DANCE_STYLES.includes(c.style)))) continue;
+      if (!c || c.feel_checked || !(forceIds.has(t.spotify_track_id) || (c.style && (DANCE_STYLES.includes(c.style) || FEEL_EXTRA_STYLES.includes(c.style))))) continue;
       byStyle.set(c.style ?? "other", [...(byStyle.get(c.style) ?? []), t]);
     }
     const jobs: { style: string; songs: any[] }[] = [];
