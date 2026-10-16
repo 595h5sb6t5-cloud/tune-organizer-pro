@@ -5,7 +5,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Slider } from "@/components/ui/slider";
 import type { TrackProfile } from "@/lib/playlist/features";
 import { applyManualSound, saveManualSound } from "@/lib/playlist/ai";
-import { SCENES } from "@/lib/playlist/organize";
+import { SCENES, FEELINGS, ARCS } from "@/lib/playlist/organize";
 
 const INSTRUMENTS = ["analog-synth-pads", "arpeggiated-synths", "epic-synth-leads", "acid-synth", "sub-bass", "electric-bass", "upright-bass", "808", "four-on-the-floor-kick", "broken-beat-drums", "live-drums", "organic-percussion", "afro-percussion", "marimba-kalimba", "acoustic-guitar", "electric-guitar", "piano", "rhodes-keys", "organ", "saxophone", "trumpet-brass", "strings", "flute-ethnic-winds", "vocal-chops", "lead-vocals", "choir"];
 const label = (s: string) => s.replace(/-/g, " ");
@@ -28,6 +28,9 @@ export default function EditSoundDialog({ track, onSaved, compact }: { track: Tr
   const [texture, setTexture] = useState(track.texture ?? 0.5);
   const [warmth, setWarmth] = useState(track.warmth ?? 0.5);
   const [scale, setScale] = useState(track.scale ?? 0.5);
+  const [feeling, setFeeling] = useState<string>(track.feeling ?? "");
+  const [melodic, setMelodic] = useState(track.melodicFocus ?? 0.5);
+  const [arc, setArc] = useState<string>(track.arc ?? "");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -35,7 +38,7 @@ export default function EditSoundDialog({ track, onSaved, compact }: { track: Tr
 
   async function save() {
     setBusy(true); setErr(null);
-    const m = { scene: scene || null, instruments: inst, texture, warmth, scale };
+    const m = { scene: scene || null, instruments: inst, texture, warmth, scale, feeling: feeling || null, melodic_focus: melodic, arc: arc || null };
     try {
       await saveManualSound(track, m);
       onSaved(applyManualSound(track, m));
@@ -48,7 +51,7 @@ export default function EditSoundDialog({ track, onSaved, compact }: { track: Tr
   return (
     <Dialog open={open} onOpenChange={(o) => {
       setOpen(o);
-      if (o) { setScene(track.scene ?? ""); setInst(track.instruments); setTexture(track.texture ?? 0.5); setWarmth(track.warmth ?? 0.5); setScale(track.scale ?? 0.5); }
+      if (o) { setScene(track.scene ?? ""); setInst(track.instruments); setTexture(track.texture ?? 0.5); setWarmth(track.warmth ?? 0.5); setScale(track.scale ?? 0.5); setFeeling(track.feeling ?? ""); setMelodic(track.melodicFocus ?? 0.5); setArc(track.arc ?? ""); }
     }}>
       <DialogTrigger asChild>
         {compact
@@ -81,6 +84,21 @@ export default function EditSoundDialog({ track, onSaved, compact }: { track: Tr
           </div>
           <Dial name="Texture" low="Organic" high="Synthetic" value={texture} onChange={setTexture} />
           <Dial name="Warmth" low="Cold / dark" high="Warm / sunny" value={warmth} onChange={setWarmth} />
+          <label className="block space-y-1 text-sm">
+            <span className="font-medium">Feeling</span>
+            <select value={feeling} onChange={(e) => setFeeling(e.target.value)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm">
+              <option value="">Not set</option>
+              {FEELINGS.map((s) => <option key={s} value={s}>{label(s)}</option>)}
+            </select>
+          </label>
+          <Dial name="Melodic focus" low="Rhythm / groove" high="Melody / emotion" value={melodic} onChange={setMelodic} />
+          <label className="block space-y-1 text-sm">
+            <span className="font-medium">Arc</span>
+            <select value={arc} onChange={(e) => setArc(e.target.value)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm">
+              <option value="">Not set</option>
+              {ARCS.map((s) => <option key={s} value={s}>{label(s)}</option>)}
+            </select>
+          </label>
           <Dial name="Scale" low="Intimate" high="Epic" value={scale} onChange={setScale} />
           {err && <p role="alert" className="text-sm text-destructive">{err}</p>}
         </div>

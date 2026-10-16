@@ -2,6 +2,8 @@
 export const INSTRUMENTS = ["analog-synth-pads","arpeggiated-synths","epic-synth-leads","acid-synth","sub-bass","electric-bass","upright-bass","808","four-on-the-floor-kick","broken-beat-drums","live-drums","organic-percussion","afro-percussion","marimba-kalimba","acoustic-guitar","electric-guitar","piano","rhodes-keys","organ","saxophone","trumpet-brass","strings","flute-ethnic-winds","vocal-chops","lead-vocals","choir"];
 export const SCENES = ["keinemusik-afro-organic","afterlife-melodic-techno","anjunadeep-emotional","innervisions-deep","diynamic-melodic","organic-downtempo","afro-house-south-african","tech-house-club","minimal-deep-tech","jazzy-soulful-house","nu-disco-french-touch","indie-dance-vocal","progressive-trance","big-room-festival"];
 export const DANCE_STYLES = ["melodic-house","afro-house","deep-house","tech-house","indie-dance","nu-disco","techno","trance","drum-and-bass","edm-festival"];
+export const FEELINGS = ["inspirational","euphoric","nostalgic","melancholic","introspective","peaceful","sensual","groovy-carefree","hypnotic","dark-tense"];
+export const ARCS = ["steady-groove","slow-build-climax","peaks-and-drops","floating-ambient"];
 export const GROOVES = ["straight","swung","broken","half-time"];
 
 export const SOUND_PROMPT = `

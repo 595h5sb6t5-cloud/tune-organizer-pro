@@ -154,6 +154,32 @@ export function sceneMatch(a: TrackProfile, b: TrackProfile): number | null {
   return SCENE_NEIGHBORS.get(a.scene)?.has(b.scene) ? 0.5 : 0;
 }
 
+export const FEELINGS = ["inspirational", "euphoric", "nostalgic", "melancholic", "introspective", "peaceful", "sensual", "groovy-carefree", "hypnotic", "dark-tense"];
+export const ARCS = ["steady-groove", "slow-build-climax", "peaks-and-drops", "floating-ambient"];
+const FEELING_PAIRS: [string, string][] = [
+  ["inspirational", "euphoric"], ["nostalgic", "melancholic"], ["melancholic", "introspective"],
+  ["nostalgic", "introspective"], ["peaceful", "introspective"], ["groovy-carefree", "sensual"], ["hypnotic", "dark-tense"],
+];
+const feelingNeighbors = (a: string, b: string) => FEELING_PAIRS.some(([x, y]) => (x === a && y === b) || (x === b && y === a));
+
+/** Listener feeling 0–1: 50% feeling, 30% melodic focus (tol 0.3), 20% same arc. Null if unknown. */
+export function feelMatch(a: TrackProfile, b: TrackProfile): number | null {
+  const parts: [number | null, number][] = [
+    [a.feeling && b.feeling ? (a.feeling === b.feeling ? 1 : feelingNeighbors(a.feeling, b.feeling) ? 0.5 : 0) : null, 0.5],
+    [closeness(a.melodicFocus, b.melodicFocus, 0.3), 0.3],
+    [a.arc && b.arc ? (a.arc === b.arc ? 1 : 0) : null, 0.2],
+  ];
+  let sum = 0, w = 0;
+  for (const [v, k] of parts) if (v !== null) { sum += v * k; w += k; }
+  return w ? sum / w : null;
+}
+
+/** The listener would stop feeling the same: melodic focus gap > 0.35 or unrelated feelings. */
+export function feelClash(a: TrackProfile, b: TrackProfile): boolean {
+  if (a.melodicFocus !== null && b.melodicFocus !== null && Math.abs(a.melodicFocus - b.melodicFocus) > 0.35) return true;
+  return !!a.feeling && !!b.feeling && a.feeling !== b.feeling && !feelingNeighbors(a.feeling, b.feeling);
+}
+
 /** Sound palette match 0–1 (null if unknown): 50% instruments, 50% texture/warmth/scale. */
 export function soundMatch(a: TrackProfile, b: TrackProfile): number | null {
   const inst = a.instruments.length && b.instruments.length ? jaccard(a.instruments, b.instruments) : null;
@@ -182,6 +208,7 @@ export function compatibility(a: TrackProfile, b: TrackProfile): number {
     [style, 0.35],
     [soundMatch(a, b), 0.35],
     [scene, 0.3],
+    [feelMatch(a, b), 0.35],
     [jaccard(a.families, b.families) * 0.75 + jaccard(a.genres, b.genres) * 0.25, 0.32],
     [closeness(a.energy, b.energy, 0.45), 0.12],
     [a.mood && b.mood ? (a.mood === b.mood ? 1 : MOOD_NEIGHBORS[a.mood].includes(b.mood) ? 0.6 : 0) : null, 0.08],
@@ -205,6 +232,7 @@ export function compatibility(a: TrackProfile, b: TrackProfile): number {
   if (a.energy !== null && b.energy !== null && Math.abs(a.energy - b.energy) > 0.55) score *= 0.5;
   if (a.year && b.year && Math.abs(a.year - b.year) > 25) score *= 0.6;
   if (style === 0) score *= 0.3; // different sound worlds
+  if (feelClash(a, b)) score *= 0.3; // listener would feel something else
   if (scene === 0) score *= 0.4; // different, non-neighbor scenes
   if (soundClash(a, b)) score *= 0.5; // different instrument palette / groove
   if (a.artistIds.some((id) => b.artistIds.includes(id))) score = Math.min(1, score + 0.08);

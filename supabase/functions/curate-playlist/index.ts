@@ -13,6 +13,7 @@ EJEMPLO BUENO (el usuario la armó a mano): Let's Straighten It Out – O.V. Wri
 EJEMPLO MALO: una playlist de house melódico/afro house (WhoMadeWho, Mochakk, RÜFÜS DU SOL, ANOTR, Adriatique) que incluye 'Sunny' de Marvin Gaye, 'Down In Atlanta' de Pharrell y Travis Scott y 'Who You Foolin' de Gunna. Esas tres se deben quitar aunque tengan la misma energía, porque son de otro mundo sonoro.
 La instrumentación es lo que más define si una canción encaja. Dos canciones del mismo estilo pero con paletas de instrumentos distintas NO encajan. Ejemplo: con 'Forms Of Love' (house orgánico, cálido, percusión orgánica, groove relajado) NO encajan 'Dune – Moonwalk' (sintetizadores épicos y oscuros, estilo Afterlife) ni 'calvera – fyodor, Apéro' (instrumentación de jazz), aunque tengan energía y mood parecidos. Quita cualquier canción cuya paleta de instrumentos no se parezca a la de la semilla.
 Canciones de escenas distintas no encajan aunque compartan estilo, salvo que sean escenas vecinas.
+La pregunta clave es: ¿el oyente seguiría sintiendo lo mismo? Si la semilla te hace sentir inspirado por la melodía y los instrumentos, una canción de groove repetitivo rompe ese sentimiento aunque sea de la misma escena; quítala. Ejemplo: 'Forms Of Love' (piano tranquilo que crece hasta un clímax melódico e inspiracional) no encaja con house de groove percusivo.
 Quita todo lo que no pase la prueba. Es mejor una playlist de 15 canciones perfecta que una de 40 con 3 skips. El nombre debe ser corto, evocador y describir el mundo sonoro (ej. 'Velvet Soul Sundays', 'Desert Sunrise House'), sin usar 'Mix'.
 
 Responde SOLO JSON con esta forma exacta:
@@ -41,10 +42,10 @@ Deno.serve(async (req) => {
     const vibe = typeof body.vibe === "string" ? body.vibe.slice(0, 500) : "";
     const nameOnly = body.nameOnly === true;
     const seedStr = (s: any) => typeof s === "string" ? s.slice(0, 200)
-      : `"${String(s?.name ?? "").slice(0, 200)}" – ${(Array.isArray(s?.artists) ? s.artists : []).slice(0, 4).join(", ")} | año original: ${s?.year ?? "?"} | style: ${s?.style ?? "?"} | idioma: ${s?.lang ?? "?"} | families: ${(s?.families ?? []).join(", ") || "?"} | genres: ${(s?.genres ?? []).slice(0, 5).join(", ") || "?"} | energy: ${s?.energy ?? "?"} | valence: ${s?.valence ?? "?"} | tempo: ${s?.tempo ?? "?"} | mood: ${s?.mood ?? "?"} | instruments: ${(s?.instruments ?? []).join(", ") || "?"} | texture: ${s?.texture ?? "?"} | warmth: ${s?.warmth ?? "?"} | scale: ${s?.scale ?? "?"} | groove: ${s?.groove ?? "?"} | scene: ${s?.scene ?? "?"}`;
+      : `"${String(s?.name ?? "").slice(0, 200)}" – ${(Array.isArray(s?.artists) ? s.artists : []).slice(0, 4).join(", ")} | año original: ${s?.year ?? "?"} | style: ${s?.style ?? "?"} | idioma: ${s?.lang ?? "?"} | families: ${(s?.families ?? []).join(", ") || "?"} | genres: ${(s?.genres ?? []).slice(0, 5).join(", ") || "?"} | energy: ${s?.energy ?? "?"} | valence: ${s?.valence ?? "?"} | tempo: ${s?.tempo ?? "?"} | mood: ${s?.mood ?? "?"} | instruments: ${(s?.instruments ?? []).join(", ") || "?"} | texture: ${s?.texture ?? "?"} | warmth: ${s?.warmth ?? "?"} | scale: ${s?.scale ?? "?"} | groove: ${s?.groove ?? "?"} | scene: ${s?.scene ?? "?"} | feeling: ${s?.feeling ?? "?"} | melodic_focus: ${s?.melodic_focus ?? "?"} | arc: ${s?.arc ?? "?"}`;
     const seeds = Array.isArray(body.seeds) ? body.seeds.slice(0, 3).map(seedStr) : [];
 
-    const keySrc = JSON.stringify({ v: 4, nameOnly, ids: tracks.map((t: any) => t.id).sort(), vibe, seeds });
+    const keySrc = JSON.stringify({ v: 5, nameOnly, ids: tracks.map((t: any) => t.id).sort(), vibe, seeds });
     const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(keySrc));
     const key = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
     const { data: cached } = await sb.from("curator_cache").select("result").eq("user_id", user.id).eq("cache_key", key).maybeSingle();
@@ -54,7 +55,7 @@ Deno.serve(async (req) => {
     if (!apiKey) return json({ error: "OPENAI_API_KEY is not set." }, 500);
 
     const list = tracks.map((t: any, i: number) =>
-      `${i + 1}. id=${t.id} | "${String(t.name ?? "").slice(0, 200)}" – ${(t.artists ?? []).join(", ")} | año original: ${t.year ?? "?"} | style: ${t.style ?? "?"} | idioma: ${t.lang ?? "?"} | energy: ${t.energy ?? "?"} | mood: ${t.mood ?? "?"} | instruments: ${(t.instruments ?? []).join(", ") || "?"} | texture: ${t.texture ?? "?"} | warmth: ${t.warmth ?? "?"} | scale: ${t.scale ?? "?"} | groove: ${t.groove ?? "?"} | scene: ${t.scene ?? "?"}`).join("\n");
+      `${i + 1}. id=${t.id} | "${String(t.name ?? "").slice(0, 200)}" – ${(t.artists ?? []).join(", ")} | año original: ${t.year ?? "?"} | style: ${t.style ?? "?"} | idioma: ${t.lang ?? "?"} | energy: ${t.energy ?? "?"} | mood: ${t.mood ?? "?"} | instruments: ${(t.instruments ?? []).join(", ") || "?"} | texture: ${t.texture ?? "?"} | warmth: ${t.warmth ?? "?"} | scale: ${t.scale ?? "?"} | groove: ${t.groove ?? "?"} | scene: ${t.scene ?? "?"} | feeling: ${t.feeling ?? "?"} | melodic_focus: ${t.melodic_focus ?? "?"} | arc: ${t.arc ?? "?"}`).join("\n");
     const context = vibe || seeds.length
       ? `Vibe pedido por el usuario: "${vibe}"${seeds.length ? `\nCanciones semilla (deben quedarse, todo debe encajar con ellas):\n${seeds.map((x: string) => `- ${x}`).join("\n")}` : ""}\n\n`
       : "";
