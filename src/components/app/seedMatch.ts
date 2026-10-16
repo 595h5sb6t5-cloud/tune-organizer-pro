@@ -65,6 +65,13 @@ export function findSeedMatches(text: string, liked: SpotifyTrack[], limit = 5):
     .slice(0, limit);
 }
 
+/** Full title typed, and it's the only Liked Song with that title → safe to auto-pick. */
+export function isUniqueFullTitle(m: SeedMatch, liked: SpotifyTrack[]): boolean {
+  const title = cleanTitle(m.track.name);
+  if (m.span !== title) return false;
+  return liked.filter((t) => cleanTitle(t.name) === title).length === 1;
+}
+
 /** Raw lowercase text without accents, keeping symbols ("&me", "blond:ish"). */
 const rawNorm = (s: string) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim();
 

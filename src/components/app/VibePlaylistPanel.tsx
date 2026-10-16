@@ -13,7 +13,7 @@ import { sequence } from "@/lib/playlist/organize";
 import { buildVibePlaylist } from "@/lib/playlist/vibe";
 import { loadLikedTracks, loadArtistGenres } from "@/components/app/OrganizeLibraryPanel";
 import type { SpotifyTrack } from "@/lib/playlist/features";
-import { findSeedMatches, leftoverKeywords, type SeedMatch } from "@/components/app/seedMatch";
+import { findSeedMatches, isUniqueFullTitle, leftoverKeywords, type SeedMatch } from "@/components/app/seedMatch";
 
 const LANG_LABEL: Record<string, string> = {
   es: "Español", en: "English", pt: "Português", fr: "Français", it: "Italiano", de: "Deutsch",
@@ -50,11 +50,16 @@ export default function VibePlaylistPanel() {
 
   // Auto-pick a single clear match (title + artist).
   useEffect(() => {
-    const clear = matches.filter((m) => m.artistHit.length);
+    let clear = matches.filter((m) => m.artistHit.length);
+    if (!clear.length && liked) {
+      // Several full titles in the text ("forms of love, late night drive"): the longest title wins; ties pick none.
+      const full = matches.filter((m) => isUniqueFullTitle(m, liked)).sort((a, b) => b.span.split(" ").length - a.span.split(" ").length);
+      clear = full.length > 1 && full[0].span.split(" ").length === full[1].span.split(" ").length ? [] : full.slice(0, 1);
+    }
     if (clear.length === 1 && !dismissed.has(clear[0].track.id) && seeds.length < 3) {
       setSeeds((s) => [...s, clear[0]]);
     }
-  }, [matches, dismissed, seeds.length]);
+  }, [matches, dismissed, seeds.length, liked]);
 
   const keywords = leftoverKeywords(vibe, seeds, liked ?? []);
   const canCreate = !!vibe.trim() || seeds.length > 0;

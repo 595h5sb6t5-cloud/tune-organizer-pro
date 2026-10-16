@@ -22,14 +22,19 @@ export interface VibeResult {
   tracks: TrackProfile[];
   candidates: number;
   approved: number;
+  eights?: number;
+  sevens?: number;
 }
 
 const E_TOL = 0.08;
 const MIN_SEED_COMPAT = 0.6;
 const MAX_CANDIDATES = 120;
 const MIN_SCORE = 8;
+const FILL_SCORE = 7;
+const FILL_TARGET = 20;
 const MIN_COHESION = 0.55;
-const MAX_TRACKS = 40;
+const MIN_SEED_COHESION = 0.5;
+const MAX_TRACKS = 30;
 const SELECT_BATCH = 40;
 
 const mid = (a: number, b: number) => (a + b) / 2;
@@ -154,13 +159,19 @@ export function filterCandidates(profiles: TrackProfile[], spec: VibeSpec, langC
 const vibeKey = (v: string) => v.toLowerCase().replace(/\s+/g, " ").trim();
 
 /** Step 3: AI review with per-(vibe, song) cache. */
+const r2 = (x: number | null) => (x === null ? null : Math.round(x * 100) / 100);
 const brief = (t: TrackProfile) => ({
   id: t.id, name: t.name, artists: t.artists, year: t.year, genres: t.genres.slice(0, 5),
-  energy: t.energy !== null ? Math.round(t.energy * 100) / 100 : null, mood: t.mood,
+  style: t.style ?? null, lang: t.lang, energy: r2(t.energy), mood: t.mood,
+});
+/** Full seed profile for the AI. */
+export const seedProfile = (t: TrackProfile) => ({
+  ...brief(t), families: t.families, valence: r2(t.valence), danceability: r2(t.danceability),
+  tempo: t.tempo !== null ? Math.round(t.tempo) : null,
 });
 
 async function scoreCandidates(userId: string, vibe: string, cands: TrackProfile[], seeds: TrackProfile[], onProgress?: (d: number, t: number) => void) {
-  const key = vibeKey(vibe) + (seeds.length ? ` |seed:${seeds.map((x) => x.id).join(",")}` : "");
+  const key = "v2|" + vibeKey(vibe) + (seeds.length ? ` |seed:${seeds.map((x) => x.id).join(",")}` : "");
   const scores = new Map<string, number>();
   const ids = cands.map((c) => c.id);
   for (let i = 0; i < ids.length; i += 200) {
@@ -177,7 +188,7 @@ async function scoreCandidates(userId: string, vibe: string, cands: TrackProfile
       body: {
         vibe,
         tracks: batch.map(brief),
-        seeds: seeds.map(brief),
+        seeds: seeds.map(seedProfile),
       },
     });
     if (error || data?.error) throw new Error(data?.error ?? error?.message ?? "The AI review failed.");
@@ -193,25 +204,45 @@ async function scoreCandidates(userId: string, vibe: string, cands: TrackProfile
   return scores;
 }
 
-/** Step 4: drop songs that don't cohere with the rest, cap, sequence. */
-function cohere(tracks: TrackProfile[], scores: Map<string, number>, seeds: TrackProfile[] = []): TrackProfile[] {
-  let pool = [...tracks];
-  // Iteratively remove the weakest song until everyone averages >= MIN_COHESION.
-  while (pool.length > 1) {
-    const avgs = pool.map((t) => {
-      let s = 0;
-      for (const o of pool) if (o !== t) s += compatibility(t, o);
-      return s / (pool.length - 1);
-    });
-    let worst = 0;
-    for (let i = 1; i < avgs.length; i++) if (avgs[i] < avgs[worst]) worst = i;
-    if (avgs[worst] >= MIN_COHESION) break;
-    pool.splice(worst, 1);
+const seedFitOf = (t: TrackProfile, seeds: TrackProfile[]) =>
+  seeds.reduce((a, x) => a + compatibility(t, x), 0) / seeds.length;
+
+/** Step 4: pick 8+ (and 7s up to 20 when short), check coherence, cap, sequence. */
+export function selectVibeTracks(cands: TrackProfile[], scores: Map<string, number>, seeds: TrackProfile[] = []) {
+  const room = MAX_TRACKS - seeds.length;
+  const sc = (t: TrackProfile) => scores.get(t.id) ?? 0;
+  // Coherence: with seeds, against the seed only; otherwise against the group.
+  const coheres = (t: TrackProfile) => !seeds.length || seedFitOf(t, seeds) >= MIN_SEED_COHESION;
+  const fit = (t: TrackProfile) => (seeds.length ? seedFitOf(t, seeds) : 0);
+  const top = cands.filter((t) => sc(t) >= MIN_SCORE && coheres(t))
+    .sort((a, b) => sc(b) - sc(a) || fit(b) - fit(a));
+  let picked = top.slice(0, room);
+  let sevens: TrackProfile[] = [];
+  const target = Math.min(FILL_TARGET, MAX_TRACKS) - seeds.length;
+  if (picked.length < target) {
+    const base = picked;
+    const rank = (t: TrackProfile) => seeds.length ? seedFitOf(t, seeds)
+      : base.length ? base.reduce((a, o) => a + compatibility(t, o), 0) / base.length : 0;
+    sevens = cands.filter((t) => sc(t) >= FILL_SCORE && sc(t) < MIN_SCORE && coheres(t))
+      .map((t) => ({ t, c: rank(t) })).sort((a, b) => b.c - a.c)
+      .slice(0, target - picked.length).map((x) => x.t);
+    picked = [...picked, ...sevens];
   }
-  pool = pool.sort((a, b) => (scores.get(b.id) ?? 0) - (scores.get(a.id) ?? 0)).slice(0, MAX_TRACKS - seeds.length);
-  if (!seeds.length) return sequence(pool);
-  // First seed opens; other seeds are placed wherever they flow best.
-  return sequence([...seeds, ...pool], seeds[0].id);
+  if (!seeds.length) {
+    // No seed: keep the old group cohesion check.
+    while (picked.length > 1) {
+      const avgs = picked.map((t) => picked.reduce((a, o) => a + (o === t ? 0 : compatibility(t, o)), 0) / (picked.length - 1));
+      let worst = 0;
+      for (let i = 1; i < avgs.length; i++) if (avgs[i] < avgs[worst]) worst = i;
+      if (avgs[worst] >= MIN_COHESION) break;
+      picked.splice(worst, 1);
+    }
+  }
+  const keep = new Set(picked.map((t) => t.id));
+  const eights = top.filter((t) => keep.has(t.id)).length;
+  const sevenCount = sevens.filter((t) => keep.has(t.id)).length;
+  const tracks = seeds.length ? sequence([...seeds, ...picked], seeds[0].id) : sequence(picked);
+  return { tracks, eights, sevens: sevenCount };
 }
 
 export async function buildVibePlaylist(
@@ -239,16 +270,12 @@ export async function buildVibePlaylist(
   const approved = candidates.filter((c) => (scores.get(c.id) ?? 0) >= MIN_SCORE);
 
   onStep("Ordering the playlist");
-  let tracks = cohere(approved, scores, seeds);
+  const sel = selectVibeTracks(candidates, scores, seeds);
+  const tracks = sel.tracks;
   if (tracks.length > seeds.length) {
-    onStep("Final listen by the curator");
-    const verdict = await askCurator(tracks, { vibe, seeds });
-    if (verdict?.remove.length) {
-      const seedIds = new Set(seeds.map((t) => t.id));
-      const drop = new Set(verdict.remove.map((r) => r.id).filter((id) => !seedIds.has(id)));
-      const left = tracks.filter((t) => !drop.has(t.id));
-      tracks = seeds.length ? sequence(left, seeds[0].id) : sequence(left);
-    }
+    onStep("Naming the playlist");
+    const verdict = await askCurator(tracks, { vibe, seeds, nameOnly: true });
+    if (verdict?.name) spec.name = verdict.name;
   }
-  return { spec, lang, tracks, candidates: candidates.length, approved: approved.length };
+  return { spec, lang, tracks, candidates: candidates.length, approved: approved.length, eights: sel.eights, sevens: sel.sevens };
 }

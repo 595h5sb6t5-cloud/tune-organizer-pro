@@ -16,6 +16,9 @@ Quita todo lo que no pase la prueba. Es mejor una playlist de 15 canciones perfe
 Responde SOLO JSON con esta forma exacta:
 {"remove": [{"id": "<id>", "reason": "<razón corta>"}], "name": "<nombre en inglés>"}`;
 
+const NAME_SYSTEM = `Eres un curador musical. Las canciones ya fueron elegidas; NO quites ninguna. Solo ponle a la playlist un nombre corto y evocador en inglés que describa su mundo sonoro (ej. 'Velvet Soul Sundays', 'Desert Sunrise House'), sin 'Mix' y sin títulos de canciones.
+Responde SOLO JSON: {"remove": [], "name": "<nombre>"}`;
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   const json = (b: unknown, status = 200) =>
@@ -34,9 +37,12 @@ Deno.serve(async (req) => {
       return json({ error: "Send between 1 and 120 tracks." }, 400);
     }
     const vibe = typeof body.vibe === "string" ? body.vibe.slice(0, 500) : "";
-    const seeds = Array.isArray(body.seeds) ? body.seeds.slice(0, 3).map((s: any) => String(s).slice(0, 200)) : [];
+    const nameOnly = body.nameOnly === true;
+    const seedStr = (s: any) => typeof s === "string" ? s.slice(0, 200)
+      : `"${String(s?.name ?? "").slice(0, 200)}" – ${(Array.isArray(s?.artists) ? s.artists : []).slice(0, 4).join(", ")} | año original: ${s?.year ?? "?"} | style: ${s?.style ?? "?"} | idioma: ${s?.lang ?? "?"} | families: ${(s?.families ?? []).join(", ") || "?"} | genres: ${(s?.genres ?? []).slice(0, 5).join(", ") || "?"} | energy: ${s?.energy ?? "?"} | valence: ${s?.valence ?? "?"} | tempo: ${s?.tempo ?? "?"} | mood: ${s?.mood ?? "?"}`;
+    const seeds = Array.isArray(body.seeds) ? body.seeds.slice(0, 3).map(seedStr) : [];
 
-    const keySrc = JSON.stringify({ v: 1, ids: tracks.map((t: any) => t.id).sort(), vibe, seeds });
+    const keySrc = JSON.stringify({ v: 2, nameOnly, ids: tracks.map((t: any) => t.id).sort(), vibe, seeds });
     const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(keySrc));
     const key = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
     const { data: cached } = await sb.from("curator_cache").select("result").eq("user_id", user.id).eq("cache_key", key).maybeSingle();
@@ -46,9 +52,9 @@ Deno.serve(async (req) => {
     if (!apiKey) return json({ error: "OPENAI_API_KEY is not set." }, 500);
 
     const list = tracks.map((t: any, i: number) =>
-      `${i + 1}. id=${t.id} | "${String(t.name ?? "").slice(0, 200)}" – ${(t.artists ?? []).join(", ")} | año: ${t.year ?? "?"} | style: ${t.style ?? "?"} | energy: ${t.energy ?? "?"} | mood: ${t.mood ?? "?"}`).join("\n");
+      `${i + 1}. id=${t.id} | "${String(t.name ?? "").slice(0, 200)}" – ${(t.artists ?? []).join(", ")} | año original: ${t.year ?? "?"} | style: ${t.style ?? "?"} | idioma: ${t.lang ?? "?"} | energy: ${t.energy ?? "?"} | mood: ${t.mood ?? "?"}`).join("\n");
     const context = vibe || seeds.length
-      ? `Vibe pedido por el usuario: "${vibe}"${seeds.length ? `\nCanciones semilla (deben quedarse, todo debe encajar con ellas): ${seeds.join("; ")}` : ""}\n\n`
+      ? `Vibe pedido por el usuario: "${vibe}"${seeds.length ? `\nCanciones semilla (deben quedarse, todo debe encajar con ellas):\n${seeds.map((x: string) => `- ${x}`).join("\n")}` : ""}\n\n`
       : "";
 
     const res = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -57,14 +63,14 @@ Deno.serve(async (req) => {
       body: JSON.stringify({
         model: "gpt-4.1-mini",
         response_format: { type: "json_object" },
-        messages: [{ role: "system", content: SYSTEM }, { role: "user", content: `${context}Playlist:\n${list}` }],
+        messages: [{ role: "system", content: nameOnly ? NAME_SYSTEM : SYSTEM }, { role: "user", content: `${context}Playlist:\n${list}` }],
       }),
     });
     if (!res.ok) return json({ error: `AI request failed (${res.status})` }, res.status === 429 ? 429 : 502);
     const data = await res.json();
     const parsed = JSON.parse(String(data.choices?.[0]?.message?.content ?? "{}"));
     const valid = new Set(tracks.map((t: any) => t.id));
-    const remove = (Array.isArray(parsed?.remove) ? parsed.remove : [])
+    const remove = nameOnly ? [] : (Array.isArray(parsed?.remove) ? parsed.remove : [])
       .filter((r: any) => r && valid.has(r.id))
       .map((r: any) => ({ id: r.id, reason: String(r.reason ?? "").slice(0, 160) }));
     const name = typeof parsed?.name === "string" ? parsed.name.replace(/\bmix\b/gi, "").trim().slice(0, 80) : "";
