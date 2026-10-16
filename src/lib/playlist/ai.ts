@@ -152,7 +152,9 @@ export async function enrichWithAI(
     const ai = stored.get(p.id);
     let out = p;
     if (ai) out = apply(out, ai, true);
-    if (d) out = apply(out, d, false); // Deep Analysis wins where present
+    // Deep Analysis wins where present, except language: the newer classifier
+    // only says "instrumental" when there are no vocals at all.
+    if (d) out = apply(out, ai ? { ...d, lang: undefined } : d, false);
     if (ai?.style) out = { ...out, style: ai.style };
     if (ai?.original_year) out = { ...out, year: ai.original_year };
     // Artists with no stored genres: use the AI's genre family for the song.
