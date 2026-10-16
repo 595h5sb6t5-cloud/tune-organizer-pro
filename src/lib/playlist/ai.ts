@@ -24,6 +24,12 @@ export interface AiTrackInfo {
   instruments?: string[] | null;
   texture?: number | null; warmth?: number | null; scale?: number | null;
   groove?: string | null;
+  scene?: string | null;
+  manual_sound?: ManualSound | null;
+}
+
+export interface ManualSound {
+  scene?: string | null; instruments?: string[]; texture?: number | null; warmth?: number | null; scale?: number | null;
 }
 
 const LANGS: Lang[] = ["es", "en", "pt", "fr", "it", "de", "ko", "ja", "zh", "instrumental", "other"];
@@ -66,6 +72,8 @@ function sanitize(raw: any): AiTrackInfo | null {
     warmth: typeof raw.warmth === "number" ? raw.warmth : null,
     scale: typeof raw.scale === "number" ? raw.scale : null,
     groove: typeof raw.groove === "string" ? raw.groove : null,
+    scene: typeof raw.scene === "string" ? raw.scene : null,
+    manual_sound: raw.manual_sound && typeof raw.manual_sound === "object" ? raw.manual_sound : null,
   };
 }
 
@@ -117,7 +125,7 @@ async function loadDeepAnalysis(userId: string): Promise<Map<string, Partial3>> 
 async function loadStoredClassifications(userId: string): Promise<Map<string, AiTrackInfo>> {
   const rows = await fetchAll<any>((a, b) =>
     supabase.from("track_ai_classification")
-      .select("spotify_track_id, lang, energy, valence, danceability, tempo, mood, original_year, year_checked, family, style, instruments, texture, warmth, scale, groove")
+      .select("spotify_track_id, lang, energy, valence, danceability, tempo, mood, original_year, year_checked, family, style, instruments, texture, warmth, scale, groove, scene, manual_sound")
       .eq("user_id", userId).range(a, b));
   const map = new Map<string, AiTrackInfo>();
   for (const r of rows) {
@@ -166,11 +174,38 @@ export async function enrichWithAI(
     if (ai?.style) out = { ...out, style: ai.style };
     if (ai) out = {
       ...out, instruments: ai.instruments ?? [], texture: ai.texture ?? null,
-      warmth: ai.warmth ?? null, scale: ai.scale ?? null, groove: ai.groove ?? null,
+      warmth: ai.warmth ?? null, scale: ai.scale ?? null, groove: ai.groove ?? null, scene: ai.scene ?? null,
     };
+    // Hand corrections always win over AI values.
+    if (ai?.manual_sound) out = applyManualSound(out, ai.manual_sound);
     if (ai?.original_year) out = { ...out, year: ai.original_year };
     // Artists with no stored genres: use the AI's genre family for the song.
     if (!out.families.length && ai?.family) out = { ...out, families: [ai.family] };
     return out;
   });
+}
+
+export function applyManualSound(p: TrackProfile, m: ManualSound): TrackProfile {
+  return {
+    ...p, soundEdited: true,
+    scene: m.scene !== undefined ? m.scene : p.scene,
+    instruments: m.instruments ?? p.instruments,
+    texture: m.texture ?? p.texture, warmth: m.warmth ?? p.warmth, scale: m.scale ?? p.scale,
+  };
+}
+
+/** Saves a hand correction. The AI never writes manual_sound, so it is never overwritten. */
+export async function saveManualSound(p: TrackProfile, m: ManualSound): Promise<void> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Please sign in again.");
+  const { data, error } = await supabase.from("track_ai_classification")
+    .update({ manual_sound: m as any }).eq("user_id", user.id).eq("spotify_track_id", p.id).select("spotify_track_id");
+  if (error) throw new Error(error.message);
+  if (!data?.length) {
+    const { error: e2 } = await supabase.from("track_ai_classification").insert({
+      user_id: user.id, spotify_track_id: p.id, lang: p.lang, energy: p.energy ?? 0.5, valence: p.valence ?? 0.5,
+      danceability: p.danceability ?? 0.5, tempo: p.tempo ?? 110, mood: p.mood ?? "chill", manual_sound: m as any,
+    });
+    if (e2) throw new Error(e2.message);
+  }
 }

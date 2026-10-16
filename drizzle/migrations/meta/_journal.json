@@ -71,6 +71,13 @@
       "when": 1792168081140,
       "tag": "0009_sound_profile_and_feedback",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1792169305123,
+      "tag": "0010_scene_and_manual_sound",
+      "breakpoints": true
     }
   ]
 }

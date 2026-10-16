@@ -132,6 +132,28 @@ function languagesCompatible(a: TrackProfile, b: TrackProfile): boolean {
   return a.lang === b.lang;
 }
 
+export const SCENES = ["keinemusik-afro-organic", "afterlife-melodic-techno", "anjunadeep-emotional", "innervisions-deep", "diynamic-melodic", "organic-downtempo", "afro-house-south-african", "tech-house-club", "minimal-deep-tech", "jazzy-soulful-house", "nu-disco-french-touch", "indie-dance-vocal", "progressive-trance", "big-room-festival"];
+const SCENE_PAIRS: [string, string][] = [
+  ["keinemusik-afro-organic", "afro-house-south-african"], ["afro-house-south-african", "organic-downtempo"],
+  ["keinemusik-afro-organic", "organic-downtempo"],
+  ["afterlife-melodic-techno", "diynamic-melodic"],
+  ["anjunadeep-emotional", "diynamic-melodic"], ["diynamic-melodic", "indie-dance-vocal"], ["anjunadeep-emotional", "indie-dance-vocal"],
+  ["innervisions-deep", "minimal-deep-tech"],
+  ["jazzy-soulful-house", "nu-disco-french-touch"],
+];
+export const SCENE_NEIGHBORS = new Map<string, Set<string>>();
+for (const [x, y] of SCENE_PAIRS) {
+  if (!SCENE_NEIGHBORS.has(x)) SCENE_NEIGHBORS.set(x, new Set());
+  if (!SCENE_NEIGHBORS.has(y)) SCENE_NEIGHBORS.set(y, new Set());
+  SCENE_NEIGHBORS.get(x)!.add(y); SCENE_NEIGHBORS.get(y)!.add(x);
+}
+/** Same scene 1, neighbor 0.5, other 0; null when either is unknown. */
+export function sceneMatch(a: TrackProfile, b: TrackProfile): number | null {
+  if (!a.scene || !b.scene) return null;
+  if (a.scene === b.scene) return 1;
+  return SCENE_NEIGHBORS.get(a.scene)?.has(b.scene) ? 0.5 : 0;
+}
+
 /** Sound palette match 0–1 (null if unknown): 50% instruments, 50% texture/warmth/scale. */
 export function soundMatch(a: TrackProfile, b: TrackProfile): number | null {
   const inst = a.instruments.length && b.instruments.length ? jaccard(a.instruments, b.instruments) : null;
@@ -155,9 +177,11 @@ export function compatibility(a: TrackProfile, b: TrackProfile): number {
   if (!languagesCompatible(a, b)) return 0;
 
   const style = styleMatch(a, b);
+  const scene = sceneMatch(a, b);
   const parts: [number | null, number][] = [
     [style, 0.35],
     [soundMatch(a, b), 0.35],
+    [scene, 0.3],
     [jaccard(a.families, b.families) * 0.75 + jaccard(a.genres, b.genres) * 0.25, 0.32],
     [closeness(a.energy, b.energy, 0.45), 0.12],
     [a.mood && b.mood ? (a.mood === b.mood ? 1 : MOOD_NEIGHBORS[a.mood].includes(b.mood) ? 0.6 : 0) : null, 0.08],
@@ -181,6 +205,7 @@ export function compatibility(a: TrackProfile, b: TrackProfile): number {
   if (a.energy !== null && b.energy !== null && Math.abs(a.energy - b.energy) > 0.55) score *= 0.5;
   if (a.year && b.year && Math.abs(a.year - b.year) > 25) score *= 0.6;
   if (style === 0) score *= 0.3; // different sound worlds
+  if (scene === 0) score *= 0.4; // different, non-neighbor scenes
   if (soundClash(a, b)) score *= 0.5; // different instrument palette / groove
   if (a.artistIds.some((id) => b.artistIds.includes(id))) score = Math.min(1, score + 0.08);
   return score;

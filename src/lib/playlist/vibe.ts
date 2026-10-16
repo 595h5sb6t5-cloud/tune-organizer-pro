@@ -163,7 +163,7 @@ const r2 = (x: number | null) => (x === null ? null : Math.round(x * 100) / 100)
 const brief = (t: TrackProfile) => ({
   id: t.id, name: t.name, artists: t.artists, year: t.year, genres: t.genres.slice(0, 5),
   style: t.style ?? null, lang: t.lang, energy: r2(t.energy), mood: t.mood,
-  instruments: t.instruments, texture: r2(t.texture), warmth: r2(t.warmth), scale: r2(t.scale), groove: t.groove,
+  instruments: t.instruments, texture: r2(t.texture), warmth: r2(t.warmth), scale: r2(t.scale), groove: t.groove, scene: t.scene,
 });
 /** Full seed profile for the AI. */
 export const seedProfile = (t: TrackProfile) => ({
@@ -172,7 +172,7 @@ export const seedProfile = (t: TrackProfile) => ({
 });
 
 async function scoreCandidates(userId: string, vibe: string, cands: TrackProfile[], seeds: TrackProfile[], onProgress?: (d: number, t: number) => void) {
-  const key = "v3|" + vibeKey(vibe) + (seeds.length ? ` |seed:${seeds.map((x) => x.id).join(",")}` : "");
+  const key = "v4|" + vibeKey(vibe) + (seeds.length ? ` |seed:${seeds.map((x) => x.id).join(",")}` : "");
   const scores = new Map<string, number>();
   const ids = cands.map((c) => c.id);
   for (let i = 0; i < ids.length; i += 200) {

@@ -2286,9 +2286,12 @@ export type Database = {
           groove: string | null
           instruments: string[] | null
           lang: string
+          manual_sound: Json | null
           mood: string
           original_year: number | null
           scale: number | null
+          scene: string | null
+          scene_checked: boolean
           sound_checked: boolean
           spotify_track_id: string
           style: string | null
@@ -2309,9 +2312,12 @@ export type Database = {
           groove?: string | null
           instruments?: string[] | null
           lang: string
+          manual_sound?: Json | null
           mood: string
           original_year?: number | null
           scale?: number | null
+          scene?: string | null
+          scene_checked?: boolean
           sound_checked?: boolean
           spotify_track_id: string
           style?: string | null
@@ -2332,9 +2338,12 @@ export type Database = {
           groove?: string | null
           instruments?: string[] | null
           lang?: string
+          manual_sound?: Json | null
           mood?: string
           original_year?: number | null
           scale?: number | null
+          scene?: string | null
+          scene_checked?: boolean
           sound_checked?: boolean
           spotify_track_id?: string
           style?: string | null
