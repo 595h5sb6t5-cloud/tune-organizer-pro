@@ -227,7 +227,7 @@ export async function buildVibePlaylist(
     name: t.name, artists: t.artists, year: t.year, genres: t.genres.slice(0, 6), lang: t.lang,
     energy: t.energy, valence: t.valence, danceability: t.danceability, tempo: t.tempo, mood: t.mood,
   }));
-  const { data, error } = await supabase.functions.invoke("vibe-spec", { body: { vibe: vibe || "(no keywords: use only the seed songs)", seeds: seedBody } });
+  const { data, error } = await supabase.functions.invoke("vibe-spec", { body: { vibe, seeds: seedBody } });
   if (error || data?.error) throw new Error(data?.error ?? error?.message ?? "Couldn't read the vibe.");
   const spec = normalizeSpec(data as VibeSpec, vibe, seeds.length > 0);
 

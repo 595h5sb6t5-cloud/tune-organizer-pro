@@ -56,7 +56,7 @@ export default function VibePlaylistPanel() {
     }
   }, [matches, dismissed, seeds.length]);
 
-  const keywords = leftoverKeywords(vibe, seeds);
+  const keywords = leftoverKeywords(vibe, seeds, liked ?? []);
   const canCreate = !!vibe.trim() || seeds.length > 0;
 
   // Languages present in the library (from stored AI data).
