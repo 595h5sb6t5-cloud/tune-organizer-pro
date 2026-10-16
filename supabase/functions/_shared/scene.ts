@@ -1,9 +1,8 @@
 // Scene pass: for electronic dance songs only, a stronger OpenAI model picks the sound
 // scene and re-describes instruments/texture/warmth/scale, comparing songs of the same style.
-import { INSTRUMENTS, sanitizeSound } from "./sound.ts";
+import { INSTRUMENTS, sanitizeSound, SCENES, DANCE_STYLES } from "./sound.ts";
+export { SCENES, DANCE_STYLES };
 
-export const SCENES = ["keinemusik-afro-organic","afterlife-melodic-techno","anjunadeep-emotional","innervisions-deep","diynamic-melodic","organic-downtempo","afro-house-south-african","tech-house-club","minimal-deep-tech","jazzy-soulful-house","nu-disco-french-touch","indie-dance-vocal","progressive-trance","big-room-festival"];
-export const DANCE_STYLES = ["melodic-house","afro-house","deep-house","tech-house","indie-dance","nu-disco","techno","trance","drum-and-bass","edm-festival"];
 
 // Strongest full (non-mini) model first; falls back if the key has no access to it.
 const MODELS = ["gpt-5.2", "gpt-5.1", "gpt-5", "gpt-4.1"];
