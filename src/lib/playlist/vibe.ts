@@ -121,7 +121,7 @@ export function normalizeSpec(spec: VibeSpec, keywords: string, hasSeeds: boolea
 }
 
 /** Step 2: local filter. `langChoice` = "auto" or a language code. */
-export function filterCandidates(profiles: TrackProfile[], spec: VibeSpec, langChoice: string, seeds: TrackProfile[] = []) {
+export function filterCandidates(profiles: TrackProfile[], spec: VibeSpec, langChoice: string, seeds: TrackProfile[] = [], anySeed = false) {
   const seedIds = new Set(seeds.map((x) => x.id));
   const hard = profiles.filter((t) => !seedIds.has(t.id) && passesHardRules(t, spec, seeds));
   // Instrumental or dance-style seed: language is not a hard rule (style already is).
@@ -142,7 +142,8 @@ export function filterCandidates(profiles: TrackProfile[], spec: VibeSpec, langC
     langFree || t.lang === lang || (isDance(t) && seeds.some((x) => isDance(x) && sameOrNeighborStyle(x.style, t.style)));
   const inLang = hard.filter(langOk);
 
-  const seedFit = (t: TrackProfile) => seeds.reduce((a, x) => a + compatibility(t, x), 0) / seeds.length;
+  // Artist as seed: its 3 songs span its sound, so a song only needs to fit one of them.
+  const seedFit = (t: TrackProfile) => anySeed ? Math.max(...seeds.map((x) => compatibility(t, x))) : seeds.reduce((a, x) => a + compatibility(t, x), 0) / seeds.length;
   const rank = (list: TrackProfile[]) => seeds.length
     ? list.map((t) => ({ t, c: seedFit(t) })).filter((x) => x.c >= MIN_SEED_COMPAT)
         .sort((a, b) => (b.c + preferenceBonus(b.t, spec)) - (a.c + preferenceBonus(a.t, spec))).map((x) => x.t)
@@ -242,8 +243,10 @@ async function listenCandidates(userId: string, cands: TrackProfile[], seeds: Tr
 const feelsLikeSeed = (t: TrackProfile, seeds: TrackProfile[]) =>
   seeds.some((x) => { const f = feelingScore(t, x); return f === null || f >= 0.5; });
 
-const seedFitOf = (t: TrackProfile, seeds: TrackProfile[]) =>
-  seeds.reduce((a, x) => a + compatibility(t, x), 0) / seeds.length;
+let anySeedMode = false;
+const seedFitOf = (t: TrackProfile, seeds: TrackProfile[]) => anySeedMode
+  ? Math.max(...seeds.map((x) => compatibility(t, x)))
+  : seeds.reduce((a, x) => a + compatibility(t, x), 0) / seeds.length;
 
 /** Step 4: pick 8+ (and 7s up to 20 when short), check coherence, cap, sequence. */
 export function selectVibeTracks(cands: TrackProfile[], scores: Map<string, number>, seeds: TrackProfile[] = [], capArtist?: string) {
@@ -351,7 +354,8 @@ export async function buildVibePlaylist(
 
   onStep("Finding songs that feel the same");
   const removed = await removedP;
-  const { lang, candidates } = filterCandidates(profiles.filter((t) => !removed.has(t.id)), spec, langChoice, seeds);
+  anySeedMode = !!capArtist;
+  const { lang, candidates } = filterCandidates(profiles.filter((t) => !removed.has(t.id)), spec, langChoice, seeds, !!capArtist);
   lap("filter");
   if (!candidates.length) return finish({ spec, lang, tracks: seeds.length ? sequence(seeds, seeds[0].id) : [], candidates: 0, approved: 0 });
 
