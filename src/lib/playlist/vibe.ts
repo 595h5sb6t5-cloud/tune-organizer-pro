@@ -161,7 +161,6 @@ export function filterCandidates(profiles: TrackProfile[], spec: VibeSpec, langC
     active.delete(r); relaxed.push(r);
     candidates = rank(inLang.filter((t) => passesSoft(t, spec, active)));
   }
-  console.info(`[vibe] filter hard=${hard.length} lang=${inLang.length} cands=${candidates.length} spec=${JSON.stringify({e:[spec.energy_min,spec.energy_max],ex:spec.excluded_families})} seeds=${JSON.stringify(seeds.map((x)=>[x.name,x.style,x.energy,x.feeling,x.percussiveDrive]))}`);
   return { lang, candidates: candidates.slice(0, MAX_CANDIDATES), relaxed };
 }
 
@@ -383,7 +382,6 @@ export async function buildVibePlaylist(
       .sort((a, b) => (scores.get(b.id) ?? 0) - (scores.get(a.id) ?? 0) || fitOf(b) - fitOf(a)).slice(0, LISTEN_TOP);
     onStep("Listening to the songs");
     const { scores: ear, seedHeard } = await listenCandidates(userId, top, seeds, (d, t) => onStep("Listening to the songs", d, t));
-    console.info(`[vibe] listen ${JSON.stringify(top.map((t) => [t.name, scores.get(t.id), ear.get(t.id), t.feeling, feelsLikeSeed(t, seeds)]))}`);
     pool = seedHeard
       ? top.filter((t) => feelsLikeSeed(t, seeds) && (ear.has(t.id) ? ear.get(t.id)! >= LISTEN_MIN : (scores.get(t.id) ?? 0) >= MIN_SCORE)
           && ((scores.get(t.id) ?? 0) >= FILL_SCORE || (ear.get(t.id) ?? 0) >= MIN_SCORE && strongFeel(t, seeds)))
