@@ -43,7 +43,15 @@ export default function VibePlaylistPanel() {
 
   useEffect(() => {
     if (user) loadLikedTracks(user.id).then(setLiked).catch(() => setLiked([]));
-    if (user) { warmVibeFunctions(); void getProfiles().catch(() => null); } // ready before the first click
+    if (user) { // ready before the first click, without showing a loading state
+      warmVibeFunctions();
+      loadLikedTracks(user.id).then(async (l) => {
+        if (!l.length) return;
+        const g = await loadArtistGenres(l.flatMap((t) => t.artists.map((a) => a.id)), () => {});
+        const p = await enrichWithAI(buildProfiles(l, g));
+        setProfiles((cur) => cur ?? p);
+      }).catch(() => null);
+    }
   }, [user]);
 
   const matches = useMemo(() => {
