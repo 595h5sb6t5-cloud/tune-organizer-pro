@@ -141,6 +141,7 @@ export function filterCandidates(profiles: TrackProfile[], spec: VibeSpec, langC
   const langOk = (t: TrackProfile) =>
     langFree || t.lang === lang || (isDance(t) && seeds.some((x) => isDance(x) && sameOrNeighborStyle(x.style, t.style)));
   const inLang = hard.filter(langOk);
+  for (const t of profiles.filter((t) => /al green|sam cooke/i.test(t.artists.join(",")))) console.info("[vibe-debug2]", t.name, t.energy, t.style, t.lang, t.families, passesHardRules(t, spec, seeds), langOk(t), fitSeeds?.length ? Math.max(...fitSeeds.map((x) => compatibility(t, x))) : null, JSON.stringify(spec), seeds.map((x) => x.name + ":" + x.style + ":" + x.energy).join("|"));
 
   // Artist as seed: its 3 songs span its sound, so a song only needs to fit one of them.
   const seedFit = (t: TrackProfile) => fitSeeds?.length ? Math.max(...fitSeeds.map((x) => compatibility(t, x))) : seeds.reduce((a, x) => a + compatibility(t, x), 0) / seeds.length;
