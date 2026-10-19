@@ -16,3 +16,9 @@ verify_jwt = true
 
 [functions.listener-tags]
 verify_jwt = false
+
+[functions.audio-analyze]
+verify_jwt = false
+
+[functions.vibe-listen]
+verify_jwt = false
