@@ -23,3 +23,13 @@ describe("percussive drive hard rule", () => {
     expect(drumClash({ percussiveDrive: 0.4 } as any, { percussiveDrive: 0.6 } as any)).toBe(false);
   });
 });
+
+import { rescuedScore } from "@/lib/playlist/vibe";
+describe("listening rescue", () => {
+  it("a text 6 becomes a 7 only when the ear gives 8+ and the feeling strongly matches", () => {
+    expect(rescuedScore(6, 8, true)).toBe(7);
+    expect(rescuedScore(6, 7, true)).toBe(6);
+    expect(rescuedScore(6, 9, false)).toBe(6);
+    expect(rescuedScore(8, 2, false)).toBe(8);
+  });
+});
