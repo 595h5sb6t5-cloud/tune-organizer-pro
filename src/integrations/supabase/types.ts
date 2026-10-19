@@ -482,6 +482,36 @@ export type Database = {
         }
         Relationships: []
       }
+      audio_analysis_state: {
+        Row: {
+          analyzed: number
+          id: number
+          last_error: string | null
+          lease_until: string | null
+          paused_until: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          analyzed?: number
+          id?: number
+          last_error?: string | null
+          lease_until?: string | null
+          paused_until?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          analyzed?: number
+          id?: number
+          last_error?: string | null
+          lease_until?: string | null
+          paused_until?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       cluster_candidate_tracks: {
         Row: {
           artist_context_fit: number | null
@@ -2591,6 +2621,57 @@ export type Database = {
           year_checked?: boolean
           youtube_checked?: boolean
           youtube_summary?: string | null
+        }
+        Relationships: []
+      }
+      track_audio_analysis: {
+        Row: {
+          analyzed_at: string
+          confidence: number | null
+          groove: string | null
+          instruments: string[] | null
+          melodic_focus: number | null
+          model: string | null
+          percussive_drive: number | null
+          piano: boolean | null
+          scale: number | null
+          section: string | null
+          source: string
+          spotify_track_id: string
+          texture: number | null
+          warmth: number | null
+        }
+        Insert: {
+          analyzed_at?: string
+          confidence?: number | null
+          groove?: string | null
+          instruments?: string[] | null
+          melodic_focus?: number | null
+          model?: string | null
+          percussive_drive?: number | null
+          piano?: boolean | null
+          scale?: number | null
+          section?: string | null
+          source: string
+          spotify_track_id: string
+          texture?: number | null
+          warmth?: number | null
+        }
+        Update: {
+          analyzed_at?: string
+          confidence?: number | null
+          groove?: string | null
+          instruments?: string[] | null
+          melodic_focus?: number | null
+          model?: string | null
+          percussive_drive?: number | null
+          piano?: boolean | null
+          scale?: number | null
+          section?: string | null
+          source?: string
+          spotify_track_id?: string
+          texture?: number | null
+          warmth?: number | null
         }
         Relationships: []
       }
