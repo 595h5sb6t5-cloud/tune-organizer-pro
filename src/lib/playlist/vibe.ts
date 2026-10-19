@@ -161,7 +161,6 @@ export function filterCandidates(profiles: TrackProfile[], spec: VibeSpec, langC
     active.delete(r); relaxed.push(r);
     candidates = rank(inLang.filter((t) => passesSoft(t, spec, active)));
   }
-  for (const t of profiles.filter((x) => /tell me are we|^after earth$/i.test(x.name))) console.info(`[vibe] dbg ${t.name} hard=${hard.includes(t)} lang=${inLang.includes(t)} fit=${seeds.length ? Math.round(seedFit(t) * 100) : "-"} e=${t.energy} pd=${t.percussiveDrive} mf=${t.melodicFocus} f=${t.feeling}/${t.feeling2} arc=${t.arc} style=${t.style} scene=${t.scene} tex=${t.texture} w=${t.warmth} sc=${t.scale} gr=${t.groove} seed=${JSON.stringify(seeds.map((x) => [x.percussiveDrive, x.melodicFocus, x.texture, x.warmth, x.scale, x.groove, x.arc]))}`);
   console.info(`[vibe] filter hard=${hard.length} lang=${inLang.length} cands=${candidates.length} spec=${JSON.stringify({e:[spec.energy_min,spec.energy_max],ex:spec.excluded_families})} seeds=${JSON.stringify(seeds.map((x)=>[x.name,x.style,x.energy,x.feeling,x.percussiveDrive]))}`);
   return { lang, candidates: candidates.slice(0, MAX_CANDIDATES), relaxed };
 }
@@ -245,6 +244,11 @@ const feelsLikeSeed = (t: TrackProfile, seeds: TrackProfile[]) =>
   (fitPool.length ? fitPool : seeds).some((x) => { const f = feelingScore(t, x); return f === null || f >= 0.5; });
 
 let fitPool: TrackProfile[] = [];
+/** Same main feeling, or main = the other's secondary (≥0.75). */
+const strongFeel = (t: TrackProfile, seeds: TrackProfile[]) => seeds.some((x) => (feelingScore(t, x) ?? 0) >= 0.75);
+/** Ear rescued a text 6 → treat it as a 7 for picking. */
+export const rescuedScore = (text: number, ear: number | undefined, strong: boolean) => (text >= 7 ? text : ear !== undefined && ear >= 8 && strong ? 7 : text);
+
 const seedFitOf = (t: TrackProfile, seeds: TrackProfile[]) => fitPool.length
   ? Math.max(...fitPool.map((x) => compatibility(t, x)))
   : seeds.reduce((a, x) => a + compatibility(t, x), 0) / seeds.length;
@@ -374,14 +378,17 @@ export async function buildVibePlaylist(
   let pool = candidates;
   if (seeds.length) {
     const fitOf = (t: TrackProfile) => seedFitOf(t, seeds);
-    const top = candidates.filter((c) => (scores.get(c.id) ?? 0) >= FILL_SCORE)
+    // A 6 from the text review may still be heard: listeners and the ear can prove it belongs.
+    const top = candidates.filter((c) => (scores.get(c.id) ?? 0) >= FILL_SCORE - 1)
       .sort((a, b) => (scores.get(b.id) ?? 0) - (scores.get(a.id) ?? 0) || fitOf(b) - fitOf(a)).slice(0, LISTEN_TOP);
     onStep("Listening to the songs");
     const { scores: ear, seedHeard } = await listenCandidates(userId, top, seeds, (d, t) => onStep("Listening to the songs", d, t));
     console.info(`[vibe] listen ${JSON.stringify(top.map((t) => [t.name, scores.get(t.id), ear.get(t.id), t.feeling, feelsLikeSeed(t, seeds)]))}`);
     pool = seedHeard
-      ? top.filter((t) => feelsLikeSeed(t, seeds) && (ear.has(t.id) ? ear.get(t.id)! >= LISTEN_MIN : (scores.get(t.id) ?? 0) >= MIN_SCORE))
-      : top.filter((t) => feelsLikeSeed(t, seeds));
+      ? top.filter((t) => feelsLikeSeed(t, seeds) && (ear.has(t.id) ? ear.get(t.id)! >= LISTEN_MIN : (scores.get(t.id) ?? 0) >= MIN_SCORE)
+          && ((scores.get(t.id) ?? 0) >= FILL_SCORE || (ear.get(t.id) ?? 0) >= MIN_SCORE && strongFeel(t, seeds)))
+      : top.filter((t) => feelsLikeSeed(t, seeds) && (scores.get(t.id) ?? 0) >= FILL_SCORE);
+    for (const t of pool) scores.set(t.id, rescuedScore(scores.get(t.id) ?? 0, ear.get(t.id), strongFeel(t, seeds)));
   }
   lap("listen");
 
