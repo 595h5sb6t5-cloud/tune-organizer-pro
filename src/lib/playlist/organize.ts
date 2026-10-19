@@ -95,7 +95,7 @@ export const isDance = (t: TrackProfile) => !!t.style && DANCE_STYLES.has(t.styl
 export const sameOrNeighborStyle = (a: string | null | undefined, b: string | null | undefined) =>
   !!a && !!b && (a === b || !!STYLE_NEIGHBORS.get(a)?.has(b));
 
-function styleMatch(a: TrackProfile, b: TrackProfile): number | null {
+export function styleMatch(a: TrackProfile, b: TrackProfile): number | null {
   if (!a.style || !b.style) return null;
   if (a.style === b.style) return 1;
   return STYLE_NEIGHBORS.get(a.style)?.has(b.style) ? 0.6 : 0;
