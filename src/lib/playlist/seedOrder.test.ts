@@ -3,7 +3,7 @@ import { sequence } from "./organize";
 import type { TrackProfile } from "./features";
 
 const t = (id: string, feeling: string, feeling2: string | null = null) =>
-  ({ id, feeling, feeling2, energy: 0.5, artistIds: [id], albumId: id, melodicFocus: null, instruments: [], genres: [], moods: [], keywords: [] } as unknown as TrackProfile);
+  ({ id, feeling, feeling2, energy: 0.5, artistIds: [id], albumId: id, melodicFocus: null, instruments: [], families: [], artists: [], genres: [], moods: [], keywords: [] } as unknown as TrackProfile);
 
 describe("seed playlist opening", () => {
   it("positions 2 and 3 are strong feeling matches, neighbor-only songs come later", () => {
