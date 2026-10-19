@@ -395,7 +395,7 @@ export async function buildVibePlaylist(
     lap("select");
     const fitOf = (t: TrackProfile) => seedFitOf(t, seeds);
     const top = candidates.filter((t) => feelsLikeSeed(t, seeds)).sort((a, b) => fitOf(b) - fitOf(a)).slice(0, LISTEN_TOP);
-    console.info("[vibe-debug]", JSON.stringify(candidates.map((t) => [t.name, Math.round(fitOf(t) * 100) / 100, feelsLikeSeed(t, seeds), t.feeling, t.feeling2]).sort((a: any, b: any) => b[1] - a[1]).slice(0, 80), t => 0), candidates.length, candidates.filter((t) => /al green|sam cooke/i.test(t.artists.join(","))).map((t) => [t.name, Math.round(fitOf(t) * 100) / 100, feelsLikeSeed(t, seeds)]));
+    console.info("[vibe-debug]", JSON.stringify(candidates.map((t) => [t.name, Math.round(fitOf(t) * 100) / 100, feelsLikeSeed(t, seeds), t.feeling, t.feeling2]).sort((a: any, b: any) => b[1] - a[1]).slice(0, 80)), candidates.length, candidates.filter((t) => /al green|sam cooke/i.test(t.artists.join(","))).map((t) => [t.name, Math.round(fitOf(t) * 100) / 100, feelsLikeSeed(t, seeds)]));
     const withClip = top.filter((t) => t.audioSource !== "none");
     onStep("Listening to the songs");
     const listenP = listenCandidates(userId, withClip, seeds, (d, t) => onStep("Listening to the songs", d, t));
