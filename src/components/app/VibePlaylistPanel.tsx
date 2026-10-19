@@ -68,7 +68,8 @@ export default function VibePlaylistPanel() {
       const full = matches.filter((m) => isUniqueFullTitle(m, liked)).sort((a, b) => b.span.split(" ").length - a.span.split(" ").length);
       clear = full.length > 1 && full[0].span.split(" ").length === full[1].span.split(" ").length ? [] : full.slice(0, 1);
     }
-    if (clear.length === 1 && !dismissed.has(clear[0].track.id) && seeds.length < 3) {
+    // Only ONE automatic seed; other matching titles stay as suggestions for the user to pick.
+    if (clear.length === 1 && !dismissed.has(clear[0].track.id) && seeds.length === 0) {
       setSeeds((s) => [...s, clear[0]]);
     }
   }, [matches, dismissed, seeds.length, liked]);
