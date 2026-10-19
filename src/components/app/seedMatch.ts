@@ -105,3 +105,25 @@ export function leftoverKeywords(text: string, seeds: SeedMatch[], library: Spot
   t = t.replace(/\s+/g, " ").trim();
   return t.replace(/[^a-z]/g, "").length < 3 ? "" : t;
 }
+
+/** An artist from Liked Songs named in the text ("marvin gaye"). Longest name wins. */
+export function findArtistMatch(text: string, liked: SpotifyTrack[]): { name: string; tracks: SpotifyTrack[] } | null {
+  const t = norm(text);
+  if (t.length < 3) return null;
+  const byName = new Map<string, { name: string; tracks: SpotifyTrack[] }>();
+  for (const track of liked) for (const a of track.artists) {
+    const n = norm(a.name);
+    if (n.replace(/\s/g, "").length < 3 || !has(t, n)) continue;
+    const e = byName.get(n) ?? { name: a.name, tracks: [] };
+    e.tracks.push(track); byName.set(n, e);
+  }
+  return [...byName.entries()].sort((a, b) => b[0].length - a[0].length || b[1].tracks.length - a[1].tracks.length)[0]?.[1] ?? null;
+}
+
+interface SoundLike { id: string; style: string | null; scene: string | null; feeling: string | null }
+/** The 3 songs most alike each other in style, scene and feeling = the artist's core sound. */
+export function representativeSongs<T extends SoundLike>(songs: T[], n = 3): T[] {
+  const sim = (a: T, b: T) => (a.style && a.style === b.style ? 1 : 0) + (a.scene && a.scene === b.scene ? 1 : 0) + (a.feeling && a.feeling === b.feeling ? 1 : 0);
+  return songs.map((s) => ({ s, v: songs.reduce((acc, o) => acc + (o === s ? 0 : sim(s, o)), 0) }))
+    .sort((a, b) => b.v - a.v).slice(0, n).map((x) => x.s);
+}
