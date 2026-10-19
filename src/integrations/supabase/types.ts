@@ -3158,6 +3158,26 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      audio_queue: {
+        Args: { _ids?: string[]; _limit: number }
+        Returns: {
+          artist_name: string
+          electronic: boolean
+          isrc: string
+          spotify_track_id: string
+          track_name: string
+        }[]
+      }
+      audio_queue_count: { Args: never; Returns: number }
+      audio_queue_next: {
+        Args: { _limit: number }
+        Returns: {
+          artist_name: string
+          isrc: string
+          spotify_track_id: string
+          track_name: string
+        }[]
+      }
       enrich_resume_arm: { Args: { _on: boolean }; Returns: undefined }
       hydrate_track_analysis: { Args: { _user_id: string }; Returns: number }
       reconcile_liked_songs: {
