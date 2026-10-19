@@ -1224,6 +1224,75 @@ export type Database = {
         }
         Relationships: []
       }
+      listener_evidence: {
+        Row: {
+          evidence_applied: boolean
+          lastfm_checked: boolean
+          spotify_track_id: string
+          tag_source: string | null
+          tags: Json | null
+          updated_at: string
+          user_id: string
+          youtube_checked: boolean
+          youtube_summary: string | null
+        }
+        Insert: {
+          evidence_applied?: boolean
+          lastfm_checked?: boolean
+          spotify_track_id: string
+          tag_source?: string | null
+          tags?: Json | null
+          updated_at?: string
+          user_id: string
+          youtube_checked?: boolean
+          youtube_summary?: string | null
+        }
+        Update: {
+          evidence_applied?: boolean
+          lastfm_checked?: boolean
+          spotify_track_id?: string
+          tag_source?: string | null
+          tags?: Json | null
+          updated_at?: string
+          user_id?: string
+          youtube_checked?: boolean
+          youtube_summary?: string | null
+        }
+        Relationships: []
+      }
+      listener_evidence_state: {
+        Row: {
+          error: string | null
+          lease_until: string | null
+          status: string
+          updated_at: string
+          user_id: string
+          youtube_day: string | null
+          youtube_paused_until: string | null
+          youtube_searches_today: number
+        }
+        Insert: {
+          error?: string | null
+          lease_until?: string | null
+          status?: string
+          updated_at?: string
+          user_id: string
+          youtube_day?: string | null
+          youtube_paused_until?: string | null
+          youtube_searches_today?: number
+        }
+        Update: {
+          error?: string | null
+          lease_until?: string | null
+          status?: string
+          updated_at?: string
+          user_id?: string
+          youtube_day?: string | null
+          youtube_paused_until?: string | null
+          youtube_searches_today?: number
+        }
+        Relationships: []
+      }
       playlist_feedback: {
         Row: {
           action: string
