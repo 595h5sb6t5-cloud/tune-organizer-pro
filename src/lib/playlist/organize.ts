@@ -429,16 +429,24 @@ export function sequence(tracks: TrackProfile[], startId?: string): TrackProfile
     return cost;
   };
 
+  // With a seed, positions 2 and 3 go to the strongest feeling matches (same main, or main = seed's secondary).
+  const seed = startIndex >= 0 ? ordered[0] : undefined;
+  const strongFeel = (t: TrackProfile) =>
+    !!seed?.feeling && !!t.feeling && (t.feeling === seed.feeling || (!!seed.feeling2 && t.feeling === seed.feeling2));
+
   while (remaining.length) {
-    let bestIndex = 0;
+    const restrict = seed && ordered.length < 3 && remaining.some(strongFeel);
+    let bestIndex = -1;
     let bestCost = Infinity;
     remaining.forEach((t, i) => {
+      if (restrict && !strongFeel(t)) return;
       const c = stepCost(t);
       if (c < bestCost) {
         bestCost = c;
         bestIndex = i;
       }
     });
+    if (bestIndex < 0) bestIndex = remaining.findIndex((t) => !restrict || strongFeel(t));
     ordered.push(remaining.splice(bestIndex, 1)[0]);
   }
   return ordered;

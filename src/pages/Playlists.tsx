@@ -338,6 +338,7 @@ function PlaylistDetail({ playlistId, onBack }: { playlistId: string; onBack: ()
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium truncate">{t.name}</p>
               <p className="text-xs text-muted-foreground truncate">{t.artist_names.join(", ")}</p>
+              {t.album_name && <p className="text-xs text-muted-foreground/70 truncate">{t.album_name}</p>}
               {t.reason_for_inclusion && (
                 <p className="text-xs text-muted-foreground/80 italic mt-1 line-clamp-2">{t.reason_for_inclusion}</p>
               )}
