@@ -111,7 +111,7 @@ async function runHop(admin: any, userId: string, started: number, priority: str
   let used = st.youtube_day === utcDay() ? st.youtube_searches_today : 0;
   let ytBlocked = !ytKey || used >= YT_DAILY || (st.youtube_paused_until && new Date(st.youtube_paused_until) > new Date());
   for (const id of ytQueue) {
-    if (ytBlocked || left() < 25_000) break;
+    if (ytBlocked || left() < 32_000) break;
     if (used >= YT_DAILY) { ytBlocked = true; break; }
     const t = byId.get(id)!;
     const artist = ((t.artists ?? []) as any[])[0]?.name ?? t.artist_name;
@@ -139,7 +139,7 @@ async function runHop(admin: any, userId: string, started: number, priority: str
   const artistCache = new Map<string, any[]>();
   if (Deno.env.get("LASTFM_API_KEY")) {
     for (const id of lfQueue) {
-      if (left() < 15_000) break;
+      if (left() < 25_000) break;
       const t = byId.get(id)!;
       const artist = ((t.artists ?? []) as any[])[0]?.name ?? String(t.artist_name).split(",")[0];
       let r = await lastfm("track.gettoptags", { artist, track: cleanTitle(t.track_name) }); await sleep(250);
@@ -159,7 +159,7 @@ async function runHop(admin: any, userId: string, started: number, priority: str
   // 3) Re-describe with evidence (strong model). Wait for YouTube on candidates still in today's budget.
   const ready = order([...ev.values()].filter((e) => !e.evidence_applied && e.lastfm_checked && (e.tags?.length || e.youtube_summary) && byId.has(e.spotify_track_id)
     && (e.youtube_checked || !isYtCandidate(e.spotify_track_id) || ytBlocked)).map((e) => e.spotify_track_id));
-  for (let i = 0; i < ready.length && left() > 15_000; i += 15) {
+  for (let i = 0; i < ready.length && left() > 10_000; i += 15) {
     const ids = ready.slice(i, i + 15);
     const lines = ids.map((id, n) => {
       const t = byId.get(id)!; const e = ev.get(id); const c = cls.get(id);
