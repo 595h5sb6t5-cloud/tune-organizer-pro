@@ -18,7 +18,9 @@ const json = (b: unknown, s = 200) =>
   new Response(JSON.stringify(b), { status: s, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-const CONCURRENCY = 2;
+const CONCURRENCY = 2; // Spotify
+const AI_CONCURRENCY = 5; // OpenAI batches at once
+const PRIORITY_RECENT = 200;
 const GAP_MS = 350;
 const HOP_BUDGET_MS = 45_000;
 const MAX_WAIT_S = 30;
@@ -81,7 +83,8 @@ async function likedRows(admin: any, userId: string) {
   for (let from = 0; ; from += 1000) {
     const { data, error } = await admin.from("liked_songs")
       .select("spotify_track_id, track_name, album_name, artists, album_release_date")
-      .eq("user_id", userId).eq("is_active", true).eq("is_available", true).range(from, from + 999);
+      .eq("user_id", userId).eq("is_active", true).eq("is_available", true)
+      .order("added_at", { ascending: false, nullsFirst: false }).range(from, from + 999);
     if (error) throw new Error(error.message);
     out.push(...(data ?? []));
     if (!data || data.length < 1000) return out;
@@ -99,12 +102,70 @@ async function existing(admin: any, table: string, col: string, ids: string[], u
   return known;
 }
 
+
+/** 200 most recent Liked Songs first, then songs by the artists with the most Liked Songs, then the rest. */
+function prioritize(liked: any[]) {
+  const count = new Map<string, number>();
+  for (const r of liked) for (const a of (r.artists ?? []) as any[]) if (a?.id) count.set(a.id, (count.get(a.id) ?? 0) + 1);
+  const top = (r: any) => Math.max(0, ...((r.artists ?? []) as any[]).map((a) => count.get(a?.id) ?? 0));
+  const recent = liked.slice(0, PRIORITY_RECENT);
+  const rest = liked.slice(PRIORITY_RECENT).sort((x, y) => top(y) - top(x));
+  return [...recent, ...rest];
+}
+
+/** Base AI classification (fast model) for one batch; rows are stored and returned. */
+async function classifyBatch(admin: any, apiKey: string, userId: string, batch: any[], genreMap: Map<string, any>) {
+  const maxYear = new Date().getFullYear();
+  const list = batch.map((t, i) => {
+    const artists = ((t.artists ?? []) as any[]);
+    const g = [...new Set(artists.flatMap((a) => genreMap.get(a?.id)?.genres ?? []))].slice(0, 6);
+    const y = parseInt(String(t.album_release_date ?? "").slice(0, 4));
+    return `${i + 1}. id=${t.spotify_track_id} | "${String(t.track_name).slice(0, 200)}" by ${artists.map((a) => a?.name).join(", ")} | album: ${t.album_name ?? ""} | year: ${Number.isFinite(y) ? y : "?"} | genres: ${g.join(", ") || "none"}`;
+  }).join("\n");
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "gpt-4.1-mini", response_format: { type: "json_object" },
+      messages: [{ role: "system", content: CLASSIFY_SYSTEM }, { role: "user", content: list }],
+    }),
+  });
+  if (res.status === 429) { throw new Pause(Date.now() + 120_000, "ai_rate_limit", 429, null); }
+  if (!res.ok) { console.log(`[library-enrich] OpenAI ${res.status}`); throw new Error(`AI request failed (${res.status})`); }
+  const data = await res.json();
+  let parsed: any = {};
+  try { parsed = JSON.parse(String(data.choices?.[0]?.message?.content ?? "{}")); } catch { /* skip */ }
+  const valid = new Set(batch.map((t) => t.spotify_track_id));
+  const rows = (Array.isArray(parsed?.results) ? parsed.results : []).filter((r: any) => r && valid.has(r.id)).map((r: any) => {
+    const y = Number(r.original_year); const tempo = Number(r.tempo);
+    return {
+      user_id: userId, spotify_track_id: r.id,
+      lang: LANGS.includes(r.lang) ? r.lang : "other",
+      energy: c01(r.energy), valence: c01(r.valence), danceability: c01(r.danceability),
+      tempo: Number.isFinite(tempo) && tempo >= 50 && tempo <= 220 ? tempo : 110,
+      mood: MOODS.includes(r.mood) ? r.mood : "chill",
+      original_year: Number.isInteger(y) && y >= 1900 && y <= maxYear ? y : null,
+      year_checked: true,
+      family: FAMILIES.includes(r.family) ? r.family : null,
+      family_checked: true,
+      style: STYLES.includes(r.style) ? r.style : null,
+      style_checked: true,
+      ...sanitizeSound(r),
+    };
+  });
+  if (rows.length) await admin.from("track_ai_classification").upsert(rows, { onConflict: "user_id,spotify_track_id" });
+  return rows;
+}
+
 const DAILY_GENRE_CAP = 250;
 const utcDay = () => new Date().toISOString().slice(0, 10);
 const nextUtcMidnight = () => { const d = new Date(); d.setUTCHours(24, 0, 0, 0); return d.getTime(); };
 
 async function runHop(admin: any, userId: string, started: number, skipSpotify = false, forceIds: Set<string> = new Set()) {
-  const liked = await likedRows(admin, userId);
+  // Songs any user already analyzed are copied from the shared table, never re-analyzed.
+  const { data: hydrated } = await admin.rpc("hydrate_track_analysis", { _user_id: userId });
+  if (hydrated) console.log(`[library-enrich] reused shared analysis for ${hydrated} songs`);
+  const liked = prioritize(await likedRows(admin, userId));
   const trackIds = liked.map((r) => r.spotify_track_id);
   const cls = await existing(admin, "track_ai_classification", "spotify_track_id", trackIds, userId);
   const trackQueue = liked.filter((r) => { const c = cls.get(r.spotify_track_id); return !c?.year_checked || !c?.family_checked || !c?.style_checked || !c?.sound_checked; });
@@ -125,47 +186,8 @@ async function runHop(admin: any, userId: string, started: number, skipSpotify =
     const worker = async () => {
       while (batches.length && Date.now() - started < HOP_BUDGET_MS) {
         const batch = batches.shift()!;
-        const list = batch.map((t, i) => {
-          const artists = ((t.artists ?? []) as any[]);
-          const g = [...new Set(artists.flatMap((a) => genreMap.get(a?.id)?.genres ?? []))].slice(0, 6);
-          const y = parseInt(String(t.album_release_date ?? "").slice(0, 4));
-          return `${i + 1}. id=${t.spotify_track_id} | "${String(t.track_name).slice(0, 200)}" by ${artists.map((a) => a?.name).join(", ")} | album: ${t.album_name ?? ""} | year: ${Number.isFinite(y) ? y : "?"} | genres: ${g.join(", ") || "none"}`;
-        }).join("\n");
-        const res = await fetch("https://api.openai.com/v1/chat/completions", {
-          method: "POST",
-          headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model: "gpt-4.1-mini", response_format: { type: "json_object" },
-            messages: [{ role: "system", content: CLASSIFY_SYSTEM }, { role: "user", content: list }],
-          }),
-        });
-        if (res.status === 429) { batches.length = 0; throw new Pause(Date.now() + 120_000, "ai_rate_limit", 429, null); }
-        if (!res.ok) { console.log(`[library-enrich] OpenAI ${res.status}`); throw new Error(`AI request failed (${res.status})`); }
-        const data = await res.json();
-        let parsed: any = {};
-        try { parsed = JSON.parse(String(data.choices?.[0]?.message?.content ?? "{}")); } catch { /* skip */ }
-        const valid = new Set(batch.map((t) => t.spotify_track_id));
-        const rows = (Array.isArray(parsed?.results) ? parsed.results : []).filter((r: any) => r && valid.has(r.id)).map((r: any) => {
-          const y = Number(r.original_year); const tempo = Number(r.tempo);
-          return {
-            user_id: userId, spotify_track_id: r.id,
-            lang: LANGS.includes(r.lang) ? r.lang : "other",
-            energy: c01(r.energy), valence: c01(r.valence), danceability: c01(r.danceability),
-            tempo: Number.isFinite(tempo) && tempo >= 50 && tempo <= 220 ? tempo : 110,
-            mood: MOODS.includes(r.mood) ? r.mood : "chill",
-            original_year: Number.isInteger(y) && y >= 1900 && y <= maxYear ? y : null,
-            year_checked: true,
-            family: FAMILIES.includes(r.family) ? r.family : null,
-            family_checked: true,
-            style: STYLES.includes(r.style) ? r.style : null,
-            style_checked: true,
-            ...sanitizeSound(r),
-          };
-        });
-        if (rows.length) {
-          await admin.from("track_ai_classification").upsert(rows, { onConflict: "user_id,spotify_track_id" });
-          for (const r of rows) cls.set(r.spotify_track_id, r);
-        }
+        const rows = await classifyBatch(admin, apiKey, userId, batch, genreMap);
+        for (const r of rows) cls.set(r.spotify_track_id, r);
         tracksDone += rows.length;
         await save({ tracks_done: tracksDone });
         await sleep(GAP_MS);
