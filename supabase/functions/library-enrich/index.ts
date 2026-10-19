@@ -186,14 +186,15 @@ async function runHop(admin: any, userId: string, started: number, skipSpotify =
     const worker = async () => {
       while (batches.length && Date.now() - started < HOP_BUDGET_MS) {
         const batch = batches.shift()!;
-        const rows = await classifyBatch(admin, apiKey, userId, batch, genreMap);
+        let rows: any[];
+        try { rows = await classifyBatch(admin, apiKey, userId, batch, genreMap); } catch (e) { batches.length = 0; throw e; }
         for (const r of rows) cls.set(r.spotify_track_id, r);
         tracksDone += rows.length;
         await save({ tracks_done: tracksDone });
         await sleep(GAP_MS);
       }
     };
-    await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+    await Promise.all(Array.from({ length: AI_CONCURRENCY }, worker));
   }
   // 1b) Scene pass (stronger model) for electronic dance songs, batched by style.
   let scenesLeft = 0;
@@ -231,7 +232,7 @@ async function runHop(admin: any, userId: string, started: number, skipSpotify =
         await sleep(GAP_MS);
       }
     };
-    await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+    await Promise.all(Array.from({ length: AI_CONCURRENCY }, worker));
   }
   const tracksLeft = Math.max(0, trackIds.length - tracksDone) + Math.max(0, scenesLeft);
 
@@ -413,9 +414,25 @@ Deno.serve(async (req) => {
       const ids = body.feel_ids.filter((x: unknown) => typeof x === "string").slice(0, 3);
       const apiKey = Deno.env.get("OPENAI_API_KEY");
       if (!apiKey) return json({ error: "OPENAI_API_KEY is not set." }, 500);
-      const { data: rows } = await admin.from("liked_songs").select("spotify_track_id, track_name, album_name, artists")
+      const { data: rows } = await admin.from("liked_songs").select("spotify_track_id, track_name, album_name, artists, album_release_date")
         .eq("user_id", userId).in("spotify_track_id", ids);
-      const { data: cl } = await admin.from("track_ai_classification").select("spotify_track_id, style, feel_checked").eq("user_id", userId).in("spotify_track_id", ids);
+      const { data: cl0 } = await admin.from("track_ai_classification").select("spotify_track_id, style, feel_checked").eq("user_id", userId).in("spotify_track_id", ids);
+      const cl: any[] = [...(cl0 ?? [])];
+      // Seed with no analysis at all: classify it first (fast model), then describe its feeling.
+      const bare = (rows ?? []).filter((r: any) => !cl?.find((c: any) => c.spotify_track_id === r.spotify_track_id));
+      if (bare.length) {
+        await admin.rpc("hydrate_track_analysis", { _user_id: userId });
+        const { data: again } = await admin.from("track_ai_classification").select("spotify_track_id").eq("user_id", userId).in("spotify_track_id", bare.map((b: any) => b.spotify_track_id));
+        const still = bare.filter((b: any) => !again?.find((x: any) => x.spotify_track_id === b.spotify_track_id));
+        if (still.length) {
+          const ids = [...new Set(still.flatMap((t: any) => ((t.artists ?? []) as any[]).map((a) => a?.id).filter(Boolean)))] as string[];
+          const created = await classifyBatch(admin, apiKey, userId, still, await existing(admin, "artist_genres", "artist_id", ids));
+          for (const c of created) cl?.push({ spotify_track_id: c.spotify_track_id, style: c.style, feel_checked: false } as any);
+        } else {
+          const { data: cl2 } = await admin.from("track_ai_classification").select("spotify_track_id, style, feel_checked").eq("user_id", userId).in("spotify_track_id", bare.map((b: any) => b.spotify_track_id));
+          for (const c of cl2 ?? []) cl?.push(c);
+        }
+      }
       const todo = (rows ?? []).filter((r: any) => !cl?.find((c: any) => c.spotify_track_id === r.spotify_track_id)?.feel_checked);
       for (const t of todo) {
         const style = cl?.find((c: any) => c.spotify_track_id === t.spotify_track_id)?.style ?? "unknown";
