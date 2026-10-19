@@ -30,6 +30,7 @@ export default function EditSoundDialog({ track, onSaved, compact }: { track: Tr
   const [warmth, setWarmth] = useState(track.warmth ?? 0.5);
   const [scale, setScale] = useState(track.scale ?? 0.5);
   const [feeling, setFeeling] = useState<string>(track.feeling ?? "");
+  const [feeling2, setFeeling2] = useState<string>(track.feeling2 ?? "");
   const [melodic, setMelodic] = useState(track.melodicFocus ?? 0.5);
   const [arc, setArc] = useState<string>(track.arc ?? "");
   const [busy, setBusy] = useState(false);
@@ -45,7 +46,7 @@ export default function EditSoundDialog({ track, onSaved, compact }: { track: Tr
 
   async function save() {
     setBusy(true); setErr(null);
-    const m = { scene: scene || null, instruments: inst, texture, warmth, scale, feeling: feeling || null, melodic_focus: melodic, arc: arc || null };
+    const m = { scene: scene || null, instruments: inst, texture, warmth, scale, feeling: feeling || null, feeling_2: feeling2 && feeling2 !== feeling ? feeling2 : null, melodic_focus: melodic, arc: arc || null };
     try {
       await saveManualSound(track, m);
       onSaved(applyManualSound(track, m));
@@ -58,7 +59,7 @@ export default function EditSoundDialog({ track, onSaved, compact }: { track: Tr
   return (
     <Dialog open={open} onOpenChange={(o) => {
       setOpen(o);
-      if (o) { setScene(track.scene ?? ""); setInst(track.instruments); setTexture(track.texture ?? 0.5); setWarmth(track.warmth ?? 0.5); setScale(track.scale ?? 0.5); setFeeling(track.feeling ?? ""); setMelodic(track.melodicFocus ?? 0.5); setArc(track.arc ?? ""); }
+      if (o) { setScene(track.scene ?? ""); setInst(track.instruments); setTexture(track.texture ?? 0.5); setWarmth(track.warmth ?? 0.5); setScale(track.scale ?? 0.5); setFeeling(track.feeling ?? ""); setFeeling2(track.feeling2 ?? ""); setMelodic(track.melodicFocus ?? 0.5); setArc(track.arc ?? ""); }
     }}>
       <DialogTrigger asChild>
         {compact
@@ -107,6 +108,13 @@ export default function EditSoundDialog({ track, onSaved, compact }: { track: Tr
             <select value={feeling} onChange={(e) => setFeeling(e.target.value)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm">
               <option value="">Not set</option>
               {FEELINGS.map((s) => <option key={s} value={s}>{label(s)}</option>)}
+            </select>
+          </label>
+          <label className="block space-y-1 text-sm">
+            <span className="font-medium">Second feeling <span className="text-muted-foreground font-normal">(optional)</span></span>
+            <select value={feeling2} onChange={(e) => setFeeling2(e.target.value)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm">
+              <option value="">None</option>
+              {FEELINGS.filter((s) => s !== feeling).map((s) => <option key={s} value={s}>{label(s)}</option>)}
             </select>
           </label>
           <Dial name="Melodic focus" low="Rhythm / groove" high="Melody / emotion" value={melodic} onChange={setMelodic} />

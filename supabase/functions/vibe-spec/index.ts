@@ -48,7 +48,7 @@ Deno.serve(async (req) => {
     const seedList = Array.isArray(seeds) ? seeds.slice(0, 3) : [];
     if (text.length > 300 || (!text && !seedList.length)) return json({ error: "Write between 1 and 300 characters." }, 400);
     const seedText = seedList.map((t, i) =>
-      `${i + 1}. "${String(t.name).slice(0, 200)}" by ${(t.artists ?? []).slice(0, 4).join(", ")} | year: ${t.year ?? "?"} | genres: ${(t.genres ?? []).slice(0, 6).join(", ") || "none"} | language: ${t.lang ?? "?"} | energy: ${t.energy ?? "?"} | valence: ${t.valence ?? "?"} | danceability: ${t.danceability ?? "?"} | tempo: ${t.tempo ?? "?"} | mood: ${t.mood ?? "?"} | style: ${t.style ?? "?"} | scene: ${t.scene ?? "?"} | instruments: ${(t.instruments ?? []).slice(0, 6).join(", ") || "?"} | feeling: ${t.feeling ?? "?"} | arc: ${t.arc ?? "?"} | melodic_focus: ${t.melodic_focus ?? "?"}`
+      `${i + 1}. "${String(t.name).slice(0, 200)}" by ${(t.artists ?? []).slice(0, 4).join(", ")} | year: ${t.year ?? "?"} | genres: ${(t.genres ?? []).slice(0, 6).join(", ") || "none"} | language: ${t.lang ?? "?"} | energy: ${t.energy ?? "?"} | valence: ${t.valence ?? "?"} | danceability: ${t.danceability ?? "?"} | tempo: ${t.tempo ?? "?"} | mood: ${t.mood ?? "?"} | style: ${t.style ?? "?"} | scene: ${t.scene ?? "?"} | instruments: ${(t.instruments ?? []).slice(0, 6).join(", ") || "?"} | feeling: ${t.feeling ?? "?"}${t.feeling_2 ? ` / ${t.feeling_2}` : ""} | arc: ${t.arc ?? "?"} | melodic_focus: ${t.melodic_focus ?? "?"}`
     ).join("\n");
     const userMsg = `Vibe keywords: ${text || "(none — use only the seeds)"}` + (seedText ? `\n\nSEED SONGS:\n${seedText}` : "");
 

@@ -54,6 +54,7 @@ export interface TrackProfile {
   groove: string | null; // straight | swung | broken | half-time
   scene: string | null; // electronic dance scene (e.g. keinemusik-afro-organic)
   feeling: string | null; // listener emotion (e.g. inspirational)
+  feeling2?: string | null; // optional secondary feeling, same list
   melodicFocus: number | null; // 0 rhythm-driven → 1 melody-driven
   arc: string | null; // steady-groove | slow-build-climax | peaks-and-drops | floating-ambient
   confidence: number | null; // AI confidence in the sound description
@@ -242,7 +243,7 @@ export function buildProfiles(
       tempo: null,
       mood: null,
       style: null,
-      instruments: [], texture: null, warmth: null, scale: null, groove: null, scene: null, feeling: null, melodicFocus: null, arc: null, confidence: null,
+      instruments: [], texture: null, warmth: null, scale: null, groove: null, scene: null, feeling: null, feeling2: null, melodicFocus: null, arc: null, confidence: null,
     };
   });
 }

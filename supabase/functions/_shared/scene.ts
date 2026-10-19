@@ -17,11 +17,12 @@ const SYSTEM = `You are an expert electronic music curator. For each song, descr
 "scale": 0 = intimate/minimal, 1 = epic/festival.
 Compare the songs in the batch with each other. texture, warmth and scale must use the full 0–1 range to tell them apart; do not repeat the same value for all.
 "feeling": the main emotion the LISTENER feels, ONLY one of: ${FEELINGS.map((x) => `"${x}"`).join(",")}.
+"feeling_2": optional secondary emotion from the same list (different from "feeling"), or null. "inspirational" = calm hope, healing, reflection; "euphoric" = dance-floor euphoria — never confuse them.
 "melodic_focus": 0 = the song lives on rhythm and groove; 1 = the song lives on melody and emotion.
 "arc": the song's shape, ONLY one of: "steady-groove" (same from start to end), "slow-build-climax" (starts calm and grows to an emotional climax), "peaks-and-drops" (festival builds and drops), "floating-ambient".
 Describe what the listener FEELS with this specific song and how it evolves from start to end. If you don't know it well, say so with a low "confidence" (0–1) instead of guessing from the artist.
 If you don't know a song, infer from the artist/remixer and the style, and list one instrument fewer.
-Return ONLY JSON: {"results":[{"id":"<id>","scene":"...","instruments":[...],"texture":0.0,"warmth":0.0,"scale":0.0,"feeling":"...","melodic_focus":0.0,"arc":"...","confidence":0.0}]}`;
+Return ONLY JSON: {"results":[{"id":"<id>","scene":"...","instruments":[...],"texture":0.0,"warmth":0.0,"scale":0.0,"feeling":"...","feeling_2":null,"melodic_focus":0.0,"arc":"...","confidence":0.0}]}`;
 
 export async function classifyScenes(apiKey: string, style: string, songs: { id: string; line: string }[]) {
   const user = `All songs are style "${style}".\n` + songs.map((s, i) => `${i + 1}. id=${s.id} | ${s.line}`).join("\n");
@@ -49,6 +50,7 @@ export async function classifyScenes(apiKey: string, style: string, songs: { id:
         instruments: snd.instruments, texture: snd.texture, warmth: snd.warmth, scale: snd.scale,
         scene_checked: true,
         feeling: FEELINGS.includes(r.feeling) ? r.feeling : null,
+        feeling_2: FEELINGS.includes(r.feeling_2) && r.feeling_2 !== r.feeling ? r.feeling_2 : null,
         melodic_focus: c01(r.melodic_focus),
         arc: ARCS.includes(r.arc) ? r.arc : null,
         confidence: c01(r.confidence),

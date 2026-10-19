@@ -170,7 +170,7 @@ const r2 = (x: number | null) => (x === null ? null : Math.round(x * 100) / 100)
 const brief = (t: TrackProfile) => ({
   id: t.id, name: t.name, artists: t.artists, year: t.year, genres: t.genres.slice(0, 5),
   style: t.style ?? null, lang: t.lang, energy: r2(t.energy), mood: t.mood,
-  instruments: t.instruments, texture: r2(t.texture), warmth: r2(t.warmth), scale: r2(t.scale), groove: t.groove, scene: t.scene, feeling: t.feeling, melodic_focus: r2(t.melodicFocus), arc: t.arc,
+  instruments: t.instruments, texture: r2(t.texture), warmth: r2(t.warmth), scale: r2(t.scale), groove: t.groove, scene: t.scene, feeling: t.feeling, feeling_2: t.feeling2 ?? null, melodic_focus: r2(t.melodicFocus), arc: t.arc,
 });
 /** Full seed profile for the AI. */
 export const seedProfile = (t: TrackProfile) => ({
@@ -179,7 +179,7 @@ export const seedProfile = (t: TrackProfile) => ({
 });
 
 async function scoreCandidates(userId: string, vibe: string, cands: TrackProfile[], seeds: TrackProfile[], onProgress?: (d: number, t: number) => void) {
-  const key = "v6|" + vibeKey(vibe) + (seeds.length ? ` |seed:${seeds.map((x) => `${x.id}~${x.feeling ?? ""}~${x.arc ?? ""}~${x.melodicFocus ?? ""}~${x.scene ?? ""}`).join(",")}` : "");
+  const key = "v6|" + vibeKey(vibe) + (seeds.length ? ` |seed:${seeds.map((x) => `${x.id}~${x.feeling ?? ""}~${x.feeling2 ?? ""}~${x.arc ?? ""}~${x.melodicFocus ?? ""}~${x.scene ?? ""}`).join(",")}` : "");
   const scores = new Map<string, number>();
   const ids = cands.map((c) => c.id);
   for (let i = 0; i < ids.length; i += 200) {
@@ -290,11 +290,11 @@ export async function buildVibePlaylist(
   const seedBody = seeds.map((t) => ({
     name: t.name, artists: t.artists, year: t.year, genres: t.genres.slice(0, 6), lang: t.lang,
     energy: t.energy, valence: t.valence, danceability: t.danceability, tempo: t.tempo, mood: t.mood,
-    style: t.style ?? null, scene: t.scene ?? null, instruments: t.instruments ?? [], feeling: t.feeling ?? null, arc: t.arc ?? null, melodic_focus: t.melodicFocus ?? null,
+    style: t.style ?? null, scene: t.scene ?? null, instruments: t.instruments ?? [], feeling: t.feeling ?? null, feeling_2: t.feeling2 ?? null, arc: t.arc ?? null, melodic_focus: t.melodicFocus ?? null,
   }));
   const removedP = removedForSeeds(userId, seeds);
   // Recipe (and name) cached per vibe text + seed profile.
-  const specKey = "s1|" + vibeKey(vibe) + "|" + seeds.map((x) => `${x.id}~${x.feeling ?? ""}~${x.arc ?? ""}~${x.scene ?? ""}`).join(",");
+  const specKey = "s1|" + vibeKey(vibe) + "|" + seeds.map((x) => `${x.id}~${x.feeling ?? ""}~${x.feeling2 ?? ""}~${x.arc ?? ""}~${x.scene ?? ""}`).join(",");
   const { data: cached } = await supabase.from("vibe_spec_cache").select("spec").eq("user_id", userId).eq("spec_key", specKey).maybeSingle();
   let raw = cached?.spec as unknown as VibeSpec | undefined;
   if (!raw) {

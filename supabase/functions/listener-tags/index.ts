@@ -30,11 +30,12 @@ export function cleanTitle(t: string) {
 const RECLASS = `You are an expert music curator. Basa el feeling en cómo los oyentes describen la canción. Si la evidencia contradice lo que suele hacer el artista, gana la evidencia. La confidence depende de cuánta evidencia hay y qué tan consistente es.
 For each song you get listener evidence: Last.fm tags (with counts; tags marked "artist" describe the artist, not the song, so they are weaker) and/or a summary of YouTube comments.
 "feeling": main emotion the LISTENER feels, ONLY one of: ${FEELINGS.map((x) => `"${x}"`).join(",")}.
+"feeling_2": optional secondary emotion from the same list (different from "feeling"), or null. "inspirational" = calm hope, healing, reflection (goosebumps, tears, sunrise); "euphoric" = dance-floor euphoria, hands in the air — never confuse them.
 "melodic_focus": 0 = lives on rhythm and groove; 1 = lives on melody and emotion.
 "arc": ONLY one of: ${ARCS.map((x) => `"${x}"`).join(",")}.
 "instruments": 2 to 5, ONLY from: ${INSTRUMENTS.map((x) => `"${x}"`).join(",")}.
 "confidence": 0–1.
-Return ONLY JSON: {"results":[{"id":"<id>","feeling":"...","melodic_focus":0.0,"arc":"...","instruments":[...],"confidence":0.0}]}`;
+Return ONLY JSON: {"results":[{"id":"<id>","feeling":"...","feeling_2":null,"melodic_focus":0.0,"arc":"...","instruments":[...],"confidence":0.0}]}`;
 
 async function lastfm(method: string, params: Record<string, string>) {
   const u = new URL("https://ws.audioscrobbler.com/2.0/");
@@ -169,38 +170,47 @@ async function runHop(admin: any, userId: string, started: number, priority: str
   // 3) Re-describe with evidence (strong model). Wait for YouTube on candidates still in today's budget.
   const ready = order([...ev.values()].filter((e) => !e.evidence_applied && e.lastfm_checked && (e.tags?.length || e.youtube_summary) && byId.has(e.spotify_track_id)
     && (e.youtube_checked || !isYtCandidate(e.spotify_track_id) || ytBlocked)).map((e) => e.spotify_track_id));
-  for (let i = 0; i < ready.length && left() > 10_000; i += 15) {
-    const ids = ready.slice(i, i + 15);
-    const lines = ids.map((id, n) => {
-      const t = byId.get(id)!; const e = ev.get(id); const c = cls.get(id);
-      const tags = (e.tags ?? []).map((x: any) => `${x.name} (${x.count})`).join(", ");
-      return `${n + 1}. id=${id} | "${t.track_name}" by ${((t.artists ?? []) as any[]).map((a) => a?.name).join(", ")} | style: ${c?.style ?? "?"} | last.fm ${e.tag_source ?? ""} tags: ${tags || "none"} | youtube comments: ${e.youtube_summary ?? "none"}`;
-    }).join("\n");
-    let res: Response | null = null;
-    for (const model of chosen ? [chosen] : MODELS) {
-      res = await openai({ model, response_format: { type: "json_object" }, messages: [{ role: "system", content: RECLASS }, { role: "user", content: lines }] });
-      if ([400, 403, 404].includes(res.status) && !chosen) continue;
-      if (res.ok) chosen = model;
-      break;
+  // Up to 5 strong-model batches at once.
+  const groups: string[][] = [];
+  for (let i = 0; i < ready.length; i += 15) groups.push(ready.slice(i, i + 15));
+  let stop = false;
+  const reWorker = async () => {
+    while (groups.length && !stop && left() > 10_000) {
+      const ids = groups.shift()!;
+        const lines = ids.map((id, n) => {
+          const t = byId.get(id)!; const e = ev.get(id); const c = cls.get(id);
+          const tags = (e.tags ?? []).map((x: any) => `${x.name} (${x.count})`).join(", ");
+          return `${n + 1}. id=${id} | "${t.track_name}" by ${((t.artists ?? []) as any[]).map((a) => a?.name).join(", ")} | style: ${c?.style ?? "?"} | last.fm ${e.tag_source ?? ""} tags: ${tags || "none"} | youtube comments: ${e.youtube_summary ?? "none"}`;
+        }).join("\n");
+        let res: Response | null = null;
+        for (const model of chosen ? [chosen] : MODELS) {
+          res = await openai({ model, response_format: { type: "json_object" }, messages: [{ role: "system", content: RECLASS }, { role: "user", content: lines }] });
+          if ([400, 403, 404].includes(res.status) && !chosen) continue;
+          if (res.ok) chosen = model;
+          break;
+        }
+        if (!res || !res.ok) { console.log(`[listener-tags] AI ${res?.status}`); stop = true; return; }
+        let parsed: any = {};
+        try { parsed = JSON.parse(String((await res.json()).choices?.[0]?.message?.content ?? "{}")); } catch { /* skip */ }
+        for (const r of (parsed.results ?? []) as any[]) {
+          if (!ids.includes(r?.id)) continue;
+          const patch: Record<string, unknown> = {
+            feeling: FEELINGS.includes(r.feeling) ? r.feeling : undefined,
+            feeling_2: FEELINGS.includes(r.feeling) ? (FEELINGS.includes(r.feeling_2) && r.feeling_2 !== r.feeling ? r.feeling_2 : null) : undefined,
+            melodic_focus: c01(r.melodic_focus) ?? undefined,
+            arc: ARCS.includes(r.arc) ? r.arc : undefined,
+            instruments: sanitizeSound(r).instruments ?? undefined,
+            confidence: c01(r.confidence) ?? undefined,
+            feel_checked: true,
+          };
+          for (const k of Object.keys(patch)) if (patch[k] === undefined) delete patch[k];
+          await admin.from("track_ai_classification").update(patch).eq("user_id", userId).eq("spotify_track_id", r.id);
+        }
+        for (const id of ids) await upsert(id, { evidence_applied: true });
+
     }
-    if (!res || !res.ok) { console.log(`[listener-tags] AI ${res?.status}`); break; }
-    let parsed: any = {};
-    try { parsed = JSON.parse(String((await res.json()).choices?.[0]?.message?.content ?? "{}")); } catch { /* skip */ }
-    for (const r of (parsed.results ?? []) as any[]) {
-      if (!ids.includes(r?.id)) continue;
-      const patch: Record<string, unknown> = {
-        feeling: FEELINGS.includes(r.feeling) ? r.feeling : undefined,
-        melodic_focus: c01(r.melodic_focus) ?? undefined,
-        arc: ARCS.includes(r.arc) ? r.arc : undefined,
-        instruments: sanitizeSound(r).instruments ?? undefined,
-        confidence: c01(r.confidence) ?? undefined,
-        feel_checked: true,
-      };
-      for (const k of Object.keys(patch)) if (patch[k] === undefined) delete patch[k];
-      await admin.from("track_ai_classification").update(patch).eq("user_id", userId).eq("spotify_track_id", r.id);
-    }
-    for (const id of ids) await upsert(id, { evidence_applied: true });
-  }
+  };
+  await Promise.all(Array.from({ length: 5 }, reWorker));
   const reLeft = [...ev.values()].filter((e) => !e.evidence_applied && e.lastfm_checked && (e.tags?.length || e.youtube_summary)).length;
   return { lastfm_left: lfLeft, youtube_left: ytLeft, reclassify_left: reLeft, youtube_searches_today: used };
 }

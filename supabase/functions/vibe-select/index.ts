@@ -17,6 +17,7 @@ Without a seed, read "the seed" as the vibe described by the user.
 La instrumentación es lo que más define si una canción encaja. Dos canciones del mismo estilo pero con paletas de instrumentos distintas NO encajan. Ejemplo: con 'Forms Of Love' (house orgánico, cálido, percusión orgánica, groove relajado) NO encajan 'Dune – Moonwalk' (sintetizadores épicos y oscuros, estilo Afterlife) ni 'calvera – fyodor, Apéro' (instrumentación de jazz), aunque tengan energía y mood parecidos. Califica con 6 o menos cualquier canción cuya paleta de instrumentos no se parezca a la de la semilla.
 Canciones de escenas distintas no encajan aunque compartan estilo, salvo que sean escenas vecinas.
 La pregunta clave es: ¿el oyente seguiría sintiendo lo mismo? Si la semilla te hace sentir inspirado por la melodía y los instrumentos, una canción de groove repetitivo rompe ese sentimiento aunque sea de la misma escena; califícala con 6 o menos. Ejemplo: 'Forms Of Love' (piano tranquilo que crece hasta un clímax melódico e inspiracional) no encaja con house de groove percusivo.
+Inspirational (calm hope, healing, reflection) and euphoric (dance-floor euphoria) are DIFFERENT feelings: with an inspirational seed, a euphoric peak-time song is 6 or less.
 Use your knowledge of the actual song when you know it.
 Return ONLY JSON: {"results":[{"n":<song number>,"s":<score 0-10>}, ...]} with one object per song.`;
 
@@ -25,7 +26,7 @@ interface Cand {
   genres: string[]; energy: number | null; mood: string | null;
   style?: string | null; lang?: string | null; families?: string[];
   valence?: number | null; danceability?: number | null; tempo?: number | null;
-  instruments?: string[]; texture?: number | null; warmth?: number | null; scale?: number | null; groove?: string | null; scene?: string | null; feeling?: string | null; melodic_focus?: number | null; arc?: string | null;
+  instruments?: string[]; texture?: number | null; warmth?: number | null; scale?: number | null; groove?: string | null; scene?: string | null; feeling?: string | null; feeling_2?: string | null; melodic_focus?: number | null; arc?: string | null;
 }
 
 Deno.serve(async (req) => {
@@ -47,13 +48,13 @@ Deno.serve(async (req) => {
     if (!apiKey) return json({ error: "OPENAI_API_KEY is not set." }, 500);
 
     const list = tracks.map((t, i) =>
-      `${i + 1}. "${String(t.name).slice(0, 200)}" by ${(t.artists ?? []).slice(0, 4).join(", ")} | original year: ${t.year ?? "?"} | style: ${t.style ?? "?"} | language: ${t.lang ?? "?"} | genres: ${(t.genres ?? []).slice(0, 5).join(", ") || "none"} | energy: ${t.energy ?? "?"} | mood: ${t.mood ?? "?"} | instruments: ${(t.instruments ?? []).join(", ") || "?"} | texture: ${t.texture ?? "?"} | warmth: ${t.warmth ?? "?"} | scale: ${t.scale ?? "?"} | groove: ${t.groove ?? "?"} | scene: ${t.scene ?? "?"} | feeling: ${t.feeling ?? "?"} | melodic_focus: ${t.melodic_focus ?? "?"} | arc: ${t.arc ?? "?"}`
+      `${i + 1}. "${String(t.name).slice(0, 200)}" by ${(t.artists ?? []).slice(0, 4).join(", ")} | original year: ${t.year ?? "?"} | style: ${t.style ?? "?"} | language: ${t.lang ?? "?"} | genres: ${(t.genres ?? []).slice(0, 5).join(", ") || "none"} | energy: ${t.energy ?? "?"} | mood: ${t.mood ?? "?"} | instruments: ${(t.instruments ?? []).join(", ") || "?"} | texture: ${t.texture ?? "?"} | warmth: ${t.warmth ?? "?"} | scale: ${t.scale ?? "?"} | groove: ${t.groove ?? "?"} | scene: ${t.scene ?? "?"} | feeling: ${t.feeling ?? "?"}${t.feeling_2 ? ` (also ${t.feeling_2})` : ""} | melodic_focus: ${t.melodic_focus ?? "?"} | arc: ${t.arc ?? "?"}`
     ).join("\n");
 
     const seedText = seedList.map((t) => `"${String(t.name).slice(0, 200)}" by ${(t.artists ?? []).slice(0, 4).join(", ")}`).join("; ");
     const seedRule = seedText
       ? `\n\nRate how well each song would flow in a playlist that starts with ${seedText}. Think about sound, production, energy, emotion and listening context. A song of the same genre but with a different energy or feeling is NOT an 8.\nSeed details:\n` +
-        seedList.map((t) => `- "${t.name}" by ${(t.artists ?? []).slice(0, 4).join(", ")} | original year: ${t.year ?? "?"} | style: ${t.style ?? "?"} | language: ${t.lang ?? "?"} | families: ${(t.families ?? []).join(", ") || "?"} | genres: ${(t.genres ?? []).slice(0, 5).join(", ") || "none"} | energy: ${t.energy ?? "?"} | valence: ${t.valence ?? "?"} | danceability: ${t.danceability ?? "?"} | tempo: ${t.tempo ?? "?"} | mood: ${t.mood ?? "?"} | instruments: ${(t.instruments ?? []).join(", ") || "?"} | texture: ${t.texture ?? "?"} | warmth: ${t.warmth ?? "?"} | scale: ${t.scale ?? "?"} | groove: ${t.groove ?? "?"} | scene: ${t.scene ?? "?"} | feeling: ${t.feeling ?? "?"} | melodic_focus: ${t.melodic_focus ?? "?"} | arc: ${t.arc ?? "?"}`).join("\n")
+        seedList.map((t) => `- "${t.name}" by ${(t.artists ?? []).slice(0, 4).join(", ")} | original year: ${t.year ?? "?"} | style: ${t.style ?? "?"} | language: ${t.lang ?? "?"} | families: ${(t.families ?? []).join(", ") || "?"} | genres: ${(t.genres ?? []).slice(0, 5).join(", ") || "none"} | energy: ${t.energy ?? "?"} | valence: ${t.valence ?? "?"} | danceability: ${t.danceability ?? "?"} | tempo: ${t.tempo ?? "?"} | mood: ${t.mood ?? "?"} | instruments: ${(t.instruments ?? []).join(", ") || "?"} | texture: ${t.texture ?? "?"} | warmth: ${t.warmth ?? "?"} | scale: ${t.scale ?? "?"} | groove: ${t.groove ?? "?"} | scene: ${t.scene ?? "?"} | feeling: ${t.feeling ?? "?"}${t.feeling_2 ? ` (also ${t.feeling_2})` : ""} | melodic_focus: ${t.melodic_focus ?? "?"} | arc: ${t.arc ?? "?"}`).join("\n")
       : "";
     const res = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
