@@ -99,6 +99,13 @@
       "when": 1792432807798,
       "tag": "0013_shared_track_analysis_and_prebuilt_playlists",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1792434363825,
+      "tag": "0014_vibe_spec_cache",
+      "breakpoints": true
     }
   ]
 }

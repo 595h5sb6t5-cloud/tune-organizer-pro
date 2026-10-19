@@ -3015,6 +3015,27 @@ export type Database = {
         }
         Relationships: []
       }
+      vibe_spec_cache: {
+        Row: {
+          created_at: string
+          spec: Json
+          spec_key: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          spec: Json
+          spec_key: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          spec?: Json
+          spec_key?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       vibe_timings: {
         Row: {
           created_at: string
