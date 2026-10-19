@@ -566,16 +566,25 @@ export async function curateLibrary(
   const kept: PlaylistDraft[] = [];
   const removed: TrackProfile[] = [];
   let done = 0;
-  for (const p of result.playlists) {
-    const verdict = await curator(p.tracks).catch(() => null);
-    onProgress?.(++done, result.playlists.length);
+  // Up to 5 curator calls at once; results are applied in the original playlist order.
+  const verdicts: (Awaited<ReturnType<Curator>> | null)[] = new Array(result.playlists.length).fill(null);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(5, result.playlists.length) }, async () => {
+    while (next < result.playlists.length) {
+      const i = next++;
+      verdicts[i] = await curator(result.playlists[i].tracks).catch(() => null);
+      onProgress?.(++done, result.playlists.length);
+    }
+  }));
+  result.playlists.forEach((p, i) => {
+    const verdict = verdicts[i];
     const drop = new Set(verdict?.remove.map((r) => r.id) ?? []);
     verdict?.remove.forEach((r) => (reasons[r.id] = r.reason));
     const tracks = p.tracks.filter((t) => !drop.has(t.id));
     removed.push(...p.tracks.filter((t) => drop.has(t.id)));
     const name = verdict?.name || p.name;
     kept.push({ ...p, name, tracks });
-  }
+  });
 
   const unsorted = [...result.unsorted];
   for (const t of removed) {
