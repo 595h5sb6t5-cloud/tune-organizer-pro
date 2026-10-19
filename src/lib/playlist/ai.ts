@@ -158,6 +158,36 @@ function apply(p: TrackProfile, info: Partial3, fromAi: boolean): TrackProfile {
   };
 }
 
+/** Sound heard from public previews (shared per song). Replaces the text-based sound fields. */
+async function loadAudio(ids: string[]): Promise<Map<string, any>> {
+  const map = new Map<string, any>();
+  for (let i = 0; i < ids.length; i += 300) {
+    const { data } = await supabase.from("track_audio_analysis")
+      .select("spotify_track_id, source, instruments, melodic_focus, percussive_drive, texture, warmth, scale, groove, confidence")
+      .in("spotify_track_id", ids.slice(i, i + 300));
+    for (const r of data ?? []) map.set(r.spotify_track_id, r);
+  }
+  return map;
+}
+
+export function applyAudio(p: TrackProfile, a: any): TrackProfile {
+  if (!a) return p;
+  const heard = a.source !== "none";
+  return {
+    ...p, audioSource: a.source,
+    percussiveDrive: a.percussive_drive ?? p.percussiveDrive ?? null,
+    // Without a preview the text values stay; only fill gaps.
+    instruments: heard && a.instruments?.length ? a.instruments : p.instruments.length ? p.instruments : a.instruments ?? [],
+    texture: heard ? a.texture ?? p.texture : p.texture ?? a.texture,
+    warmth: heard ? a.warmth ?? p.warmth : p.warmth ?? a.warmth,
+    scale: heard ? a.scale ?? p.scale : p.scale ?? a.scale,
+    groove: heard ? a.groove ?? p.groove : p.groove ?? a.groove,
+    melodicFocus: heard ? a.melodic_focus ?? p.melodicFocus : p.melodicFocus ?? a.melodic_focus,
+    // "Sin audio": lower confidence.
+    confidence: heard ? p.confidence : Math.min(p.confidence ?? 0.4, 0.4),
+  };
+}
+
 export async function enrichWithAI(
   profiles: TrackProfile[],
   onProgress?: (done: number, total: number) => void,
@@ -165,7 +195,7 @@ export async function enrichWithAI(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return profiles;
 
-  const [deep, stored] = await Promise.all([loadDeepAnalysis(user.id), loadStoredClassifications(user.id)]);
+  const [deep, stored, audio] = await Promise.all([loadDeepAnalysis(user.id), loadStoredClassifications(user.id), loadAudio(profiles.map((p) => p.id))]);
 
   // Missing songs are classified in the background (library-enrich); use stored data now.
   onProgress?.(0, 0);
@@ -184,6 +214,8 @@ export async function enrichWithAI(
       warmth: ai.warmth ?? null, scale: ai.scale ?? null, groove: ai.groove ?? null, scene: ai.scene ?? null,
       feeling: ai.feeling ?? null, feeling2: ai.feeling_2 ?? null, melodicFocus: ai.melodic_focus ?? null, arc: ai.arc ?? null, confidence: ai.confidence ?? null,
     };
+    // Heard sound replaces text sound; feeling/arc stay with listeners.
+    out = applyAudio(out, audio.get(p.id));
     // Hand corrections always win over AI values.
     if (ai?.manual_sound) out = applyManualSound(out, ai.manual_sound);
     if (ai?.original_year) out = { ...out, year: ai.original_year };
