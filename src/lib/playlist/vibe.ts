@@ -211,36 +211,53 @@ async function scoreCandidates(userId: string, vibe: string, cands: TrackProfile
 }
 
 const LISTEN_TOP = 24;
-const LISTEN_BATCH = 8;
-const LISTEN_MIN = 7;
+const LISTEN_BATCH = 4;
+const LISTEN_PARALLEL = 6;
 
-/** Step 3b: Gemini hears the seed + the 24 best candidates (batches of 8 in parallel). Cached per seed set. */
+/** Most similar seed for a candidate (the ear compares against that one). */
+export const nearestSeed = (t: TrackProfile, seeds: TrackProfile[]) =>
+  seeds.reduce((best, x) => (compatibility(t, x) > compatibility(t, best) ? x : best), seeds[0]);
+
+/** Step 3: Gemini hears each candidate next to its nearest seed. Batches of 4, 6 at a time.
+ *  Each (seed, candidate) score is cached so a pair is never heard twice. */
 async function listenCandidates(userId: string, cands: TrackProfile[], seeds: TrackProfile[], onProgress?: (d: number, t: number) => void) {
-  const key = "listen1|" + seeds.map((x) => x.id).join(",");
   const scores = new Map<string, number>();
-  const ids = cands.map((c) => c.id);
-  const { data } = await supabase.from("vibe_select_cache").select("spotify_track_id, score")
-    .eq("user_id", userId).eq("vibe_key", key).in("spotify_track_id", ids);
-  for (const r of data ?? []) scores.set(r.spotify_track_id, Number(r.score));
-  const todo = ids.filter((id) => !scores.has(id));
-  const batches: string[][] = [];
-  for (let i = 0; i < todo.length; i += LISTEN_BATCH) batches.push(todo.slice(i, i + LISTEN_BATCH));
-  let done = 0, seedHeard = true;
-  onProgress?.(0, todo.length);
-  await Promise.all(batches.map(async (b) => {
-    const { data, error } = await supabase.functions.invoke("vibe-listen", { body: { seed_ids: seeds.map((x) => x.id), ids: b } });
-    if (error || data?.error) throw new Error(data?.error ?? error?.message ?? "The listening step failed.");
-    if (data.no_seed_audio) seedHeard = false;
-    const rows = (data.results ?? []).map((r: any) => { scores.set(r.id, r.score); return { user_id: userId, vibe_key: key, spotify_track_id: r.id, score: r.score }; });
-    if (rows.length) await supabase.from("vibe_select_cache").upsert(rows, { onConflict: "user_id,vibe_key,spotify_track_id" });
-    done += b.length; onProgress?.(done, todo.length);
+  const unheard = new Set<string>();
+  const bySeed = new Map<string, string[]>();
+  for (const c of cands) { const s = nearestSeed(c, seeds).id; bySeed.set(s, [...(bySeed.get(s) ?? []), c.id]); }
+  const jobs: { seed: string; ids: string[] }[] = [];
+  await Promise.all([...bySeed.entries()].map(async ([seed, ids]) => {
+    const key = "ear2|" + seed;
+    const { data } = await supabase.from("vibe_select_cache").select("spotify_track_id, score")
+      .eq("user_id", userId).eq("vibe_key", key).in("spotify_track_id", ids);
+    for (const r of data ?? []) scores.set(r.spotify_track_id, Number(r.score));
+    const todo = ids.filter((id) => !scores.has(id));
+    for (let i = 0; i < todo.length; i += LISTEN_BATCH) jobs.push({ seed, ids: todo.slice(i, i + LISTEN_BATCH) });
   }));
-  return { scores, seedHeard };
+  const total = jobs.reduce((a, j) => a + j.ids.length, 0);
+  let done = 0, next = 0, seedHeard = true;
+  onProgress?.(0, total);
+  const worker = async () => {
+    while (next < jobs.length) {
+      const j = jobs[next++];
+      const call = () => supabase.functions.invoke("vibe-listen", { body: { seed_ids: [j.seed], ids: j.ids } });
+      let { data, error } = await call();
+      if (error || data?.error) ({ data, error } = await call()); // one retry for a busy moment
+      if (error || data?.error) throw new Error(data?.error ?? error?.message ?? "The listening step failed.");
+      if (data.no_seed_audio) seedHeard = false;
+      for (const id of data.unheard ?? []) unheard.add(id);
+      const rows = (data.results ?? []).map((r: any) => { scores.set(r.id, r.score); return { user_id: userId, vibe_key: "ear2|" + j.seed, spotify_track_id: r.id, score: r.score }; });
+      if (rows.length) await supabase.from("vibe_select_cache").upsert(rows, { onConflict: "user_id,vibe_key,spotify_track_id" });
+      done += j.ids.length; onProgress?.(done, total);
+    }
+  };
+  await Promise.all(Array.from({ length: LISTEN_PARALLEL }, worker));
+  return { scores, seedHeard, unheard };
 }
 
 /** Listener feeling vs. the seed: same main, or main = the other's secondary, or neighbor. */
 const feelsLikeSeed = (t: TrackProfile, seeds: TrackProfile[]) =>
-  (fitPool.length ? fitPool : seeds).some((x) => { const f = feelingScore(t, x); return f === null || f >= 0.5; });
+  seeds.some((x) => { const f = feelingScore(t, x); return f === null || f >= 0.5; });
 
 let fitPool: TrackProfile[] = [];
 /** Same main feeling, or main = the other's secondary (≥0.75). */
@@ -369,24 +386,31 @@ export async function buildVibePlaylist(
   lap("filter");
   if (!candidates.length) return finish({ spec, lang, tracks: seeds.length ? sequence(seeds, seeds[0].id) : [], candidates: 0, approved: 0 });
 
-  const scores = await scoreCandidates(userId, vibe, candidates, seeds, (d, t) => onStep("Finding songs that feel the same", d, t));
-  const approved = candidates.filter((c) => (scores.get(c.id) ?? 0) >= MIN_SCORE);
-  lap("select");
-
-  // Listening: seed + 24 best candidates. Only songs that pass BOTH the ear and the listeners' feeling stay.
+  // With seeds: the ear decides. The 24 heard are the best compatibility() fits (stored audio + listener feeling).
+  // The text review is used only for songs without an audio clip, or when there are no seeds.
+  let scores = new Map<string, number>();
   let pool = candidates;
+  let approved = 0;
   if (seeds.length) {
+    lap("select");
     const fitOf = (t: TrackProfile) => seedFitOf(t, seeds);
-    // A 6 from the text review may still be heard: listeners and the ear can prove it belongs.
-    const top = candidates.filter((c) => (scores.get(c.id) ?? 0) >= FILL_SCORE - 1)
-      .sort((a, b) => (scores.get(b.id) ?? 0) - (scores.get(a.id) ?? 0) || fitOf(b) - fitOf(a)).slice(0, LISTEN_TOP);
+    const top = candidates.filter((t) => feelsLikeSeed(t, seeds)).sort((a, b) => fitOf(b) - fitOf(a)).slice(0, LISTEN_TOP);
+    const withClip = top.filter((t) => t.audioSource !== "none");
     onStep("Listening to the songs");
-    const { scores: ear, seedHeard } = await listenCandidates(userId, top, seeds, (d, t) => onStep("Listening to the songs", d, t));
-    pool = seedHeard
-      ? top.filter((t) => feelsLikeSeed(t, seeds) && (ear.has(t.id) ? ear.get(t.id)! >= LISTEN_MIN : (scores.get(t.id) ?? 0) >= MIN_SCORE)
-          && ((scores.get(t.id) ?? 0) >= FILL_SCORE || (ear.get(t.id) ?? 0) >= MIN_SCORE && strongFeel(t, seeds)))
-      : top.filter((t) => feelsLikeSeed(t, seeds) && (scores.get(t.id) ?? 0) >= FILL_SCORE);
-    for (const t of pool) scores.set(t.id, rescuedScore(scores.get(t.id) ?? 0, ear.get(t.id), strongFeel(t, seeds)));
+    const listenP = listenCandidates(userId, withClip, seeds, (d, t) => onStep("Listening to the songs", d, t));
+    const noClip = top.filter((t) => t.audioSource === "none");
+    const textP = noClip.length ? scoreCandidates(userId, vibe, noClip, seeds) : Promise.resolve(new Map<string, number>());
+    const [{ scores: ear, seedHeard, unheard }, text] = await Promise.all([listenP, textP]);
+    // Clip missing at listen time, or seed without a clip → text review for those.
+    const late = top.filter((t) => !ear.has(t.id) && !text.has(t.id) && (!seedHeard || unheard.has(t.id)));
+    const text2 = late.length ? await scoreCandidates(userId, vibe, late, seeds) : new Map<string, number>();
+    scores = new Map([...text, ...text2, ...ear]);
+    pool = top.filter((t) => (scores.get(t.id) ?? 0) >= MIN_SCORE);
+    approved = pool.length;
+  } else {
+    scores = await scoreCandidates(userId, vibe, candidates, seeds, (d, t) => onStep("Finding songs that feel the same", d, t));
+    approved = candidates.filter((c) => (scores.get(c.id) ?? 0) >= MIN_SCORE).length;
+    lap("select");
   }
   lap("listen");
 
@@ -396,5 +420,5 @@ export async function buildVibePlaylist(
   lap("order");
   // The name comes with the recipe (vibe-spec); no separate naming call.
   lap("name");
-  return finish({ spec, lang, tracks, candidates: candidates.length, approved: approved.length, eights: sel.eights, sevens: sel.sevens });
+  return finish({ spec, lang, tracks, candidates: candidates.length, approved, eights: sel.eights, sevens: sel.sevens });
 }
