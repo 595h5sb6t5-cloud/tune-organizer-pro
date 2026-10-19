@@ -1,78 +1,41 @@
-# AI Playlist Pipeline v3 — Cluster-first with strict quality gates
+# Speed: deep analysis that never makes the user wait
 
-Detengo cualquier generación/exportación con el sistema actual y reescribo el pipeline con estas piezas.
+Goals: AI Playlists opens instantly; a vibe is created in under 20 seconds.
 
-## 1. Nueva Edge Function: `cluster-library`
+## 1. Shared song analysis (global, by Spotify id)
+- New table `track_analysis_global` keyed by Spotify track id: style, family, scene, feeling, melodic_focus, arc, instruments, texture, warmth, scale, groove, original_year, energy, mood, confidence, listener evidence summary, plus model/version and timestamps.
+- Readable by any signed-in user; written only by background functions.
+- All analyzers (classify-tracks, library-enrich, listener-tags) check this table first and only call the AI for ids that are missing; results are written once to the global table.
+- One-time backfill from existing per-user analysis.
+- "Edit sound" corrections (`manual_sound`) and removal feedback stay per user and still override the global values.
 
-Reemplaza el flujo "concepto → buscar canciones". Ahora es: **agrupar primero, nombrar después**.
+## 2. Priority on connect
+- Analysis queue order: 200 most recent Liked Songs, then songs by the artists with the most Liked Songs, then the rest.
+- When the priority set is done, a first set of playlists is built in the background; later rounds rebuild them automatically.
 
-Entrada: `{ sample_size?: number, dry_run?: boolean }`.
+## 3. Parallelism
+- Up to 5 AI batches at once in the analyzers (with the existing pause on 402/403/repeated 429).
+- Last.fm throttled to 4 requests/second.
+- YouTube unchanged: only seeds and songs with confidence < 0.6, existing daily cap.
 
-Pasos:
-1. Cargar todas las canciones con `ai_track_analysis v2.1` del usuario (con las 16 dimensiones sonoras).
-2. Construir vector de features **solo sonoros** con pesos:
-   - Alto: `groove_feel`, `production_style`, `beat_style`, `instrumentation`, `energy_score`, `melody_level`, `bass_level`, `drum_intensity`, `vocal_intensity`, `darkness`, `softness`, `dance_feel`, `song_variation`, `emotional_intensity`, `sound_texture`
-   - Contexto secundario (peso bajo): `main_genre`, `language`, década
-   - Filtro duro: `language` respeta la regla (inglés aislado; romances entre sí; instrumental neutro)
-3. Clustering por similitud coseno + umbral de distancia (no k-means fijo). Cada cluster se valida contra:
-   - `min_size = 12` (o 8-11 solo si `avg_compat ≥ 0.88`, `min_compat ≥ 0.80`)
-   - `avg_compat ≥ 0.82`
-   - `max_energy_diff`, `max_groove_diff`, `max_darkness_diff`, `max_production_diff`, `max_instrumentation_diff`, `max_vocal_diff`, `max_variation_diff` dentro de tolerancia
-4. Canciones que no entren en ningún cluster válido → `unassigned` (persistido).
-5. Clusters con < 8 canciones → guardados como `candidate_cluster` (no visibles, esperan más data).
+## 4. Pre-built AI Playlists
+- The playlist engine moves to a shared folder usable both by the app and by background functions, so there is still exactly one engine (organize.ts / vibe.ts logic unchanged).
+- New background function `prebuild-playlists`: runs when analysis finishes or when a meaningful change happens (e.g. at least 5% of songs newly analyzed or re-described). Saves results as drafts with a "prebuilt" marker; replaces the previous prebuilt set but never touches exported or user-edited playlists.
+- AI Playlists reads the saved set immediately; a "Rebuild now" button keeps the manual option.
+- Dashboard shows "Your playlists are ready" when a new set is saved (dismissible).
 
-## 2. Nueva Edge Function: `name-cluster`
+## 5. Fast vibe
+- Candidate review capped at the 60 most compatible with the seed, sent to vibe-select in 3 parallel batches of 20.
+- vibe-select and the naming call use the fast mini model; the strong model only analyzes songs.
+- If the seed has no analysis, it is analyzed first (the only step that may take a few seconds).
+- Step-by-step progress: "Reading the vibe…", "Finding songs that feel the same…", "Putting them in order…", "Naming your playlist…".
+- Rules (8+/7 fill, confidence < 0.5 needs 8+, seed coherence, feedback) unchanged.
 
-Solo se llama **después** de que un cluster pasó todos los filtros. Recibe el cluster ya validado + resumen numérico y pide al modelo:
-- Nombre específico
-- Descripción sonora concreta (percusión, bajo, textura, voz, estructura) — rechaza descripciones genéricas
-- vibe, context
-- fit_score por canción respecto al centro
-- reason en lenguaje natural con **nombre de canción + artista**, nunca IDs
+## 6. Timing
+- Each vibe run records duration of: recipe (vibe-spec), filter, vibe-select, order, name, and total; stored with the run and logged.
+- After building, run 3 different vibes on your account and report per-step times.
 
-## 3. Revisor endurecido (`review-playlist`)
-
-- Umbral de aprobación: `coherence_score ≥ 0.85`, `avg_compat ≥ 0.82`, ninguna canción con `fit_score < 0.72`
-- **Nueva regla**: si `songs_to_remove.length / total > 0.25` → `rejected: true, action: "disband_cluster"`, devolver canciones a `unassigned`, no publicar playlist
-- Si tras remover queda `< min_size` válido → mismo trato: disolver
-
-## 4. Cambios de datos
-
-Nueva tabla `cluster_candidates` (candidatos y unassigned tracking):
-
-```text
-id, user_id, status ('candidate'|'unassigned'|'promoted'|'rejected'),
-centroid jsonb, avg_compat numeric, min_compat numeric,
-size int, dimensions_summary jsonb, created_at, updated_at
-```
-
-Y `cluster_candidate_tracks(cluster_id, track_id, compat_to_centroid)`.
-
-`generated_playlists` gana: `avg_compat`, `min_compat`, `dimensions_summary jsonb`, `source_cluster_id`.
-
-## 5. UI
-
-- Deshabilitar botón "Generate" del sistema viejo mientras exista pipeline v2.
-- Nueva sección "Sample Test" en Playlists: corre `cluster-library` con muestra de 150 y muestra tabla con:
-  - Cluster · size · avg_compat · min_compat · dimensiones dominantes · canción menos compatible · diferencia vs. los otros clusters
-  - Lista de unassigned
-- Solo cuando yo apruebe la muestra, se habilita "Run on full library".
-- En playlists ya publicadas, mostrar **nombre + artista + razón**, nunca IDs. Auditar `PlaylistDetail`/`PlaylistEditor` para eliminar cualquier ID visible.
-
-## 6. Orden de ejecución (esta iteración)
-
-1. Migración: nuevas tablas + columnas.
-2. Escribir `cluster-library` (matemática de clustering + validaciones, sin IA).
-3. Escribir `name-cluster` (solo nombrar clusters aprobados).
-4. Endurecer `review-playlist` con la regla del 25% y disolución.
-5. UI: pantalla "Sample Test" en `/ai-playlists` + deshabilitar el generador viejo.
-6. Correr la muestra de 150 canciones y **enseñarte el reporte**. No re-etiqueto ni proceso la biblioteca completa hasta tu aprobación.
-
-## Detalles técnicos
-
-- Clustering en Deno con álgebra vectorial simple (sin dependencias pesadas). Similitud coseno sobre vector normalizado 15-dim.
-- Umbrales configurables en constantes al inicio del archivo para poder ajustar tras la muestra.
-- Todo idempotente: correr `cluster-library` recomputa candidatos sin duplicar.
-- Se preserva `generate-ai-playlist` en el código pero deshabilitado desde UI (por si quieres comparar).
-
-¿Apruebas este plan para empezar por la migración + `cluster-library` + pantalla de muestra?
+## Technical notes
+- Engine relocation: pure TS under `supabase/functions/_shared/playlist/`, re-exported from `src/lib/playlist/*` so imports in the app don't change; AGENTS.md rule updated.
+- Prebuild job follows background-job rules: lease lock, bounded work per run, paused-state guard.
+- Global table: RLS select for authenticated, writes via service role only.
