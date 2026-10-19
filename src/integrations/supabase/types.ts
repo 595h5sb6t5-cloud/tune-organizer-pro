@@ -2395,6 +2395,7 @@ export type Database = {
           family_checked: boolean
           feel_checked: boolean
           feeling: string | null
+          feeling_2: string | null
           groove: string | null
           instruments: string[] | null
           lang: string
@@ -2426,6 +2427,7 @@ export type Database = {
           family_checked?: boolean
           feel_checked?: boolean
           feeling?: string | null
+          feeling_2?: string | null
           groove?: string | null
           instruments?: string[] | null
           lang: string
@@ -2457,6 +2459,7 @@ export type Database = {
           family_checked?: boolean
           feel_checked?: boolean
           feeling?: string | null
+          feeling_2?: string | null
           groove?: string | null
           instruments?: string[] | null
           lang?: string
@@ -2491,6 +2494,7 @@ export type Database = {
           family_checked: boolean
           feel_checked: boolean
           feeling: string | null
+          feeling_2: string | null
           groove: string | null
           instruments: string[] | null
           lang: string | null
@@ -2526,6 +2530,7 @@ export type Database = {
           family_checked?: boolean
           feel_checked?: boolean
           feeling?: string | null
+          feeling_2?: string | null
           groove?: string | null
           instruments?: string[] | null
           lang?: string | null
@@ -2561,6 +2566,7 @@ export type Database = {
           family_checked?: boolean
           feel_checked?: boolean
           feeling?: string | null
+          feeling_2?: string | null
           groove?: string | null
           instruments?: string[] | null
           lang?: string | null

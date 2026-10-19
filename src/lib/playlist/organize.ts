@@ -156,16 +156,31 @@ export function sceneMatch(a: TrackProfile, b: TrackProfile): number | null {
 
 export const FEELINGS = ["inspirational", "euphoric", "nostalgic", "melancholic", "introspective", "peaceful", "sensual", "groovy-carefree", "hypnotic", "dark-tense"];
 export const ARCS = ["steady-groove", "slow-build-climax", "peaks-and-drops", "floating-ambient"];
-const FEELING_PAIRS: [string, string][] = [
-  ["inspirational", "euphoric"], ["nostalgic", "melancholic"], ["melancholic", "introspective"],
-  ["nostalgic", "introspective"], ["peaceful", "introspective"], ["groovy-carefree", "sensual"], ["hypnotic", "dark-tense"],
+/** Feeling neighbor groups: every feeling in a group is a neighbor of the others. inspirational and euphoric are NOT neighbors. */
+const FEELING_GROUPS: string[][] = [
+  ["inspirational", "introspective", "peaceful", "nostalgic"],
+  ["euphoric", "groovy-carefree"],
+  ["melancholic", "nostalgic", "introspective"],
+  ["sensual", "groovy-carefree"],
+  ["hypnotic", "dark-tense"],
 ];
-const feelingNeighbors = (a: string, b: string) => FEELING_PAIRS.some(([x, y]) => (x === a && y === b) || (x === b && y === a));
+export const feelingNeighbors = (a: string, b: string) => a !== b && FEELING_GROUPS.some((g) => g.includes(a) && g.includes(b));
+
+/** Main + secondary feeling: same main = 1; one's main is the other's secondary = 0.75; any neighbors = 0.5; nothing shared = 0. */
+export function feelingScore(a: TrackProfile, b: TrackProfile): number | null {
+  if (!a.feeling || !b.feeling) return null;
+  if (a.feeling === b.feeling) return 1;
+  if ((a.feeling2 && a.feeling2 === b.feeling) || (b.feeling2 && b.feeling2 === a.feeling)) return 0.75;
+  const fa = [a.feeling, a.feeling2].filter(Boolean) as string[];
+  const fb = [b.feeling, b.feeling2].filter(Boolean) as string[];
+  if (fa.some((x) => fb.some((y) => x === y || feelingNeighbors(x, y)))) return 0.5;
+  return 0;
+}
 
 /** Listener feeling 0–1: 50% feeling, 30% melodic focus (tol 0.3), 20% same arc. Null if unknown. */
 export function feelMatch(a: TrackProfile, b: TrackProfile): number | null {
   const parts: [number | null, number][] = [
-    [a.feeling && b.feeling ? (a.feeling === b.feeling ? 1 : feelingNeighbors(a.feeling, b.feeling) ? 0.5 : 0) : null, 0.5],
+    [feelingScore(a, b), 0.5],
     [closeness(a.melodicFocus, b.melodicFocus, 0.3), 0.3],
     [a.arc && b.arc ? (a.arc === b.arc ? 1 : 0) : null, 0.2],
   ];
@@ -174,10 +189,10 @@ export function feelMatch(a: TrackProfile, b: TrackProfile): number | null {
   return w ? sum / w : null;
 }
 
-/** The listener would stop feeling the same: melodic focus gap > 0.35 or unrelated feelings. */
+/** The listener would stop feeling the same: melodic focus gap > 0.35 or no feeling in common (score 0). */
 export function feelClash(a: TrackProfile, b: TrackProfile): boolean {
   if (a.melodicFocus !== null && b.melodicFocus !== null && Math.abs(a.melodicFocus - b.melodicFocus) > 0.35) return true;
-  return !!a.feeling && !!b.feeling && a.feeling !== b.feeling && !feelingNeighbors(a.feeling, b.feeling);
+  return feelingScore(a, b) === 0;
 }
 
 /** Sound palette match 0–1 (null if unknown): 50% instruments, 50% texture/warmth/scale. */
@@ -202,7 +217,7 @@ export function soundClash(a: TrackProfile, b: TrackProfile): boolean {
 /** Same (or neighbor) feeling, melodic focus within 0.2 and same arc: they feel the same. */
 export function feelAligned(a: TrackProfile, b: TrackProfile): boolean {
   if (!a.feeling || !b.feeling || !a.arc || !b.arc || a.melodicFocus === null || b.melodicFocus === null) return false;
-  return (a.feeling === b.feeling || feelingNeighbors(a.feeling, b.feeling)) &&
+  return (feelingScore(a, b) ?? 0) >= 0.5 &&
     Math.abs(a.melodicFocus - b.melodicFocus) < 0.2 && a.arc === b.arc;
 }
 
