@@ -9,6 +9,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useSpotifyLibrary } from "@/hooks/use-spotify-library";
 import { toast } from "sonner";
 import AnalysisProgressCard from "@/components/app/AnalysisProgressCard";
+import PlaylistsReadyBanner from "@/components/app/PlaylistsReadyBanner";
 
 function StatCard({
   icon: Icon, label, value, to,
@@ -46,6 +47,8 @@ const Dashboard = () => {
           <h1 className="font-heading text-3xl mb-1">Welcome back, {displayName}</h1>
           <p className="text-muted-foreground">Your music intelligence at a glance.</p>
         </div>
+
+        <PlaylistsReadyBanner />
 
         {/* Spotify connection card */}
         <div className="p-6 rounded-2xl bg-surface-elevated border border-border/50">
