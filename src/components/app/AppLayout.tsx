@@ -4,10 +4,12 @@ import { Loader2 } from "lucide-react";
 import AppSidebar from "./AppSidebar";
 import { useAuth } from "@/hooks/use-auth";
 import { usePrebuild } from "@/hooks/use-prebuild";
+import { useAudioKick } from "@/hooks/use-audio-kick";
 
 const AppLayout = ({ children }: { children: ReactNode }) => {
   const { user, loading } = useAuth();
   usePrebuild(user?.id);
+  useAudioKick(user?.id);
 
   if (loading) {
     return (
