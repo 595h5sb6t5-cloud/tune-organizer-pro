@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { supabase } from "@/integrations/supabase/client";
 import { Loader2, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -33,6 +34,12 @@ export default function EditSoundDialog({ track, onSaved, compact }: { track: Tr
   const [arc, setArc] = useState<string>(track.arc ?? "");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [heard, setHeard] = useState<{ tags: { name: string; count: number }[] | null; tag_source: string | null; youtube_summary: string | null } | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    supabase.from("listener_evidence").select("tags, tag_source, youtube_summary").eq("spotify_track_id", track.id).maybeSingle()
+      .then(({ data }) => setHeard((data as any) ?? null));
+  }, [open, track.id]);
 
   const toggle = (x: string) => setInst((all) => all.includes(x) ? all.filter((y) => y !== x) : all.length >= 5 ? all : [...all, x]);
 
@@ -64,6 +71,17 @@ export default function EditSoundDialog({ track, onSaved, compact }: { track: Tr
           <DialogDescription>{track.name} · {track.artists.join(", ")}. Your changes are always used and never replaced by the AI.</DialogDescription>
         </DialogHeader>
         <div className="space-y-5">
+          <section className="rounded-xl border border-border/50 bg-muted/30 p-3 space-y-2" aria-label="What listeners say">
+            <p className="text-sm font-medium">What listeners say</p>
+            {heard?.tags?.length ? (
+              <div className="flex flex-wrap gap-1.5">
+                {heard.tags.slice(0, 10).map((t) => <span key={t.name} className="rounded-full border border-border bg-background px-2 py-0.5 text-xs">{t.name}</span>)}
+                {heard.tag_source === "artist" && <span className="basis-full text-xs text-muted-foreground">Tags describe the artist; none were found for this song.</span>}
+              </div>
+            ) : null}
+            {heard?.youtube_summary && <p className="text-sm text-muted-foreground">{heard.youtube_summary}</p>}
+            {!heard?.tags?.length && !heard?.youtube_summary && <p className="text-xs text-muted-foreground">No listener descriptions yet.</p>}
+          </section>
           <label className="block space-y-1 text-sm">
             <span className="font-medium">Scene</span>
             <select value={scene} onChange={(e) => setScene(e.target.value)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm">
