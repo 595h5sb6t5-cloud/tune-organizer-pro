@@ -240,7 +240,9 @@ async function listenCandidates(userId: string, cands: TrackProfile[], seeds: Tr
   const worker = async () => {
     while (next < jobs.length) {
       const j = jobs[next++];
-      const { data, error } = await supabase.functions.invoke("vibe-listen", { body: { seed_ids: [j.seed], ids: j.ids } });
+      const call = () => supabase.functions.invoke("vibe-listen", { body: { seed_ids: [j.seed], ids: j.ids } });
+      let { data, error } = await call();
+      if (error || data?.error) ({ data, error } = await call()); // one retry for a busy moment
       if (error || data?.error) throw new Error(data?.error ?? error?.message ?? "The listening step failed.");
       if (data.no_seed_audio) seedHeard = false;
       for (const id of data.unheard ?? []) unheard.add(id);
