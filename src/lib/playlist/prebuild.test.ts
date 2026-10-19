@@ -13,7 +13,8 @@ describe("needsRebuild", () => {
     expect(needsRebuild({ ...b, analyzed: 449 })).toBe(false);
     expect(needsRebuild({ ...b, analyzed: 450 })).toBe(true);
   });
-  it("rebuilds when analysis finishes with any change", () => {
-    expect(needsRebuild({ ...base, hasBuild: true, builtCount: 990, analyzed: 991, analysisDone: true })).toBe(true);
+  it("rebuilds when analysis finishes with a 1% change", () => {
+    expect(needsRebuild({ ...base, hasBuild: true, builtCount: 980, analyzed: 990, analysisDone: true })).toBe(true);
+    expect(needsRebuild({ ...base, hasBuild: true, builtCount: 985, analyzed: 990, analysisDone: true })).toBe(false);
   });
 });

@@ -27,7 +27,8 @@ export function needsRebuild(o: { total: number; analyzed: number; builtCount: n
   if (!total) return false;
   if (!hasBuild) return analyzed >= Math.min(FIRST_BUILD_SONGS, total);
   const diff = Math.abs(analyzed - builtCount);
-  if (analysisDone && diff > 0) return true;
+  // Analysis finished: any change of 1% or more (small listener-evidence touch-ups don't rebuild every minute).
+  if (analysisDone && diff >= Math.max(1, Math.round(total * 0.01))) return true;
   return diff >= Math.max(1, Math.round(total * REBUILD_SHARE));
 }
 
