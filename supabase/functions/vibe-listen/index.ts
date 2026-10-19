@@ -40,6 +40,7 @@ Deno.serve(async (req) => {
       const b64 = ref ? await fetchAudioB64(ref.url) : null;
       return b64 ? { id, b64, label: `"${r.track_name}" by ${r.artist_name}` } : null;
     };
+    const t0 = Date.now();
     const [seedClips, songClips] = await Promise.all([Promise.all(seedIds.map(clip)), Promise.all(ids.map(clip))]);
     const seeds = seedClips.filter(Boolean) as any[];
     const songs = songClips.filter(Boolean) as any[];
@@ -56,13 +57,15 @@ Deno.serve(async (req) => {
       content.push({ type: "text", text: `SONG ${i + 1}: ${s.label}` });
       content.push({ type: "input_audio", input_audio: { data: s.b64, format: "mp3" } });
     });
+    const t1 = Date.now();
     let parsed: any;
-    try { parsed = await gemini(content); }
+    try { try { parsed = await gemini(content); } catch (e) { if (!(e instanceof GatewayRetry)) throw e; await new Promise((r) => setTimeout(r, 1500)); parsed = await gemini(content); } }
     catch (e) {
       if (e instanceof GatewayStop) return json({ error: e.message }, e.status);
       if (e instanceof GatewayRetry) return json({ error: "The listening step is busy. Try again in a moment." }, 429);
       throw e;
     }
+    console.log(`[vibe-listen] clips ${t1 - t0}ms gemini ${Date.now() - t1}ms songs ${songs.length}`);
     const results = (Array.isArray(parsed?.results) ? parsed.results : [])
       .map((r: any) => ({ id: songs[Number(r?.n) - 1]?.id, score: Number(r?.s ?? r?.score) }))
       .filter((r: any) => r.id && Number.isFinite(r.score))
