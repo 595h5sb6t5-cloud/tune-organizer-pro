@@ -13,3 +13,6 @@ verify_jwt = false
 
 [functions.curate-playlist]
 verify_jwt = true
+
+[functions.listener-tags]
+verify_jwt = false

@@ -332,6 +332,11 @@ async function process(admin: any, userId: string, depth: number, force: boolean
       status: done ? "done" : "running", lease_until: null, updated_at: new Date().toISOString(),
     }).eq("user_id", userId);
     if (!done && depth > 0) kick(userId, depth - 1);
+    if (done) { // listener evidence (Last.fm/YouTube) only for songs it hasn't checked yet
+      const p = fetch(`${SUPABASE_URL}/functions/v1/listener-tags`, { method: "POST", headers: { Authorization: `Bearer ${SERVICE_KEY}`, apikey: SERVICE_KEY, "Content-Type": "application/json" }, body: JSON.stringify({ user_id: userId }) }).catch((e) => console.error("[library-enrich] listener-tags kick failed", e));
+      // @ts-ignore EdgeRuntime
+      if (typeof EdgeRuntime !== "undefined" && EdgeRuntime.waitUntil) EdgeRuntime.waitUntil(p);
+    }
     return { status: done ? "done" : "running", ...r };
   } catch (e) {
     if (e instanceof Pause) {
