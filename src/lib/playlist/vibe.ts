@@ -350,6 +350,11 @@ export async function buildVibePlaylist(
     supabase.from("vibe_spec_cache").upsert({ user_id: userId, spec_key: specKey, spec: raw as any }, { onConflict: "user_id,spec_key" }).then(() => {});
   }
   const spec = normalizeSpec({ ...raw }, vibe, seeds.length > 0);
+  // Artist as seed: the artist's world spans its songs' energies (wider than one song's ±0.15).
+  if (capArtist && seeds.length) {
+    const es = seeds.map((x) => x.energy).filter((e): e is number => e !== null);
+    if (es.length) { spec.energy_min = Math.max(0, Math.min(...es) - 0.35); spec.energy_max = Math.min(1, Math.max(...es) + 0.35); }
+  }
   lap("recipe");
 
   onStep("Finding songs that feel the same");
