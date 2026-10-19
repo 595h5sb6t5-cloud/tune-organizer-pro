@@ -55,7 +55,7 @@ export async function gemini(content: any[], runId?: string): Promise<any> {
   if (runId) headers["X-Lovable-AIG-Run-ID"] = runId;
   const res = await fetch(GATEWAY, {
     method: "POST", headers,
-    body: JSON.stringify({ model: AUDIO_MODEL, response_format: { type: "json_object" }, messages: [{ role: "user", content }] }),
+    body: JSON.stringify({ model: AUDIO_MODEL, temperature: 0, response_format: { type: "json_object" }, messages: [{ role: "user", content }] }),
   });
   if (res.status === 429 || res.status >= 500) {
     const ra = Number(res.headers.get("retry-after"));

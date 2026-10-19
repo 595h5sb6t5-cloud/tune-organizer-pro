@@ -20,31 +20,46 @@ const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: 
 
 interface Row { spotify_track_id: string; isrc: string | null; track_name: string; artist_name: string }
 
-async function analyzeOne(admin: any, t: Row) {
+export const DOUBLE_MODEL = AUDIO_MODEL + "|x2";
+
+/** Seeds: two listens. An instrument counts only if both heard it; numbers are averaged. */
+function mergeTwo(a: ReturnType<typeof cleanSound>, b: ReturnType<typeof cleanSound>) {
+  const avg = (x: number | null, y: number | null) => x === null ? y : y === null ? x : Math.round(((x + y) / 2) * 100) / 100;
+  const both = a.instruments && b.instruments ? a.instruments.filter((i) => b.instruments!.includes(i)) : a.instruments ?? b.instruments;
+  return {
+    instruments: both, piano: a.piano === null ? b.piano : b.piano === null ? a.piano : a.piano && b.piano,
+    melodic_focus: avg(a.melodic_focus, b.melodic_focus), percussive_drive: avg(a.percussive_drive, b.percussive_drive),
+    texture: avg(a.texture, b.texture), warmth: avg(a.warmth, b.warmth), scale: avg(a.scale, b.scale),
+    groove: a.groove === b.groove ? a.groove : a.groove ?? b.groove,
+  };
+}
+
+async function analyzeOne(admin: any, t: Row, twice = false) {
   const ref = await findPreview(t.isrc, t.track_name, t.artist_name);
   const b64 = ref ? await fetchAudioB64(ref.url) : null;
-  let raw: any;
-  if (b64) {
-    raw = await gemini([{ type: "text", text: audioPrompt(t.track_name, t.artist_name) }, { type: "input_audio", input_audio: { data: b64, format: "mp3" } }]);
-  } else {
-    raw = await gemini([{ type: "text", text: textPrompt(t.track_name, t.artist_name) }]);
-  }
-  const s = cleanSound(raw);
+  const ask = () => b64
+    ? gemini([{ type: "text", text: audioPrompt(t.track_name, t.artist_name) }, { type: "input_audio", input_audio: { data: b64, format: "mp3" } }])
+    : gemini([{ type: "text", text: textPrompt(t.track_name, t.artist_name) }]);
+  let s;
+  if (twice && b64) {
+    const [r1, r2] = await Promise.all([ask(), ask()]);
+    s = mergeTwo(cleanSound(r1), cleanSound(r2));
+  } else s = cleanSound(await ask());
   await admin.from("track_audio_analysis").upsert({
     spotify_track_id: t.spotify_track_id, source: b64 ? ref!.source : "none", ...s,
-    confidence: b64 ? 0.85 : 0.4, model: AUDIO_MODEL, analyzed_at: new Date().toISOString(),
+    confidence: b64 ? 0.85 : 0.4, model: twice && b64 ? DOUBLE_MODEL : AUDIO_MODEL, analyzed_at: new Date().toISOString(),
   }, { onConflict: "spotify_track_id" });
   return b64 ? ref!.source : "none";
 }
 
-async function runList(admin: any, list: Row[], deadline: number) {
+async function runList(admin: any, list: Row[], deadline: number, twice = false) {
   let i = 0, done = 0;
   let stop: GatewayStop | null = null;
   const worker = async () => {
     while (!stop && i < list.length && Date.now() < deadline) {
       const t = list[i++];
       for (let attempt = 0; attempt < 3; attempt++) {
-        try { await analyzeOne(admin, t); done++; break; }
+        try { await analyzeOne(admin, t, twice); done++; break; }
         catch (e) {
           if (e instanceof GatewayStop) { stop = e; return; }
           if (e instanceof GatewayRetry && attempt < 2) { await sleep(e.waitMs + Math.random() * 2000); continue; }
@@ -106,6 +121,19 @@ Deno.serve(async (req) => {
     if (bearer !== SERVICE_KEY) {
       const { data: { user } } = await admin.auth.getUser(bearer);
       if (!user) return json({ error: "Unauthorized" }, 401);
+    }
+    // Seeds: listen twice (once per song, skipped when already double-heard).
+    if (Array.isArray(body.seed_ids)) {
+      const ids = body.seed_ids.filter((x: unknown) => typeof x === "string").slice(0, 3);
+      const { data: done } = await admin.from("track_audio_analysis").select("spotify_track_id").in("spotify_track_id", ids).eq("model", DOUBLE_MODEL);
+      const skip = new Set((done ?? []).map((r: any) => r.spotify_track_id));
+      const need = ids.filter((id: string) => !skip.has(id));
+      if (!need.length) return json({ done: 0 });
+      const { data: rows } = await admin.from("liked_songs").select("spotify_track_id, isrc, track_name, artist_name").in("spotify_track_id", need);
+      const uniq = [...new Map((rows ?? []).map((r: any) => [r.spotify_track_id, r])).values()] as Row[];
+      const r = await runList(admin, uniq, Date.now() + 40_000, true);
+      if (r.stop) return json({ error: r.stop.message }, r.stop.status);
+      return json({ done: r.done });
     }
     // On demand (seeds / a few songs): analyze now and return.
     if (Array.isArray(body.ids)) {

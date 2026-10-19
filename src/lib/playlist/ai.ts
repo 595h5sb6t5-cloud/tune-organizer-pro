@@ -258,9 +258,10 @@ export async function saveManualSound(p: TrackProfile, m: ManualSound): Promise<
 /** Makes sure seeds have a listener-feeling description (strong model), then returns updated seeds. */
 /** Seeds with no heard sound yet: Gemini listens to their preview now (a few seconds). */
 export async function ensureSeedAudio(seeds: TrackProfile[]): Promise<TrackProfile[]> {
-  const missing = seeds.filter((s) => !s.audioSource && !s.soundEdited);
+  // Seeds are heard twice (the function skips seeds already double-heard).
+  const missing = seeds.filter((s) => !s.soundEdited);
   if (!missing.length) return seeds;
-  await supabase.functions.invoke("audio-analyze", { body: { ids: missing.map((s) => s.id) } }).catch(() => null);
+  await supabase.functions.invoke("audio-analyze", { body: { seed_ids: missing.map((s) => s.id) } }).catch(() => null);
   const audio = await loadAudio(missing.map((s) => s.id));
   return seeds.map((s) => (audio.has(s.id) && !s.soundEdited ? applyAudio(s, audio.get(s.id)) : s));
 }
