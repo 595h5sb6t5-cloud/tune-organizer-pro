@@ -2,3 +2,4 @@
 - Spotify access goes only through the server connection (spotify-auth-start/callback, tokens in spotify_connections); no browser-side Spotify client — one token source, no client secret exposure.
 - Spotify calls follow the Feb 2026 Development Mode API (/me/playlists, /playlists/{id}/items, single-item GETs, no audio-features/top-tracks/popularity) — those endpoints/fields are gone.
 - Artist genres and AI track classification are filled only by the library-enrich background function (started after each sync, pauses on long Spotify waits); the browser only reads stored data — keeps playlist creation instant and avoids blocking on Spotify rate limits.
+- Listener evidence (Last.fm tags, YouTube comment summaries) is gathered only by the listener-tags background function, kicked when library-enrich finishes; it re-describes feeling with the strong model and never overrides manual_sound — one evidence pipeline, bounded API quotas.
