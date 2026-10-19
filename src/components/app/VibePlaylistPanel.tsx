@@ -270,6 +270,7 @@ export default function VibePlaylistPanel() {
                     <div className="flex-1 min-w-0">
                       <p className="truncate">{t.name}</p>
                       <p className="truncate text-muted-foreground">{t.artists.join(", ")}</p>
+                      {t.album && <p className="truncate text-xs text-muted-foreground/70">{t.album}</p>}
                     </div>
                     <EditSoundDialog track={t} onSaved={updateProfile} />
                     {!savedUrl && (

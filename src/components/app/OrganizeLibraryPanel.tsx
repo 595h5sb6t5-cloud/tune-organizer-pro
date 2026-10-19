@@ -289,6 +289,7 @@ export default function OrganizeLibraryPanel({ onSaved }: { onSaved: () => void 
                         <div className="flex-1 min-w-0">
                           <p className="truncate">{t.name}</p>
                           <p className="truncate text-muted-foreground">{t.artists.join(", ")}</p>
+                          {t.album && <p className="truncate text-xs text-muted-foreground/70">{t.album}</p>}
                         </div>
                         {t.energy !== null && (
                           <span className="text-xs text-muted-foreground w-20 text-right" title="Estimated energy">
