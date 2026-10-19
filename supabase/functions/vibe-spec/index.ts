@@ -41,7 +41,9 @@ Deno.serve(async (req) => {
     new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
   try {
-    const { vibe, seeds } = (await req.json()) as { vibe?: string; seeds?: any[] };
+    const body = (await req.json()) as { vibe?: string; seeds?: any[]; warm?: boolean };
+    if (body.warm) return json({ ok: true });
+    const { vibe, seeds } = body;
     const text = String(vibe ?? "").trim();
     const seedList = Array.isArray(seeds) ? seeds.slice(0, 3) : [];
     if (text.length > 300 || (!text && !seedList.length)) return json({ error: "Write between 1 and 300 characters." }, 400);

@@ -35,6 +35,7 @@ Deno.serve(async (req) => {
     if (!user) return json({ error: "Unauthorized" }, 401);
 
     const body = await req.json();
+    if (body?.warm) return json({ ok: true });
     const tracks = Array.isArray(body?.tracks) ? body.tracks : null;
     if (!tracks || tracks.length < 1 || tracks.length > 120 || tracks.some((t: any) => typeof t?.id !== "string")) {
       return json({ error: "Send between 1 and 120 tracks." }, 400);
@@ -66,6 +67,7 @@ Deno.serve(async (req) => {
       body: JSON.stringify({
         model: "gpt-4.1-mini",
         response_format: { type: "json_object" },
+        ...(nameOnly ? { max_tokens: 60 } : {}),
         messages: [{ role: "system", content: nameOnly ? NAME_SYSTEM : SYSTEM }, { role: "user", content: `${context}Playlist:\n${list}` }],
       }),
     });

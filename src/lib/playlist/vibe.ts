@@ -291,13 +291,14 @@ export async function buildVibePlaylist(
     name: t.name, artists: t.artists, year: t.year, genres: t.genres.slice(0, 6), lang: t.lang,
     energy: t.energy, valence: t.valence, danceability: t.danceability, tempo: t.tempo, mood: t.mood,
   }));
+  const removedP = removedForSeeds(userId, seeds);
   const { data, error } = await supabase.functions.invoke("vibe-spec", { body: { vibe, seeds: seedBody } });
   if (error || data?.error) throw new Error(data?.error ?? error?.message ?? "Couldn't read the vibe.");
   const spec = normalizeSpec(data as VibeSpec, vibe, seeds.length > 0);
   lap("recipe");
 
   onStep("Finding songs that feel the same");
-  const removed = await removedForSeeds(userId, seeds);
+  const removed = await removedP;
   const { lang, candidates } = filterCandidates(profiles.filter((t) => !removed.has(t.id)), spec, langChoice, seeds);
   lap("filter");
   if (!candidates.length) return finish({ spec, lang, tracks: seeds.length ? sequence(seeds, seeds[0].id) : [], candidates: 0, approved: 0 });
