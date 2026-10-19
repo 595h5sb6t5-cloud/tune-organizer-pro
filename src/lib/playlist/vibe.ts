@@ -161,6 +161,7 @@ export function filterCandidates(profiles: TrackProfile[], spec: VibeSpec, langC
     active.delete(r); relaxed.push(r);
     candidates = rank(inLang.filter((t) => passesSoft(t, spec, active)));
   }
+  for (const t of inLang.filter((x) => /barry white|al green|bill withers|sam cooke/i.test(x.artists.join()))) console.info(`[vibe] dbg ${t.name} ${JSON.stringify(seeds.map((x) => Math.round(compatibility(t, x) * 100)))} ${t.feeling} ${t.year} ${t.style} ${t.energy} ${t.percussiveDrive} ${JSON.stringify(t.families)}`);
   console.info(`[vibe] filter hard=${hard.length} lang=${inLang.length} cands=${candidates.length} spec=${JSON.stringify({e:[spec.energy_min,spec.energy_max],ex:spec.excluded_families})} seeds=${JSON.stringify(seeds.map((x)=>[x.name,x.style,x.energy,x.feeling,x.percussiveDrive]))}`);
   return { lang, candidates: candidates.slice(0, MAX_CANDIDATES), relaxed };
 }
