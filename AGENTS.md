@@ -7,3 +7,4 @@
 - Pre-built AI Playlists are produced by src/lib/playlist/prebuild.ts (usePrebuild in AppLayout, DB lease in prebuilt_playlists) using organize.ts, and the AI Playlists page reads the saved set first — instant page, still one engine.
 - Each vibe run logs per-step durations to vibe_timings — keeps the <20 s target measurable.
 - Song SOUND heard from public previews (Deezer by ISRC, then iTunes) is produced only by the audio-analyze background function into the shared track_audio_analysis table (vibe-listen hears clips on demand); audio is never stored, it overrides text sound fields but never feeling/arc or manual_sound — one listening pipeline, preview terms must be reviewed before public launch.
+- Seeded vibes are decided by the ear: vibe-listen hears the 24 best compatibility() fits next to each one's nearest seed (batches of 4, 6 parallel, per seed/candidate cache); vibe-select text review only scores songs without a clip — one judge per song, no double review.
