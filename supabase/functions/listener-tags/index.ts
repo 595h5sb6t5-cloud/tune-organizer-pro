@@ -88,27 +88,6 @@ async function runHop(admin: any, userId: string, started: number, priority: str
     return admin.from("listener_evidence").upsert(row, { onConflict: "user_id,spotify_track_id" });
   };
 
-  // 1) Last.fm tags, max 4 requests/second.
-  const lfQueue = order(liked.map((t) => t.spotify_track_id).filter((id) => !ev.get(id)?.lastfm_checked));
-  const artistCache = new Map<string, any[]>();
-  if (Deno.env.get("LASTFM_API_KEY")) {
-    for (const id of lfQueue) {
-      if (left() < 15_000) break;
-      const t = byId.get(id)!;
-      const artist = ((t.artists ?? []) as any[])[0]?.name ?? String(t.artist_name).split(",")[0];
-      let r = await lastfm("track.gettoptags", { artist, track: cleanTitle(t.track_name) }); await sleep(250);
-      if (r.rate) break;
-      let source = "track";
-      if (!r.tags.length) {
-        source = "artist";
-        if (!artistCache.has(artist)) { const a = await lastfm("artist.gettoptags", { artist }); await sleep(250); if (a.rate) break; artistCache.set(artist, a.tags); }
-        r = { rate: false, tags: artistCache.get(artist)! };
-      }
-      await upsert(id, { tags: r.tags.length ? r.tags : null, tag_source: r.tags.length ? source : null, lastfm_checked: true, ...(ev.get(id)?.evidence_applied ? {} : {}) });
-    }
-  }
-  const lfLeft = liked.filter((t) => !ev.get(t.spotify_track_id)?.lastfm_checked).length;
-
   // 2) YouTube comments: seeds + electronic songs with confidence < 0.6; 80 searches/day.
   const cls = new Map<string, any>();
   for (let from = 0; ; from += 1000) {
@@ -132,7 +111,7 @@ async function runHop(admin: any, userId: string, started: number, priority: str
   let used = st.youtube_day === utcDay() ? st.youtube_searches_today : 0;
   let ytBlocked = !ytKey || used >= YT_DAILY || (st.youtube_paused_until && new Date(st.youtube_paused_until) > new Date());
   for (const id of ytQueue) {
-    if (ytBlocked || left() < 12_000) break;
+    if (ytBlocked || left() < 25_000) break;
     if (used >= YT_DAILY) { ytBlocked = true; break; }
     const t = byId.get(id)!;
     const artist = ((t.artists ?? []) as any[])[0]?.name ?? t.artist_name;
@@ -155,6 +134,27 @@ async function runHop(admin: any, userId: string, started: number, priority: str
     await upsert(id, { youtube_summary: summary, youtube_checked: true, ...(summary ? { evidence_applied: false } : {}) });
   }
   const ytLeft = ytBlocked ? 0 : ytQueue.filter((id) => !ev.get(id)?.youtube_checked).length;
+  // 1) Last.fm tags, max 4 requests/second.
+  const lfQueue = order(liked.map((t) => t.spotify_track_id).filter((id) => !ev.get(id)?.lastfm_checked));
+  const artistCache = new Map<string, any[]>();
+  if (Deno.env.get("LASTFM_API_KEY")) {
+    for (const id of lfQueue) {
+      if (left() < 15_000) break;
+      const t = byId.get(id)!;
+      const artist = ((t.artists ?? []) as any[])[0]?.name ?? String(t.artist_name).split(",")[0];
+      let r = await lastfm("track.gettoptags", { artist, track: cleanTitle(t.track_name) }); await sleep(250);
+      if (r.rate) break;
+      let source = "track";
+      if (!r.tags.length) {
+        source = "artist";
+        if (!artistCache.has(artist)) { const a = await lastfm("artist.gettoptags", { artist }); await sleep(250); if (a.rate) break; artistCache.set(artist, a.tags); }
+        r = { rate: false, tags: artistCache.get(artist)! };
+      }
+      await upsert(id, { tags: r.tags.length ? r.tags : null, tag_source: r.tags.length ? source : null, lastfm_checked: true, ...(ev.get(id)?.evidence_applied ? {} : {}) });
+    }
+  }
+  const lfLeft = liked.filter((t) => !ev.get(t.spotify_track_id)?.lastfm_checked).length;
+
 
   // 3) Re-describe with evidence (strong model). Wait for YouTube on candidates still in today's budget.
   const ready = order([...ev.values()].filter((e) => !e.evidence_applied && e.lastfm_checked && (e.tags?.length || e.youtube_summary) && byId.has(e.spotify_track_id)
