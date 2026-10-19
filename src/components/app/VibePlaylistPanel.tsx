@@ -16,7 +16,7 @@ import EditSoundDialog from "@/components/app/EditSoundDialog";
 import { loadLikedTracks, loadArtistGenres } from "@/components/app/OrganizeLibraryPanel";
 import type { SpotifyTrack } from "@/lib/playlist/features";
 import { warmVibeFunctions } from "@/lib/playlist/curate";
-import { findSeedMatches, isUniqueFullTitle, leftoverKeywords, type SeedMatch } from "@/components/app/seedMatch";
+import { findSeedMatches, isUniqueFullTitle, leftoverKeywords, findArtistMatch, representativeSongs, norm, type SeedMatch } from "@/components/app/seedMatch";
 
 const LANG_LABEL: Record<string, string> = {
   es: "Español", en: "English", pt: "Português", fr: "Français", it: "Italiano", de: "Deutsch",
@@ -40,6 +40,7 @@ export default function VibePlaylistPanel() {
   const [liked, setLiked] = useState<SpotifyTrack[] | null>(null);
   const [seeds, setSeeds] = useState<SeedMatch[]>([]);
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
+  const [artistSeed, setArtistSeed] = useState<{ name: string; tracks: SpotifyTrack[] } | null>(null);
 
   useEffect(() => {
     if (user) loadLikedTracks(user.id).then(setLiked).catch(() => setLiked([]));
@@ -73,6 +74,19 @@ export default function VibePlaylistPanel() {
       setSeeds((s) => [...s, clear[0]]);
     }
   }, [matches, dismissed, seeds.length, liked]);
+
+  // Artist as seed ("marvin gaye"): only when no song matched — a song always wins.
+  useEffect(() => {
+    if (!liked || !profiles || seeds.length || matches.length) return;
+    const a = findArtistMatch(vibe, liked);
+    if (!a || dismissed.has(`artist:${norm(a.name)}`)) return;
+    const prof = a.tracks.map((t) => profiles.find((p) => p.id === t.id)).filter((x): x is TrackProfile => !!x);
+    const picks = representativeSongs(prof);
+    if (!picks.length) return;
+    setArtistSeed(a);
+    setSeeds(picks.map((p) => ({ track: a.tracks.find((t) => t.id === p.id)!, span: norm(a.name), artistHit: [norm(a.name)], score: 0 })));
+  }, [vibe, liked, profiles, seeds.length, matches.length, dismissed]);
+  useEffect(() => { if (!seeds.length) setArtistSeed(null); }, [seeds.length]);
 
   const keywords = leftoverKeywords(vibe, seeds, liked ?? []);
   const canCreate = !!vibe.trim() || seeds.length > 0;
@@ -136,7 +150,7 @@ export default function VibePlaylistPanel() {
       const p = await getProfiles();
       const seedProfiles = seeds.map((s) => p.find((x) => x.id === s.track.id)).filter((x): x is TrackProfile => !!x);
       const words = seeds.length ? keywords : vibe.trim();
-      const res = await buildVibePlaylist(user.id, words, p, lang, (label, done, total) => setStep({ label, done, total }), seedProfiles);
+      const res = await buildVibePlaylist(user.id, words, p, lang, (label, done, total) => setStep({ label, done, total }), seedProfiles, artistSeed?.name);
       setName(res.spec.name);
       setTracks(res.tracks);
     } catch (e) {
@@ -203,7 +217,35 @@ export default function VibePlaylistPanel() {
             ))}
           </ul>
         )}
-        {seeds.length > 0 && (
+        {artistSeed && seeds.length > 0 && (
+          <div className="rounded-xl border border-border/60 bg-muted/30 p-3 space-y-2">
+            <div className="flex items-center gap-2 text-sm">
+              <span className="font-medium">Based on: {artistSeed.name}</span>
+              <button type="button" aria-label={`Stop using ${artistSeed.name}`} className="text-muted-foreground hover:text-foreground"
+                onClick={() => { setDismissed((d) => new Set(d).add(`artist:${norm(artistSeed.name)}`)); setSeeds([]); }}>
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+            <ul className="space-y-1">
+              {seeds.map((s) => (
+                <li key={s.track.id} className="flex flex-wrap items-center gap-2 text-sm">
+                  <select value={s.track.id} aria-label="Change song" className="h-8 max-w-[16rem] rounded-md border border-input bg-background px-2 text-sm"
+                    onChange={(e) => {
+                      const t = artistSeed.tracks.find((x) => x.id === e.target.value);
+                      if (t) setSeeds((all) => all.map((x) => x.track.id === s.track.id ? { ...x, track: t } : x));
+                    }}>
+                    {artistSeed.tracks.filter((t) => t.id === s.track.id || !seeds.some((x) => x.track.id === t.id)).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  </select>
+                  <button type="button" aria-label={`Remove ${s.track.name}`} className="text-muted-foreground hover:text-foreground"
+                    onClick={() => setSeeds((all) => all.filter((x) => x.track.id !== s.track.id))}>
+                    <X className="w-3 h-3" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {!artistSeed && seeds.length > 0 && (
           <div className="flex flex-wrap gap-2">
             {seeds.map((s) => (
               <span key={s.track.id} className="inline-flex flex-wrap items-center gap-1 rounded-full border border-border/60 bg-muted/40 px-3 py-1 text-sm">

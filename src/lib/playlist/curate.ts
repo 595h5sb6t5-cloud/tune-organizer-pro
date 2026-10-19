@@ -33,5 +33,5 @@ export async function askCurator(
 
 /** Wakes the vibe functions up so the first real request doesn't pay a cold start. */
 export function warmVibeFunctions() {
-  for (const f of ["vibe-spec", "vibe-select", "curate-playlist"]) void supabase.functions.invoke(f, { body: { warm: true } }).catch(() => null);
+  for (const f of ["vibe-spec", "vibe-select", "curate-playlist", "vibe-listen"]) void supabase.functions.invoke(f, { body: { warm: true } }).catch(() => null);
 }

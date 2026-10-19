@@ -58,6 +58,8 @@ export interface TrackProfile {
   melodicFocus: number | null; // 0 rhythm-driven → 1 melody-driven
   arc: string | null; // steady-groove | slow-build-climax | peaks-and-drops | floating-ambient
   confidence: number | null; // AI confidence in the sound description
+  percussiveDrive?: number | null; // 0 barely any drums → 1 drums push everything (heard from preview)
+  audioSource?: "deezer" | "itunes" | "none" | null; // where the heard sound came from ("none" = no preview)
   soundEdited?: boolean; // user corrected the sound by hand
 }
 

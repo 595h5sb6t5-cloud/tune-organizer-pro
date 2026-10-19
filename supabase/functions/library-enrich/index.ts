@@ -359,6 +359,10 @@ async function process(admin: any, userId: string, depth: number, force: boolean
       const p = fetch(`${SUPABASE_URL}/functions/v1/listener-tags`, { method: "POST", headers: { Authorization: `Bearer ${SERVICE_KEY}`, apikey: SERVICE_KEY, "Content-Type": "application/json" }, body: JSON.stringify({ user_id: userId }) }).catch((e) => console.error("[library-enrich] listener-tags kick failed", e));
       // @ts-ignore EdgeRuntime
       if (typeof EdgeRuntime !== "undefined" && EdgeRuntime.waitUntil) EdgeRuntime.waitUntil(p);
+      // Sound heard from public previews (shared per song); lease keeps it single-flight.
+      const a = fetch(`${SUPABASE_URL}/functions/v1/audio-analyze`, { method: "POST", headers: { Authorization: `Bearer ${SERVICE_KEY}`, apikey: SERVICE_KEY, "Content-Type": "application/json" }, body: "{}" }).catch((e) => console.error("[library-enrich] audio-analyze kick failed", e));
+      // @ts-ignore EdgeRuntime
+      if (typeof EdgeRuntime !== "undefined" && EdgeRuntime.waitUntil) EdgeRuntime.waitUntil(a);
     }
     return { status: done ? "done" : "running", ...r };
   } catch (e) {

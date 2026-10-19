@@ -95,7 +95,7 @@ export const isDance = (t: TrackProfile) => !!t.style && DANCE_STYLES.has(t.styl
 export const sameOrNeighborStyle = (a: string | null | undefined, b: string | null | undefined) =>
   !!a && !!b && (a === b || !!STYLE_NEIGHBORS.get(a)?.has(b));
 
-function styleMatch(a: TrackProfile, b: TrackProfile): number | null {
+export function styleMatch(a: TrackProfile, b: TrackProfile): number | null {
   if (!a.style || !b.style) return null;
   if (a.style === b.style) return 1;
   return STYLE_NEIGHBORS.get(a.style)?.has(b.style) ? 0.6 : 0;
@@ -214,6 +214,10 @@ export function soundClash(a: TrackProfile, b: TrackProfile): boolean {
     (!!a.groove && !!b.groove && a.groove !== b.groove);
 }
 
+/** Hard rule: percussive drive differs more than 0.3. */
+export const drumClash = (a: TrackProfile, b: TrackProfile) =>
+  a.percussiveDrive != null && b.percussiveDrive != null && Math.abs(a.percussiveDrive - b.percussiveDrive) > 0.3;
+
 /** Same (or neighbor) feeling, melodic focus within 0.2 and same arc: they feel the same. */
 export function feelAligned(a: TrackProfile, b: TrackProfile): boolean {
   if (!a.feeling || !b.feeling || !a.arc || !b.arc || a.melodicFocus === null || b.melodicFocus === null) return false;
@@ -275,6 +279,7 @@ export function compatibility(a: TrackProfile, b: TrackProfile): number {
   if (feelClash(a, b)) score *= 0.3; // listener would feel something else
   if (scene === 0) score *= 0.4; // different, non-neighbor scenes
   if (soundClash(a, b)) score *= 0.5; // different instrument palette / groove
+  if (drumClash(a, b)) score *= 0.3; // drum-driven vs. barely any drums (heard)
   if (a.artistIds.some((id) => b.artistIds.includes(id))) score = Math.min(1, score + 0.08);
   return score;
 }

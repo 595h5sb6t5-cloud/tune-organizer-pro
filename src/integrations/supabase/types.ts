@@ -482,6 +482,36 @@ export type Database = {
         }
         Relationships: []
       }
+      audio_analysis_state: {
+        Row: {
+          analyzed: number
+          id: number
+          last_error: string | null
+          lease_until: string | null
+          paused_until: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          analyzed?: number
+          id?: number
+          last_error?: string | null
+          lease_until?: string | null
+          paused_until?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          analyzed?: number
+          id?: number
+          last_error?: string | null
+          lease_until?: string | null
+          paused_until?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       cluster_candidate_tracks: {
         Row: {
           artist_context_fit: number | null
@@ -2594,6 +2624,57 @@ export type Database = {
         }
         Relationships: []
       }
+      track_audio_analysis: {
+        Row: {
+          analyzed_at: string
+          confidence: number | null
+          groove: string | null
+          instruments: string[] | null
+          melodic_focus: number | null
+          model: string | null
+          percussive_drive: number | null
+          piano: boolean | null
+          scale: number | null
+          section: string | null
+          source: string
+          spotify_track_id: string
+          texture: number | null
+          warmth: number | null
+        }
+        Insert: {
+          analyzed_at?: string
+          confidence?: number | null
+          groove?: string | null
+          instruments?: string[] | null
+          melodic_focus?: number | null
+          model?: string | null
+          percussive_drive?: number | null
+          piano?: boolean | null
+          scale?: number | null
+          section?: string | null
+          source: string
+          spotify_track_id: string
+          texture?: number | null
+          warmth?: number | null
+        }
+        Update: {
+          analyzed_at?: string
+          confidence?: number | null
+          groove?: string | null
+          instruments?: string[] | null
+          melodic_focus?: number | null
+          model?: string | null
+          percussive_drive?: number | null
+          piano?: boolean | null
+          scale?: number | null
+          section?: string | null
+          source?: string
+          spotify_track_id?: string
+          texture?: number | null
+          warmth?: number | null
+        }
+        Relationships: []
+      }
       tracks: {
         Row: {
           album_id: string | null
@@ -3077,6 +3158,26 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      audio_queue: {
+        Args: { _ids?: string[]; _limit: number }
+        Returns: {
+          artist_name: string
+          electronic: boolean
+          isrc: string
+          spotify_track_id: string
+          track_name: string
+        }[]
+      }
+      audio_queue_count: { Args: never; Returns: number }
+      audio_queue_next: {
+        Args: { _limit: number }
+        Returns: {
+          artist_name: string
+          isrc: string
+          spotify_track_id: string
+          track_name: string
+        }[]
+      }
       enrich_resume_arm: { Args: { _on: boolean }; Returns: undefined }
       hydrate_track_analysis: { Args: { _user_id: string }; Returns: number }
       reconcile_liked_songs: {
