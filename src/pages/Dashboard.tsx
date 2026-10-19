@@ -50,6 +50,11 @@ const Dashboard = () => {
 
         <PlaylistsReadyBanner />
 
+        {/* Admin note: song previews are only for testing (≤5 users). */}
+        <p className="text-xs text-muted-foreground border border-border/50 rounded-lg px-3 py-2">
+          Admin: Revisar términos de Deezer antes de lanzar al público.
+        </p>
+
         {/* Spotify connection card */}
         <div className="p-6 rounded-2xl bg-surface-elevated border border-border/50">
           <div className="flex items-start justify-between gap-4 flex-wrap">
