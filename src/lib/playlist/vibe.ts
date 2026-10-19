@@ -3,7 +3,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import type { Lang, Mood, TrackProfile } from "./features";
 import { compatibility, sequence, isDance, sameOrNeighborStyle, MOOD_NEIGHBORS, melodicKin } from "./organize";
-import { askCurator } from "./curate";
 import { ensureSeedFeeling } from "./ai";
 
 export interface VibeSpec {
@@ -291,11 +290,20 @@ export async function buildVibePlaylist(
   const seedBody = seeds.map((t) => ({
     name: t.name, artists: t.artists, year: t.year, genres: t.genres.slice(0, 6), lang: t.lang,
     energy: t.energy, valence: t.valence, danceability: t.danceability, tempo: t.tempo, mood: t.mood,
+    style: t.style ?? null, scene: t.scene ?? null, instruments: t.instruments ?? [], feeling: t.feeling ?? null, arc: t.arc ?? null, melodic_focus: t.melodicFocus ?? null,
   }));
   const removedP = removedForSeeds(userId, seeds);
-  const { data, error } = await supabase.functions.invoke("vibe-spec", { body: { vibe, seeds: seedBody } });
-  if (error || data?.error) throw new Error(data?.error ?? error?.message ?? "Couldn't read the vibe.");
-  const spec = normalizeSpec(data as VibeSpec, vibe, seeds.length > 0);
+  // Recipe (and name) cached per vibe text + seed profile.
+  const specKey = "s1|" + vibeKey(vibe) + "|" + seeds.map((x) => `${x.id}~${x.feeling ?? ""}~${x.arc ?? ""}~${x.scene ?? ""}`).join(",");
+  const { data: cached } = await supabase.from("vibe_spec_cache").select("spec").eq("user_id", userId).eq("spec_key", specKey).maybeSingle();
+  let raw = cached?.spec as unknown as VibeSpec | undefined;
+  if (!raw) {
+    const { data, error } = await supabase.functions.invoke("vibe-spec", { body: { vibe, seeds: seedBody } });
+    if (error || data?.error) throw new Error(data?.error ?? error?.message ?? "Couldn't read the vibe.");
+    raw = data as VibeSpec;
+    supabase.from("vibe_spec_cache").upsert({ user_id: userId, spec_key: specKey, spec: raw as any }, { onConflict: "user_id,spec_key" }).then(() => {});
+  }
+  const spec = normalizeSpec({ ...raw }, vibe, seeds.length > 0);
   lap("recipe");
 
   onStep("Finding songs that feel the same");
@@ -312,11 +320,7 @@ export async function buildVibePlaylist(
   const sel = selectVibeTracks(candidates, scores, seeds);
   const tracks = sel.tracks;
   lap("order");
-  if (tracks.length > seeds.length) {
-    onStep("Naming your playlist");
-    const verdict = await askCurator(tracks, { vibe, seeds, nameOnly: true });
-    if (verdict?.name) spec.name = verdict.name;
-  }
+  // The name comes with the recipe (vibe-spec); no separate naming call.
   lap("name");
   return finish({ spec, lang, tracks, candidates: candidates.length, approved: approved.length, eights: sel.eights, sevens: sel.sevens });
 }

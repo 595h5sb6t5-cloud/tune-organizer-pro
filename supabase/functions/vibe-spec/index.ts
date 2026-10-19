@@ -22,7 +22,7 @@ Return ONLY JSON with exactly these keys:
 - "language": one of ${LANGS.join(", ")} ONLY if the keywords imply it, otherwise null
 - "era_min","era_max": years ONLY if the keywords imply an era, otherwise null
 - "name": a short, beautiful playlist name (2–5 words) that captures the vibe. Do NOT copy the keywords literally.
-If SEED SONGS are given: the recipe must describe the sound and feeling of the seeds; the keywords only adjust it and must never contradict the seeds. Center the ranges on the seeds' values: energy within ±0.15 of the seeds, tempo within ±12 BPM of the seeds (half/double time counts as the same feel). "language" = the seeds' language (null if instrumental). The name must reflect the seeds' vibe and must NEVER contain a seed's title or artist.`;
+If SEED SONGS are given: the recipe must describe the sound and feeling of the seeds; the keywords only adjust it and must never contradict the seeds. Center the ranges on the seeds' values: energy within ±0.15 of the seeds, tempo within ±12 BPM of the seeds (half/double time counts as the same feel). "language" = the seeds' language (null if instrumental). The name must reflect the seeds' sound and feeling (style, instruments, feeling, arc) plus the keywords and must NEVER contain a seed's title or artist.`;
 
 const clamp01 = (n: unknown, d: number) => {
   const v = Number(n);
@@ -48,7 +48,7 @@ Deno.serve(async (req) => {
     const seedList = Array.isArray(seeds) ? seeds.slice(0, 3) : [];
     if (text.length > 300 || (!text && !seedList.length)) return json({ error: "Write between 1 and 300 characters." }, 400);
     const seedText = seedList.map((t, i) =>
-      `${i + 1}. "${String(t.name).slice(0, 200)}" by ${(t.artists ?? []).slice(0, 4).join(", ")} | year: ${t.year ?? "?"} | genres: ${(t.genres ?? []).slice(0, 6).join(", ") || "none"} | language: ${t.lang ?? "?"} | energy: ${t.energy ?? "?"} | valence: ${t.valence ?? "?"} | danceability: ${t.danceability ?? "?"} | tempo: ${t.tempo ?? "?"} | mood: ${t.mood ?? "?"}`
+      `${i + 1}. "${String(t.name).slice(0, 200)}" by ${(t.artists ?? []).slice(0, 4).join(", ")} | year: ${t.year ?? "?"} | genres: ${(t.genres ?? []).slice(0, 6).join(", ") || "none"} | language: ${t.lang ?? "?"} | energy: ${t.energy ?? "?"} | valence: ${t.valence ?? "?"} | danceability: ${t.danceability ?? "?"} | tempo: ${t.tempo ?? "?"} | mood: ${t.mood ?? "?"} | style: ${t.style ?? "?"} | scene: ${t.scene ?? "?"} | instruments: ${(t.instruments ?? []).slice(0, 6).join(", ") || "?"} | feeling: ${t.feeling ?? "?"} | arc: ${t.arc ?? "?"} | melodic_focus: ${t.melodic_focus ?? "?"}`
     ).join("\n");
     const userMsg = `Vibe keywords: ${text || "(none — use only the seeds)"}` + (seedText ? `\n\nSEED SONGS:\n${seedText}` : "");
 
