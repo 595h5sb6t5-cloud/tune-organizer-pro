@@ -7,12 +7,11 @@ import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
-import { buildProfiles, type SpotifyTrack, type TrackProfile } from "@/lib/playlist/features";
-import { enrichWithAI, isAiEnabled } from "@/lib/playlist/ai";
-import { organizeLibrary, curateLibrary, sequence, type PlaylistDraft } from "@/lib/playlist/organize";
-import { askCurator } from "@/lib/playlist/curate";
+import type { SpotifyTrack, TrackProfile } from "@/lib/playlist/features";
+import { sequence, type PlaylistDraft } from "@/lib/playlist/organize";
 import { recordRemoval } from "@/lib/playlist/feedback";
 import EditSoundDialog from "@/components/app/EditSoundDialog";
+import { loadPrebuilt, maybePrebuild, markPrebuiltSeen } from "@/lib/playlist/prebuild";
 
 type Step = { label: string; done: number; total: number };
 
@@ -86,6 +85,27 @@ export default function OrganizeLibraryPanel({ onSaved }: { onSaved: () => void 
   const [saving, setSaving] = useState<string | null>(null);
   const [saved, setSaved] = useState<Record<string, string>>({});
   const [coverage, setCoverage] = useState<{ done: number; total: number } | null>(null);
+  const [builtAt, setBuiltAt] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [dirty, setDirty] = useState(false);
+
+  // Saved set shows instantly; newer background builds replace it unless the user is editing.
+  useEffect(() => {
+    if (!user) return;
+    let alive = true;
+    const load = async () => {
+      const set = await loadPrebuilt(user.id);
+      if (!alive) return;
+      setLoaded(true);
+      if (set?.built_at && set.built_at !== builtAt && !dirty) {
+        setPlaylists(set.playlists); setUnsorted(set.unsorted); setBuiltAt(set.built_at);
+        void markPrebuiltSeen(user.id);
+      }
+    };
+    load();
+    const t = setInterval(load, 30000);
+    return () => { alive = false; clearInterval(t); };
+  }, [user, builtAt, dirty]);
 
   // Results only appear once ≥90% of songs have a style from the background analysis.
   useEffect(() => {
@@ -109,39 +129,12 @@ export default function OrganizeLibraryPanel({ onSaved }: { onSaved: () => void 
   async function analyze() {
     if (!user) return;
     setError(null);
-    setPlaylists([]);
-    setUnsorted([]);
-    setSaved({});
     try {
-      setStep({ label: "Reading your Liked Songs", done: 0, total: 0 });
-      const tracks = await loadLikedTracks(user.id);
-      if (!tracks.length) {
-        setError("Your Liked Songs list is empty. Sync your library first.");
-        return;
-      }
-
-      const artistIds = tracks.flatMap((t) => t.artists.map((a) => a.id));
-      setStep({ label: "Reading artist genres", done: 0, total: 0 });
-      const genres = await loadArtistGenres(artistIds, (done, total) =>
-        setStep({ label: "Reading artist genres", done, total }),
-      );
-
-      let profiles = buildProfiles(tracks, genres);
-      if (isAiEnabled()) {
-        profiles = await enrichWithAI(profiles, (done, total) =>
-          setStep({ label: "Reading language, energy and mood", done, total }),
-        );
-      }
-
-      setStep({ label: "Building your playlists", done: 0, total: 0 });
-      await new Promise((r) => setTimeout(r, 50));
-      const draft = organizeLibrary(profiles);
-      setStep({ label: "Curator is listening to each playlist", done: 0, total: draft.playlists.length });
-      const result = await curateLibrary(draft, (tracks) => askCurator(tracks), (done, total) =>
-        setStep({ label: "Curator is listening to each playlist", done, total }),
-      );
-      setPlaylists(result.playlists);
-      setUnsorted(result.unsorted);
+      setStep({ label: "Rebuilding your playlists", done: 0, total: 0 });
+      const ok = await maybePrebuild(user.id, true);
+      if (!ok) throw new Error("A rebuild is already running. Your playlists will update on their own in a moment.");
+      const set = await loadPrebuilt(user.id);
+      if (set) { setPlaylists(set.playlists); setUnsorted(set.unsorted); setBuiltAt(set.built_at); setSaved({}); setDirty(false); }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong while reading your library.");
     } finally {
@@ -150,10 +143,12 @@ export default function OrganizeLibraryPanel({ onSaved }: { onSaved: () => void 
   }
 
   function rename(key: string, name: string) {
+    setDirty(true);
     setPlaylists((all) => all.map((p) => (p.key === key ? { ...p, name } : p)));
   }
 
   function removeTrack(key: string, id: string) {
+    setDirty(true);
     setPlaylists((all) =>
       all.map((p) => {
         if (p.key !== key) return p;
@@ -207,7 +202,7 @@ export default function OrganizeLibraryPanel({ onSaved }: { onSaved: () => void 
           Songs are grouped by language, sound and mood, then ordered so each playlist flows. Songs that don't fit
           anywhere stay out instead of being forced in.
         </p>
-        {coverage && !ready && (
+        {coverage && coverage.done < coverage.total && (
           <div className="space-y-2" aria-live="polite">
             <p className="text-sm text-muted-foreground">
               Analyzing your library · {coverage.done.toLocaleString()} of {coverage.total.toLocaleString()} songs
@@ -215,9 +210,14 @@ export default function OrganizeLibraryPanel({ onSaved }: { onSaved: () => void 
             <Progress value={coverage.total ? (coverage.done / coverage.total) * 100 : 0} />
           </div>
         )}
-        <Button variant="hero" onClick={analyze} disabled={!!step || !ready}>
+        {loaded && !playlists.length && !step && (
+          <p className="text-sm text-muted-foreground">
+            Your first playlists are built automatically as soon as your most recent songs are analyzed.
+          </p>
+        )}
+        <Button variant={playlists.length ? "outline" : "hero"} onClick={analyze} disabled={!!step || !ready}>
           {step ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Wand2 className="w-4 h-4 mr-2" />}
-          {playlists.length ? "Analyze again" : "Analyze my Liked Songs"}
+          Rebuild now
         </Button>
 
         <AnalysisNote />

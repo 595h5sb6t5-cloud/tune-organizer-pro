@@ -29,7 +29,7 @@ export interface VibeResult {
 
 const E_TOL = 0.08;
 const MIN_SEED_COMPAT = 0.6;
-const MAX_CANDIDATES = 120;
+const MAX_CANDIDATES = 60; // best seed/recipe fits only, so the review stays fast
 const MIN_SCORE = 8;
 const FILL_SCORE = 7;
 const FILL_TARGET = 20;
@@ -39,7 +39,7 @@ const MAX_TRACKS = 30;
 const FEEL_EXTRA_STYLES = ["ambient-electronic", "indie-dance", "nu-disco", "synth-pop", "indie-pop", "lo-fi", "soundtrack", "classical"];
 /** AI unsure how the song feels: it needs an 8 or more to get in. */
 const lowConfidence = (t: TrackProfile) => t.confidence !== null && t.confidence !== undefined && t.confidence < 0.5;
-const SELECT_BATCH = 40;
+const SELECT_BATCH = 20; // all batches run in parallel
 
 const mid = (a: number, b: number) => (a + b) / 2;
 
@@ -191,14 +191,11 @@ async function scoreCandidates(userId: string, vibe: string, cands: TrackProfile
   const todo = cands.filter((c) => !scores.has(c.id));
   let done = 0;
   onProgress?.(0, todo.length);
-  for (let i = 0; i < todo.length; i += SELECT_BATCH) {
-    const batch = todo.slice(i, i + SELECT_BATCH);
+  const batches: TrackProfile[][] = [];
+  for (let i = 0; i < todo.length; i += SELECT_BATCH) batches.push(todo.slice(i, i + SELECT_BATCH));
+  await Promise.all(batches.map(async (batch) => {
     const { data, error } = await supabase.functions.invoke("vibe-select", {
-      body: {
-        vibe,
-        tracks: batch.map(brief),
-        seeds: seeds.map(seedProfile),
-      },
+      body: { vibe, tracks: batch.map(brief), seeds: seeds.map(seedProfile) },
     });
     if (error || data?.error) throw new Error(data?.error ?? error?.message ?? "The AI review failed.");
     const rows = [];
@@ -209,7 +206,7 @@ async function scoreCandidates(userId: string, vibe: string, cands: TrackProfile
     if (rows.length) await supabase.from("vibe_select_cache").upsert(rows, { onConflict: "user_id,vibe_key,spotify_track_id" });
     done += batch.length;
     onProgress?.(done, todo.length);
-  }
+  }));
   return scores;
 }
 
@@ -262,6 +259,8 @@ async function removedForSeeds(userId: string, seeds: TrackProfile[]): Promise<S
   return new Set((data ?? []).map((r) => r.spotify_track_id));
 }
 
+export type VibeTimings = Record<"seed" | "recipe" | "filter" | "select" | "order" | "name" | "total", number>;
+
 export async function buildVibePlaylist(
   userId: string,
   vibe: string,
@@ -269,36 +268,55 @@ export async function buildVibePlaylist(
   langChoice: string,
   onStep: (label: string, done?: number, total?: number) => void,
   seeds: TrackProfile[] = [],
-): Promise<VibeResult> {
-  onStep("Reading your vibe");
+): Promise<VibeResult & { timings: VibeTimings }> {
+  const t0 = performance.now();
+  const timings: VibeTimings = { seed: 0, recipe: 0, filter: 0, select: 0, order: 0, name: 0, total: 0 };
+  let mark = t0;
+  const lap = (k: keyof VibeTimings) => { const now = performance.now(); timings[k] = Math.round(now - mark); mark = now; };
+  const finish = async <T extends VibeResult>(r: T) => {
+    timings.total = Math.round(performance.now() - t0);
+    console.info(`[vibe] timings (ms) ${JSON.stringify(timings)}`);
+    // Query builders only run when awaited/then'd.
+    supabase.from("vibe_timings").insert({ user_id: userId, vibe, steps: timings as any, total_ms: timings.total, tracks: r.tracks.length }).then(() => {});
+    return { ...r, timings };
+  };
+
+  onStep("Reading the vibe");
   if (seeds.length) {
     const fresh = await ensureSeedFeeling(seeds);
     seeds = fresh;
     profiles = profiles.map((p) => fresh.find((x) => x.id === p.id) ?? p);
   }
+  lap("seed");
   const seedBody = seeds.map((t) => ({
     name: t.name, artists: t.artists, year: t.year, genres: t.genres.slice(0, 6), lang: t.lang,
     energy: t.energy, valence: t.valence, danceability: t.danceability, tempo: t.tempo, mood: t.mood,
   }));
+  const removedP = removedForSeeds(userId, seeds);
   const { data, error } = await supabase.functions.invoke("vibe-spec", { body: { vibe, seeds: seedBody } });
   if (error || data?.error) throw new Error(data?.error ?? error?.message ?? "Couldn't read the vibe.");
   const spec = normalizeSpec(data as VibeSpec, vibe, seeds.length > 0);
+  lap("recipe");
 
-  onStep("Filtering your Liked Songs");
-  const removed = await removedForSeeds(userId, seeds);
+  onStep("Finding songs that feel the same");
+  const removed = await removedP;
   const { lang, candidates } = filterCandidates(profiles.filter((t) => !removed.has(t.id)), spec, langChoice, seeds);
-  if (!candidates.length) return { spec, lang, tracks: seeds.length ? sequence(seeds, seeds[0].id) : [], candidates: 0, approved: 0 };
+  lap("filter");
+  if (!candidates.length) return finish({ spec, lang, tracks: seeds.length ? sequence(seeds, seeds[0].id) : [], candidates: 0, approved: 0 });
 
-  const scores = await scoreCandidates(userId, vibe, candidates, seeds, (d, t) => onStep("Listening to every candidate", d, t));
+  const scores = await scoreCandidates(userId, vibe, candidates, seeds, (d, t) => onStep("Finding songs that feel the same", d, t));
   const approved = candidates.filter((c) => (scores.get(c.id) ?? 0) >= MIN_SCORE);
+  lap("select");
 
-  onStep("Ordering the playlist");
+  onStep("Putting them in order");
   const sel = selectVibeTracks(candidates, scores, seeds);
   const tracks = sel.tracks;
+  lap("order");
   if (tracks.length > seeds.length) {
-    onStep("Naming the playlist");
+    onStep("Naming your playlist");
     const verdict = await askCurator(tracks, { vibe, seeds, nameOnly: true });
     if (verdict?.name) spec.name = verdict.name;
   }
-  return { spec, lang, tracks, candidates: candidates.length, approved: approved.length, eights: sel.eights, sevens: sel.sevens };
+  lap("name");
+  return finish({ spec, lang, tracks, candidates: candidates.length, approved: approved.length, eights: sel.eights, sevens: sel.sevens });
 }

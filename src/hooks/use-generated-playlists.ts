@@ -150,7 +150,7 @@ export function useGeneratedPlaylistDetail(playlistId: string | null) {
       const reordered = next.map((t, i) => ({ ...t, position: i + 1 }));
       // persist async
       if (reordered[0]?.id.startsWith("sid:")) {
-        void supabase.from("generated_playlists").update({ track_ids: reordered.map((t) => t.spotify_track_id) }).eq("id", playlistId!);
+        supabase.from("generated_playlists").update({ track_ids: reordered.map((t) => t.spotify_track_id) }).eq("id", playlistId!).then(() => {});
       } else {
         void Promise.all(reordered.map((t) =>
           supabase.from("generated_playlist_tracks").update({ position: t.position }).eq("id", t.id),

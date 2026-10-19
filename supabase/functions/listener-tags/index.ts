@@ -68,6 +68,8 @@ async function summarizeComments(name: string, comments: string[]) {
 }
 
 async function runHop(admin: any, userId: string, started: number, priority: string[]) {
+  // Evidence any user already gathered is copied from the shared table first.
+  await admin.rpc("hydrate_track_analysis", { _user_id: userId });
   const left = () => HOP_BUDGET_MS - (Date.now() - started);
   const liked: any[] = [];
   for (let from = 0; ; from += 1000) {
@@ -138,20 +140,28 @@ async function runHop(admin: any, userId: string, started: number, priority: str
   const lfQueue = order(liked.map((t) => t.spotify_track_id).filter((id) => !ev.get(id)?.lastfm_checked));
   const artistCache = new Map<string, any[]>();
   if (Deno.env.get("LASTFM_API_KEY")) {
-    for (const id of lfQueue) {
-      if (left() < 25_000) break;
-      const t = byId.get(id)!;
-      const artist = ((t.artists ?? []) as any[])[0]?.name ?? String(t.artist_name).split(",")[0];
-      let r = await lastfm("track.gettoptags", { artist, track: cleanTitle(t.track_name) }); await sleep(250);
-      if (r.rate) break;
-      let source = "track";
-      if (!r.tags.length) {
-        source = "artist";
-        if (!artistCache.has(artist)) { const a = await lastfm("artist.gettoptags", { artist }); await sleep(250); if (a.rate) break; artistCache.set(artist, a.tags); }
-        r = { rate: false, tags: artistCache.get(artist)! };
+    // 4 workers share one gate: at most 4 Last.fm requests start per second.
+    let nextSlot = 0; let rated = false;
+    const gate = async () => { const now = Date.now(); const at = Math.max(now, nextSlot); nextSlot = at + 250; if (at > now) await sleep(at - now); };
+    const q = [...lfQueue];
+    const worker = async () => {
+      while (q.length && !rated && left() >= 25_000) {
+        const id = q.shift()!;
+        const t = byId.get(id)!;
+        const artist = ((t.artists ?? []) as any[])[0]?.name ?? String(t.artist_name).split(",")[0];
+        await gate();
+        let r = await lastfm("track.gettoptags", { artist, track: cleanTitle(t.track_name) });
+        if (r.rate) { rated = true; return; }
+        let source = "track";
+        if (!r.tags.length) {
+          source = "artist";
+          if (!artistCache.has(artist)) { await gate(); const a = await lastfm("artist.gettoptags", { artist }); if (a.rate) { rated = true; return; } artistCache.set(artist, a.tags); }
+          r = { rate: false, tags: artistCache.get(artist)! };
+        }
+        await upsert(id, { tags: r.tags.length ? r.tags : null, tag_source: r.tags.length ? source : null, lastfm_checked: true });
       }
-      await upsert(id, { tags: r.tags.length ? r.tags : null, tag_source: r.tags.length ? source : null, lastfm_checked: true, ...(ev.get(id)?.evidence_applied ? {} : {}) });
-    }
+    };
+    await Promise.all(Array.from({ length: 4 }, worker));
   }
   const lfLeft = liked.filter((t) => !ev.get(t.spotify_track_id)?.lastfm_checked).length;
 

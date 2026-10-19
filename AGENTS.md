@@ -3,3 +3,6 @@
 - Spotify calls follow the Feb 2026 Development Mode API (/me/playlists, /playlists/{id}/items, single-item GETs, no audio-features/top-tracks/popularity) — those endpoints/fields are gone.
 - Artist genres and AI track classification are filled only by the library-enrich background function (started after each sync, pauses on long Spotify waits); the browser only reads stored data — keeps playlist creation instant and avoids blocking on Spotify rate limits.
 - Listener evidence (Last.fm tags, YouTube comment summaries) is gathered only by the listener-tags background function, kicked when library-enrich finishes; it re-describes feeling with the strong model and never overrides manual_sound — one evidence pipeline, bounded API quotas.
+- Song analysis is shared across users in track_analysis_global (filled by triggers on track_ai_classification/listener_evidence; copied back with hydrate_track_analysis before any AI call); manual_sound and feedback stay per user — one analysis per Spotify id, no repeated AI cost.
+- Pre-built AI Playlists are produced by src/lib/playlist/prebuild.ts (usePrebuild in AppLayout, DB lease in prebuilt_playlists) using organize.ts, and the AI Playlists page reads the saved set first — instant page, still one engine.
+- Each vibe run logs per-step durations to vibe_timings — keeps the <20 s target measurable.

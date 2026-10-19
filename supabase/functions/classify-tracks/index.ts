@@ -3,6 +3,7 @@
 // Secret needed:  supabase secrets set OPENAI_API_KEY=sk-...
 // Deploy:         supabase functions deploy classify-tracks
 
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { SOUND_PROMPT, sanitizeSound } from "../_shared/sound.ts";
 
 const FAMILIES = ["regional-mexicano","urbano-latino","tropical","brasil","rock-en-espanol","latin-pop","k-pop","j-music","hip-hop","rnb-soul","electronic","metal","indie-alt","rock","folk-acoustic","jazz-blues","classical-score","pop"];
@@ -50,13 +51,24 @@ Deno.serve(async (req) => {
     });
 
   try {
-    const { tracks } = (await req.json()) as { tracks: InputTrack[] };
+    const body = (await req.json()) as { tracks: InputTrack[] };
+    let tracks = body.tracks;
     if (!Array.isArray(tracks) || tracks.length === 0 || tracks.length > 50) {
       return json({ error: "Send between 1 and 50 tracks." }, 400);
     }
 
     const apiKey = Deno.env.get("OPENAI_API_KEY");
     if (!apiKey) return json({ error: "OPENAI_API_KEY is not set." }, 500);
+
+    // Songs any user already analyzed come from the shared table; only the rest go to the AI.
+    const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    const { data: shared } = await admin.from("track_analysis_global")
+      .select("spotify_track_id, lang, energy, valence, danceability, tempo, mood, original_year, family, style, instruments, texture, warmth, scale, groove")
+      .in("spotify_track_id", tracks.map((t) => t.id)).eq("style_checked", true).not("lang", "is", null);
+    const reused = (shared ?? []).map((r: any) => ({ ...r, id: r.spotify_track_id, shared: true }));
+    const have = new Set(reused.map((r: any) => r.id));
+    tracks = tracks.filter((t) => !have.has(t.id));
+    if (!tracks.length) return json({ results: reused });
 
     const list = tracks
       .map((t, i) =>
@@ -93,7 +105,7 @@ Deno.serve(async (req) => {
       const y = Number(r.original_year);
       return { ...r, original_year: Number.isInteger(y) && y >= 1900 && y <= maxYear ? y : null, family: FAMILIES.includes(r.family) ? r.family : null, style: STYLES.includes(r.style) ? r.style : null, ...sanitizeSound(r) };
     });
-    return json({ results });
+    return json({ results: [...reused, ...results] });
   } catch (err) {
     return json({ error: err instanceof Error ? err.message : "Unknown error" }, 500);
   }

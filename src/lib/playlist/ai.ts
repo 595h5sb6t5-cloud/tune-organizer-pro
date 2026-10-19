@@ -223,19 +223,22 @@ export async function saveManualSound(p: TrackProfile, m: ManualSound): Promise<
 
 /** Makes sure seeds have a listener-feeling description (strong model), then returns updated seeds. */
 export async function ensureSeedFeeling(seeds: TrackProfile[]): Promise<TrackProfile[]> {
-  const missing = seeds.filter((s) => !s.feeling && !s.soundEdited);
+  const missing = seeds.filter((s) => (!s.feeling || !s.style) && !s.soundEdited);
   if (!missing.length) return seeds;
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return seeds;
   await supabase.functions.invoke("library-enrich", { body: { feel_ids: missing.map((s) => s.id) } }).catch(() => null);
   const { data } = await supabase.from("track_ai_classification")
-    .select("spotify_track_id, scene, instruments, texture, warmth, scale, feeling, melodic_focus, arc, confidence")
+    .select("spotify_track_id, lang, energy, valence, danceability, tempo, mood, style, family, original_year, scene, instruments, texture, warmth, scale, feeling, melodic_focus, arc, confidence")
     .eq("user_id", user.id).in("spotify_track_id", missing.map((s) => s.id));
   return seeds.map((s) => {
     const r: any = data?.find((x) => x.spotify_track_id === s.id);
     if (!r) return s;
+    const base = s.style ? s : apply(s, sanitize({ ...r, id: s.id }) ?? {}, true);
     return {
-      ...s, scene: r.scene ?? s.scene, instruments: r.instruments ?? s.instruments,
+      ...base, style: r.style ?? s.style, year: r.original_year ?? s.year,
+      families: s.families.length ? s.families : r.family ? [r.family] : [],
+      scene: r.scene ?? s.scene, instruments: r.instruments ?? s.instruments,
       texture: r.texture ?? s.texture, warmth: r.warmth ?? s.warmth, scale: r.scale ?? s.scale,
       feeling: r.feeling, melodicFocus: r.melodic_focus, arc: r.arc, confidence: r.confidence,
     };

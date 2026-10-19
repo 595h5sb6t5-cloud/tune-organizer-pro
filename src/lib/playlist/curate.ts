@@ -9,7 +9,8 @@ export async function askCurator(
 ): Promise<CuratorVerdict | null> {
   const { data, error } = await supabase.functions.invoke("curate-playlist", {
     body: {
-      tracks: tracks.map((t) => ({
+      // Naming only needs a sample of the playlist.
+      tracks: (extra.nameOnly ? tracks.slice(0, 12) : tracks).map((t) => ({
         id: t.id, name: t.name, artists: t.artists, year: t.year, style: t.style, lang: t.lang,
         energy: t.energy === null ? null : Math.round(t.energy * 10) / 10, mood: t.mood,
         instruments: t.instruments, texture: t.texture, warmth: t.warmth, scale: t.scale, groove: t.groove, scene: t.scene, feeling: t.feeling, melodic_focus: t.melodicFocus, arc: t.arc,
@@ -28,4 +29,9 @@ export async function askCurator(
   });
   if (error || data?.error) return null;
   return { remove: data.remove ?? [], name: data.name ?? "" };
+}
+
+/** Wakes the vibe functions up so the first real request doesn't pay a cold start. */
+export function warmVibeFunctions() {
+  for (const f of ["vibe-spec", "vibe-select", "curate-playlist"]) void supabase.functions.invoke(f, { body: { warm: true } }).catch(() => null);
 }

@@ -15,6 +15,7 @@ import { recordRemoval } from "@/lib/playlist/feedback";
 import EditSoundDialog from "@/components/app/EditSoundDialog";
 import { loadLikedTracks, loadArtistGenres } from "@/components/app/OrganizeLibraryPanel";
 import type { SpotifyTrack } from "@/lib/playlist/features";
+import { warmVibeFunctions } from "@/lib/playlist/curate";
 import { findSeedMatches, isUniqueFullTitle, leftoverKeywords, type SeedMatch } from "@/components/app/seedMatch";
 
 const LANG_LABEL: Record<string, string> = {
@@ -42,6 +43,15 @@ export default function VibePlaylistPanel() {
 
   useEffect(() => {
     if (user) loadLikedTracks(user.id).then(setLiked).catch(() => setLiked([]));
+    if (user) { // ready before the first click, without showing a loading state
+      warmVibeFunctions();
+      loadLikedTracks(user.id).then(async (l) => {
+        if (!l.length) return;
+        const g = await loadArtistGenres(l.flatMap((t) => t.artists.map((a) => a.id)), () => {});
+        const p = await enrichWithAI(buildProfiles(l, g));
+        setProfiles((cur) => cur ?? p);
+      }).catch(() => null);
+    }
   }, [user]);
 
   const matches = useMemo(() => {

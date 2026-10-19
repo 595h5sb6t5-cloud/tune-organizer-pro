@@ -1541,6 +1541,45 @@ export type Database = {
           },
         ]
       }
+      prebuilt_playlists: {
+        Row: {
+          analyzed_count: number
+          built_at: string | null
+          error: string | null
+          lease_until: string | null
+          playlists: Json
+          seen_at: string | null
+          status: string
+          unsorted: Json
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          analyzed_count?: number
+          built_at?: string | null
+          error?: string | null
+          lease_until?: string | null
+          playlists?: Json
+          seen_at?: string | null
+          status?: string
+          unsorted?: Json
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          analyzed_count?: number
+          built_at?: string | null
+          error?: string | null
+          lease_until?: string | null
+          playlists?: Json
+          seen_at?: string | null
+          status?: string
+          unsorted?: Json
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           apple_music_connected: boolean
@@ -2441,6 +2480,114 @@ export type Database = {
         }
         Relationships: []
       }
+      track_analysis_global: {
+        Row: {
+          arc: string | null
+          confidence: number | null
+          danceability: number | null
+          energy: number | null
+          evidence_applied: boolean
+          family: string | null
+          family_checked: boolean
+          feel_checked: boolean
+          feeling: string | null
+          groove: string | null
+          instruments: string[] | null
+          lang: string | null
+          lastfm_checked: boolean
+          melodic_focus: number | null
+          mood: string | null
+          original_year: number | null
+          scale: number | null
+          scene: string | null
+          scene_checked: boolean
+          sound_checked: boolean
+          spotify_track_id: string
+          style: string | null
+          style_checked: boolean
+          tag_source: string | null
+          tags: Json | null
+          tempo: number | null
+          texture: number | null
+          updated_at: string
+          valence: number | null
+          warmth: number | null
+          year_checked: boolean
+          youtube_checked: boolean
+          youtube_summary: string | null
+        }
+        Insert: {
+          arc?: string | null
+          confidence?: number | null
+          danceability?: number | null
+          energy?: number | null
+          evidence_applied?: boolean
+          family?: string | null
+          family_checked?: boolean
+          feel_checked?: boolean
+          feeling?: string | null
+          groove?: string | null
+          instruments?: string[] | null
+          lang?: string | null
+          lastfm_checked?: boolean
+          melodic_focus?: number | null
+          mood?: string | null
+          original_year?: number | null
+          scale?: number | null
+          scene?: string | null
+          scene_checked?: boolean
+          sound_checked?: boolean
+          spotify_track_id: string
+          style?: string | null
+          style_checked?: boolean
+          tag_source?: string | null
+          tags?: Json | null
+          tempo?: number | null
+          texture?: number | null
+          updated_at?: string
+          valence?: number | null
+          warmth?: number | null
+          year_checked?: boolean
+          youtube_checked?: boolean
+          youtube_summary?: string | null
+        }
+        Update: {
+          arc?: string | null
+          confidence?: number | null
+          danceability?: number | null
+          energy?: number | null
+          evidence_applied?: boolean
+          family?: string | null
+          family_checked?: boolean
+          feel_checked?: boolean
+          feeling?: string | null
+          groove?: string | null
+          instruments?: string[] | null
+          lang?: string | null
+          lastfm_checked?: boolean
+          melodic_focus?: number | null
+          mood?: string | null
+          original_year?: number | null
+          scale?: number | null
+          scene?: string | null
+          scene_checked?: boolean
+          sound_checked?: boolean
+          spotify_track_id?: string
+          style?: string | null
+          style_checked?: boolean
+          tag_source?: string | null
+          tags?: Json | null
+          tempo?: number | null
+          texture?: number | null
+          updated_at?: string
+          valence?: number | null
+          warmth?: number | null
+          year_checked?: boolean
+          youtube_checked?: boolean
+          youtube_summary?: string | null
+        }
+        Relationships: []
+      }
       tracks: {
         Row: {
           album_id: string | null
@@ -2868,12 +3015,43 @@ export type Database = {
         }
         Relationships: []
       }
+      vibe_timings: {
+        Row: {
+          created_at: string
+          id: string
+          steps: Json
+          total_ms: number
+          tracks: number
+          user_id: string
+          vibe: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          steps?: Json
+          total_ms?: number
+          tracks?: number
+          user_id: string
+          vibe: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          steps?: Json
+          total_ms?: number
+          tracks?: number
+          user_id?: string
+          vibe?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
       enrich_resume_arm: { Args: { _on: boolean }; Returns: undefined }
+      hydrate_track_analysis: { Args: { _user_id: string }; Returns: number }
       reconcile_liked_songs: {
         Args: {
           _full_reconcile?: boolean
