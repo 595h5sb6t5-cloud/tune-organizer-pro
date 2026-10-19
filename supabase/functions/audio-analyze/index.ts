@@ -20,7 +20,7 @@ const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: 
 
 interface Row { spotify_track_id: string; isrc: string | null; track_name: string; artist_name: string }
 
-export const DOUBLE_MODEL = AUDIO_MODEL + "|x2";
+const DOUBLE_MODEL = AUDIO_MODEL + "|x2";
 
 /** Seeds: two listens. An instrument counts only if both heard it; numbers are averaged. */
 function mergeTwo(a: ReturnType<typeof cleanSound>, b: ReturnType<typeof cleanSound>) {
