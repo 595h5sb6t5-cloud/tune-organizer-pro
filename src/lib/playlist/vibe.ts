@@ -2,7 +2,7 @@
 // Never fills with songs that failed a filter.
 import { supabase } from "@/integrations/supabase/client";
 import type { Lang, Mood, TrackProfile } from "./features";
-import { compatibility, sequence, isDance, sameOrNeighborStyle, MOOD_NEIGHBORS, melodicKin, feelingScore } from "./organize";
+import { soundClash, drumClash, feelClash, styleMatch as _sm, sceneMatch as _scm, warmColdClash as _wc, compatibility, sequence, isDance, sameOrNeighborStyle, MOOD_NEIGHBORS, melodicKin, feelingScore } from "./organize";
 import { ensureSeedFeeling, ensureSeedAudio } from "./ai";
 
 export interface VibeSpec {
@@ -161,7 +161,7 @@ export function filterCandidates(profiles: TrackProfile[], spec: VibeSpec, langC
     active.delete(r); relaxed.push(r);
     candidates = rank(inLang.filter((t) => passesSoft(t, spec, active)));
   }
-  for (const t of inLang.filter((x) => /barry white|al green|bill withers|sam cooke/i.test(x.artists.join()))) console.info(`[vibe] dbg ${t.name} ${JSON.stringify(seeds.map((x) => Math.round(compatibility(t, x) * 100)))} ${t.feeling} ${t.year} ${t.style} ${t.energy} ${t.percussiveDrive} ${JSON.stringify(t.families)}`);
+  for (const t of inLang.filter((x) => /barry white|al green|bill withers|sam cooke/i.test(x.artists.join()))) console.info(`[vibe] dbg ${t.name} ${JSON.stringify(seeds.map((x) => Math.round(compatibility(t, x) * 100)))} ${t.feeling} ${t.year} ${t.style} ${t.energy} ${t.percussiveDrive} ${JSON.stringify(t.families)} ${JSON.stringify(seeds.map((x) => [soundClash(t, x), drumClash(t, x), feelClash(t, x), _sm(t, x), _scm(t, x), _wc(t, x), x.texture, t.texture, x.warmth, t.warmth, x.scale, t.scale, x.groove, t.groove, x.year]))}`);
   console.info(`[vibe] filter hard=${hard.length} lang=${inLang.length} cands=${candidates.length} spec=${JSON.stringify({e:[spec.energy_min,spec.energy_max],ex:spec.excluded_families})} seeds=${JSON.stringify(seeds.map((x)=>[x.name,x.style,x.energy,x.feeling,x.percussiveDrive]))}`);
   return { lang, candidates: candidates.slice(0, MAX_CANDIDATES), relaxed };
 }
