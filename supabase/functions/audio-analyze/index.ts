@@ -61,14 +61,10 @@ async function runList(admin: any, list: Row[], deadline: number) {
 function kick(depth: number) {
   const p = (async () => {
     await sleep(1500);
-    // Fire and forget: the next hop runs on its own; don't hold this one open while it works.
-    const ac = new AbortController();
-    const t = setTimeout(() => ac.abort(), 4000);
     await fetch(`${SUPABASE_URL}/functions/v1/audio-analyze`, {
       method: "POST", headers: { Authorization: `Bearer ${SERVICE_KEY}`, apikey: SERVICE_KEY, "Content-Type": "application/json" },
-      body: JSON.stringify({ depth }), signal: ac.signal,
-    }).catch(() => null);
-    clearTimeout(t);
+      body: JSON.stringify({ depth }),
+    }).catch((e) => console.error("[audio-analyze] kick failed", e));
   })();
   // @ts-ignore EdgeRuntime
   if (typeof EdgeRuntime !== "undefined" && EdgeRuntime.waitUntil) EdgeRuntime.waitUntil(p);
