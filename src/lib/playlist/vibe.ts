@@ -241,7 +241,7 @@ async function listenCandidates(userId: string, cands: TrackProfile[], seeds: Tr
 
 /** Listener feeling vs. the seed: same main, or main = the other's secondary, or neighbor. */
 const feelsLikeSeed = (t: TrackProfile, seeds: TrackProfile[]) =>
-  seeds.some((x) => { const f = feelingScore(t, x); return f === null || f >= 0.5; });
+  (fitPool.length ? fitPool : seeds).some((x) => { const f = feelingScore(t, x); return f === null || f >= 0.5; });
 
 let fitPool: TrackProfile[] = [];
 const seedFitOf = (t: TrackProfile, seeds: TrackProfile[]) => fitPool.length
