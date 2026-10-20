@@ -121,9 +121,17 @@ export function findArtistMatch(text: string, liked: SpotifyTrack[]): { name: st
 }
 
 interface SoundLike { id: string; style: string | null; scene: string | null; feeling: string | null }
-/** The 3 songs most alike each other in style, scene and feeling = the artist's core sound. */
+/** 3 VARIED seeds covering the artist's most common feelings: for each top feeling, the song most typical
+ *  of the artist (style/scene) with that feeling. Fills from the next feelings / most typical songs. */
 export function representativeSongs<T extends SoundLike>(songs: T[], n = 3): T[] {
-  const sim = (a: T, b: T) => (a.style && a.style === b.style ? 1 : 0) + (a.scene && a.scene === b.scene ? 1 : 0) + (a.feeling && a.feeling === b.feeling ? 1 : 0);
-  return songs.map((s) => ({ s, v: songs.reduce((acc, o) => acc + (o === s ? 0 : sim(s, o)), 0) }))
-    .sort((a, b) => b.v - a.v).slice(0, n).map((x) => x.s);
+  const sim = (a: T, b: T) => (a.style && a.style === b.style ? 1 : 0) + (a.scene && a.scene === b.scene ? 1 : 0);
+  const typ = new Map(songs.map((s) => [s.id, songs.reduce((acc, o) => acc + (o === s ? 0 : sim(s, o)), 0)]));
+  const byTyp = [...songs].sort((a, b) => typ.get(b.id)! - typ.get(a.id)!);
+  const counts = new Map<string, number>();
+  for (const s of songs) if (s.feeling) counts.set(s.feeling, (counts.get(s.feeling) ?? 0) + 1);
+  const feelings = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([f]) => f);
+  const out: T[] = [];
+  for (const f of feelings) { if (out.length >= n) break; const s = byTyp.find((x) => x.feeling === f); if (s) out.push(s); }
+  for (const s of byTyp) { if (out.length >= n) break; if (!out.includes(s)) out.push(s); }
+  return out;
 }

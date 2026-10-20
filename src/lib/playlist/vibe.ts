@@ -28,7 +28,7 @@ export interface VibeResult {
 
 const E_TOL = 0.08;
 const MIN_SEED_COMPAT = 0.6;
-const MAX_CANDIDATES = 120; // best seed/recipe fits only, so the review stays fast
+const MAX_CANDIDATES = 60; // best seed/recipe fits only, so the review stays fast
 const MIN_SCORE = 8;
 const FILL_SCORE = 7;
 const FILL_TARGET = 20;
@@ -163,7 +163,7 @@ export function filterCandidates(profiles: TrackProfile[], spec: VibeSpec, langC
     active.delete(r); relaxed.push(r);
     candidates = rank(inLang.filter((t) => passesSoft(t, spec, active)));
   }
-  return { lang, candidates: candidates.slice(0, MAX_CANDIDATES), relaxed };
+  return { lang, candidates: candidates.slice(0, seedRank ? MAX_CANDIDATES * 2 : MAX_CANDIDATES), relaxed };
 }
 
 const vibeKey = (v: string) => v.toLowerCase().replace(/\s+/g, " ").trim();
