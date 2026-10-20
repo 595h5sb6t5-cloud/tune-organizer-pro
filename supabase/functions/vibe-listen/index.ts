@@ -1,5 +1,5 @@
-// Edge Function: vibe-listen — Gemini hears the seed preview(s) and up to 8 candidate previews
-// and rates 0–10 whether each candidate SOUNDS like the same world as the seed.
+// Edge Function: vibe-listen — Gemini hears up to 8 candidate previews and rates 0–10 whether each
+// SOUNDS like the same world as the seed. The seed is NOT re-heard: its stored analysis is sent as text.
 // Audio is never stored. NOTE: Revisar términos de Deezer antes de lanzar al público.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { findPreview, fetchAudioB64, gemini, GatewayStop, GatewayRetry } from "../_shared/audio.ts";
@@ -12,7 +12,7 @@ const corsHeaders = {
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
 const PROMPT = `You are a DJ checking if songs belong in the same playlist as the SEED.
-Listen to the SEED clip(s) first, then each numbered SONG clip. For each song rate 0–10 how much it SOUNDS like the same sonic world as the seed:
+Read the SEED's sound description (heard earlier), then listen to each numbered SONG clip. For each song rate 0–10 how much it SOUNDS like the same sonic world as the seed:
 instrument palette (piano, synths, organic percussion, vocals…), melody-led vs groove/percussion-led, texture (organic vs synthetic), warmth and drive.
 10 = could be the next track in the same set; 8 = clearly the same world; 7 = close with one small difference; 6 or less = a listener would notice it doesn't belong.
 Judge ONLY what you hear. Return ONLY JSON: {"results":[{"n":<song number>,"s":<score>}]}`;
@@ -27,11 +27,13 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     if (body?.warm) return json({ ok: true });
     const str = (a: unknown, n: number) => Array.isArray(a) ? a.filter((x) => typeof x === "string").slice(0, n) as string[] : [];
-    const seedIds = str(body?.seed_ids, 3), ids = str(body?.ids, 8);
-    if (!seedIds.length || !ids.length) return json({ error: "Send 1–3 seeds and 1–8 songs." }, 400);
+    const ids = str(body?.ids, 8);
+    const seed = body?.seed && typeof body.seed === "object" ? body.seed : null;
+    const context = typeof body?.context === "string" ? body.context.trim().slice(0, 120) : "";
+    if (!seed || !ids.length) return json({ error: "Send a seed profile and 1–8 songs." }, 400);
 
     const { data: rows } = await admin.from("liked_songs").select("spotify_track_id, isrc, track_name, artist_name")
-      .eq("user_id", user.id).in("spotify_track_id", [...seedIds, ...ids]);
+      .eq("user_id", user.id).in("spotify_track_id", ids);
     const byId = new Map((rows ?? []).map((r: any) => [r.spotify_track_id, r]));
     const clip = async (id: string) => {
       const r: any = byId.get(id);
@@ -41,18 +43,14 @@ Deno.serve(async (req) => {
       return b64 ? { id, b64, label: `"${r.track_name}" by ${r.artist_name}` } : null;
     };
     const t0 = Date.now();
-    const [seedClips, songClips] = await Promise.all([Promise.all(seedIds.map(clip)), Promise.all(ids.map(clip))]);
-    const seeds = seedClips.filter(Boolean) as any[];
-    const songs = songClips.filter(Boolean) as any[];
+    const songs = (await Promise.all(ids.map(clip))).filter(Boolean) as any[];
     const unheard = ids.filter((id) => !songs.some((s) => s.id === id));
-    if (!seeds.length) return json({ results: [], unheard: ids, no_seed_audio: true });
     if (!songs.length) return json({ results: [], unheard });
 
-    const content: any[] = [{ type: "text", text: PROMPT }];
-    for (const s of seeds) {
-      content.push({ type: "text", text: `SEED: ${s.label}` });
-      content.push({ type: "input_audio", input_audio: { data: s.b64, format: "mp3" } });
-    }
+    const f = (v: unknown) => (v === null || v === undefined || v === "" ? "?" : Array.isArray(v) ? v.slice(0, 8).map(String).join(", ") : String(v).slice(0, 80));
+    const seedText = `SEED: "${f(seed.name)}" by ${f(seed.artists)} | instruments: ${f(seed.instruments)} | piano: ${f(seed.piano)} | melodic_focus: ${f(seed.melodic_focus)} | percussive_drive: ${f(seed.percussive_drive)} | texture: ${f(seed.texture)} | warmth: ${f(seed.warmth)} | scale: ${f(seed.scale)} | groove: ${f(seed.groove)} | energy: ${f(seed.energy)} | style: ${f(seed.style)} | feeling: ${f(seed.feeling)}${seed.feeling_2 ? ` (also ${f(seed.feeling_2)})` : ""} | arc: ${f(seed.arc)}`;
+    const ctxText = context ? `\nAdemás de sonar del mismo mundo que la semilla, ¿encaja con este contexto: ${context}? A song that sounds right but does not fit this context scores 7 or less.` : "";
+    const content: any[] = [{ type: "text", text: PROMPT + ctxText }, { type: "text", text: seedText }];
     songs.forEach((s, i) => {
       content.push({ type: "text", text: `SONG ${i + 1}: ${s.label}` });
       content.push({ type: "input_audio", input_audio: { data: s.b64, format: "mp3" } });

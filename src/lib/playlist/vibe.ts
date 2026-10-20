@@ -2,7 +2,7 @@
 // Never fills with songs that failed a filter.
 import { supabase } from "@/integrations/supabase/client";
 import type { Lang, Mood, TrackProfile } from "./features";
-import { compatibility, sequence, isDance, sameOrNeighborStyle, MOOD_NEIGHBORS, melodicKin, feelingScore } from "./organize";
+import { compatibility, sequence, isDance, sameOrNeighborStyle, MOOD_NEIGHBORS, melodicKin, feelingScore, soundMatch } from "./organize";
 import { ensureSeedFeeling, ensureSeedAudio } from "./ai";
 
 export interface VibeSpec {
@@ -121,7 +121,7 @@ export function normalizeSpec(spec: VibeSpec, keywords: string, hasSeeds: boolea
 }
 
 /** Step 2: local filter. `langChoice` = "auto" or a language code. */
-export function filterCandidates(profiles: TrackProfile[], spec: VibeSpec, langChoice: string, seeds: TrackProfile[] = [], fitSeeds?: TrackProfile[]) {
+export function filterCandidates(profiles: TrackProfile[], spec: VibeSpec, langChoice: string, seeds: TrackProfile[] = [], fitSeeds?: TrackProfile[], seedRank?: (t: TrackProfile) => number) {
   const seedIds = new Set(seeds.map((x) => x.id));
   const hard = profiles.filter((t) => !seedIds.has(t.id) && passesHardRules(t, spec, seeds));
   // Instrumental or dance-style seed: language is not a hard rule (style already is).
@@ -144,7 +144,9 @@ export function filterCandidates(profiles: TrackProfile[], spec: VibeSpec, langC
 
   // Artist as seed: its 3 songs span its sound, so a song only needs to fit one of them.
   const seedFit = (t: TrackProfile) => fitSeeds?.length ? Math.max(...fitSeeds.map((x) => compatibility(t, x))) : seeds.reduce((a, x) => a + compatibility(t, x), 0) / seeds.length;
-  const rank = (list: TrackProfile[]) => seeds.length
+  const rank = (list: TrackProfile[]) => seeds.length && seedRank
+    ? list.map((t) => ({ t, c: seedRank(t) })).sort((a, b) => b.c - a.c).map((x) => x.t)
+    : seeds.length
     ? list.map((t) => ({ t, c: seedFit(t) })).filter((x) => x.c >= MIN_SEED_COMPAT)
         .sort((a, b) => (b.c + preferenceBonus(b.t, spec)) - (a.c + preferenceBonus(a.t, spec))).map((x) => x.t)
     : list.map((t) => ({ t, d: distance(t, spec) })).sort((a, b) => a.d - b.d).map((x) => x.t);
@@ -154,14 +156,14 @@ export function filterCandidates(profiles: TrackProfile[], spec: VibeSpec, langC
   let candidates = rank(inLang.filter((t) => passesSoft(t, spec, active)));
   const relaxed: Soft[] = [];
   // Plan B: too few candidates but enough compatible songs → relax mood, then era, then tempo.
-  const enough = seeds.length ? inLang.filter((t) => seedFit(t) >= MIN_SEED_COMPAT).length >= MIN_CANDIDATES : inLang.length >= MIN_CANDIDATES;
+  const enough = seedRank ? inLang.length >= MIN_CANDIDATES : seeds.length ? inLang.filter((t) => seedFit(t) >= MIN_SEED_COMPAT).length >= MIN_CANDIDATES : inLang.length >= MIN_CANDIDATES;
   for (const r of RELAX_ORDER) {
     if (candidates.length >= MIN_CANDIDATES || !enough) break;
     if (!active.has(r)) continue;
     active.delete(r); relaxed.push(r);
     candidates = rank(inLang.filter((t) => passesSoft(t, spec, active)));
   }
-  return { lang, candidates: candidates.slice(0, MAX_CANDIDATES), relaxed };
+  return { lang, candidates: candidates.slice(0, seedRank ? MAX_CANDIDATES * 2 : MAX_CANDIDATES), relaxed };
 }
 
 const vibeKey = (v: string) => v.toLowerCase().replace(/\s+/g, " ").trim();
@@ -210,58 +212,86 @@ async function scoreCandidates(userId: string, vibe: string, cands: TrackProfile
   return scores;
 }
 
-const LISTEN_TOP = 24;
+const LISTEN_TOP = 40;
 const LISTEN_BATCH = 4;
-const LISTEN_PARALLEL = 6;
+const LISTEN_PARALLEL = 10; // all 10 batches at once
+
+const near = (x: number | null | undefined, y: number | null | undefined, tol = 0.35) =>
+  x == null || y == null ? null : Math.max(0, 1 - Math.abs(x - y) / tol);
+/** Stored-sound similarity only (instruments, drive, texture, melodic focus, warmth, scale, groove). No feeling. */
+export function soundSimilarity(a: TrackProfile, b: TrackProfile): number {
+  const parts: [number | null, number][] = [
+    [soundMatch(a, b), 0.45],
+    [near(a.percussiveDrive, b.percussiveDrive, 0.3), 0.2],
+    [near(a.melodicFocus, b.melodicFocus, 0.3), 0.2],
+    [a.groove && b.groove ? (a.groove === b.groove ? 1 : 0) : null, 0.15],
+  ];
+  const known = parts.filter(([v]) => v !== null) as [number, number][];
+  const w = known.reduce((x, [, k]) => x + k, 0);
+  return w ? known.reduce((x, [v, k]) => x + v * k, 0) / w : 0;
+}
 
 /** Most similar seed for a candidate (the ear compares against that one). */
 export const nearestSeed = (t: TrackProfile, seeds: TrackProfile[]) =>
-  seeds.reduce((best, x) => (compatibility(t, x) > compatibility(t, best) ? x : best), seeds[0]);
+  seeds.reduce((best, x) => (soundSimilarity(t, x) > soundSimilarity(t, best) ? x : best), seeds[0]);
 
-/** Step 3: Gemini hears each candidate next to its nearest seed. Batches of 4, 6 at a time.
- *  Each (seed, candidate) score is cached so a pair is never heard twice. */
-async function listenCandidates(userId: string, cands: TrackProfile[], seeds: TrackProfile[], onProgress?: (d: number, t: number) => void) {
+const r2n = (x: number | null | undefined) => (x == null ? null : Math.round(x * 100) / 100);
+const earSeed = (t: TrackProfile) => ({
+  name: t.name, artists: t.artists, instruments: t.instruments, piano: (t as any).piano ?? null,
+  melodic_focus: r2n(t.melodicFocus), percussive_drive: r2n(t.percussiveDrive), texture: r2n(t.texture), warmth: r2n(t.warmth),
+  scale: r2n(t.scale), groove: t.groove, energy: r2n(t.energy), style: t.style ?? null, feeling: t.feeling, feeling_2: t.feeling2 ?? null, arc: t.arc,
+});
+
+/** Step 3: Gemini hears each candidate against its nearest seed's STORED analysis (the seed is not re-heard).
+ *  Batches of 4, all in parallel. Each (seed, context, candidate) score is cached. */
+async function listenCandidates(userId: string, cands: TrackProfile[], seeds: TrackProfile[], context: string, onProgress?: (d: number, t: number) => void) {
   const scores = new Map<string, number>();
   const unheard = new Set<string>();
   const bySeed = new Map<string, string[]>();
   for (const c of cands) { const s = nearestSeed(c, seeds).id; bySeed.set(s, [...(bySeed.get(s) ?? []), c.id]); }
+  const ctx = vibeKey(context);
+  const keyOf = (seed: string) => "ear3|" + seed + "|" + ctx;
   const jobs: { seed: string; ids: string[] }[] = [];
   await Promise.all([...bySeed.entries()].map(async ([seed, ids]) => {
-    const key = "ear2|" + seed;
     const { data } = await supabase.from("vibe_select_cache").select("spotify_track_id, score")
-      .eq("user_id", userId).eq("vibe_key", key).in("spotify_track_id", ids);
+      .eq("user_id", userId).eq("vibe_key", keyOf(seed)).in("spotify_track_id", ids);
     for (const r of data ?? []) scores.set(r.spotify_track_id, Number(r.score));
     const todo = ids.filter((id) => !scores.has(id));
     for (let i = 0; i < todo.length; i += LISTEN_BATCH) jobs.push({ seed, ids: todo.slice(i, i + LISTEN_BATCH) });
   }));
   const total = jobs.reduce((a, j) => a + j.ids.length, 0);
-  let done = 0, next = 0, seedHeard = true;
+  let done = 0, next = 0;
   onProgress?.(0, total);
   const worker = async () => {
     while (next < jobs.length) {
       const j = jobs[next++];
-      const call = () => supabase.functions.invoke("vibe-listen", { body: { seed_ids: [j.seed], ids: j.ids } });
+      const seed = seeds.find((x) => x.id === j.seed)!;
+      const call = () => supabase.functions.invoke("vibe-listen", { body: { seed: earSeed(seed), ids: j.ids, context: ctx } });
       let { data, error } = await call();
       if (error || data?.error) ({ data, error } = await call()); // one retry for a busy moment
       if (error || data?.error) throw new Error(data?.error ?? error?.message ?? "The listening step failed.");
-      if (data.no_seed_audio) seedHeard = false;
       for (const id of data.unheard ?? []) unheard.add(id);
-      const rows = (data.results ?? []).map((r: any) => { scores.set(r.id, r.score); return { user_id: userId, vibe_key: "ear2|" + j.seed, spotify_track_id: r.id, score: r.score }; });
+      const rows = (data.results ?? []).map((r: any) => { scores.set(r.id, r.score); return { user_id: userId, vibe_key: keyOf(j.seed), spotify_track_id: r.id, score: r.score }; });
       if (rows.length) await supabase.from("vibe_select_cache").upsert(rows, { onConflict: "user_id,vibe_key,spotify_track_id" });
       done += j.ids.length; onProgress?.(done, total);
     }
   };
   await Promise.all(Array.from({ length: LISTEN_PARALLEL }, worker));
-  return { scores, seedHeard, unheard };
+  return { scores, unheard };
 }
 
-/** Listener feeling vs. the seed: same main, or main = the other's secondary, or neighbor. */
+/** Wide net: shares at least one feeling or a neighbor with some seed (unknown feeling passes). */
 const feelsLikeSeed = (t: TrackProfile, seeds: TrackProfile[]) =>
   seeds.some((x) => { const f = feelingScore(t, x); return f === null || f >= 0.5; });
+/** Strong: any shared feeling, main or secondary of either song. */
+export const strongFeelPair = (t: TrackProfile, x: TrackProfile) => {
+  const a = [t.feeling, t.feeling2].filter(Boolean), b = [x.feeling, x.feeling2].filter(Boolean);
+  return a.some((f) => b.includes(f));
+};
+/** Strict ear: 8+ with a strong feeling match, or 9+ when only neighbors match. */
+export const earAdmits = (ear: number, strong: boolean, neighbor: boolean) => (strong && ear >= 8) || (neighbor && ear >= 9);
 
 let fitPool: TrackProfile[] = [];
-/** Same main feeling, or main = the other's secondary (≥0.75). */
-const strongFeel = (t: TrackProfile, seeds: TrackProfile[]) => seeds.some((x) => (feelingScore(t, x) ?? 0) >= 0.75);
 /** Ear rescued a text 6 → treat it as a 7 for picking. */
 export const rescuedScore = (text: number, ear: number | undefined, strong: boolean) => (text >= 7 ? text : ear !== undefined && ear >= 8 && strong ? 7 : text);
 
@@ -382,30 +412,35 @@ export async function buildVibePlaylist(
   const removed = await removedP;
   // Artist as seed: a song fits the artist's world if it fits any of the artist's songs (the 3 seeds lead).
   fitPool = capArtist ? [...seeds, ...profiles.filter((t) => !seeds.some((x) => x.id === t.id) && t.artists.some((a) => a.toLowerCase() === capArtist.toLowerCase()))] : [];
-  const { lang, candidates } = filterCandidates(profiles.filter((t) => !removed.has(t.id)), spec, langChoice, seeds, fitPool);
+  const soundRank = (t: TrackProfile) => Math.max(...seeds.map((x) => soundSimilarity(t, x)));
+  const { lang, candidates: raw0 } = filterCandidates(profiles.filter((t) => !removed.has(t.id)), spec, langChoice, seeds, fitPool, seeds.length ? soundRank : undefined);
+  const candidates = seeds.length ? raw0.filter((t) => feelsLikeSeed(t, seeds)) : raw0;
   lap("filter");
   if (!candidates.length) return finish({ spec, lang, tracks: seeds.length ? sequence(seeds, seeds[0].id) : [], candidates: 0, approved: 0 });
 
-  // With seeds: the ear decides. The 24 heard are the best compatibility() fits (stored audio + listener feeling).
-  // The text review is used only for songs without an audio clip, or when there are no seeds.
+  // With seeds — "wide net, strict ear": the 40 heard are the closest in STORED sound (no feeling penalty,
+  // only songs sharing no feeling or neighbor are skipped). Gemini's ear decides; the text review is only for songs without a clip.
   let scores = new Map<string, number>();
   let pool = candidates;
   let approved = 0;
   if (seeds.length) {
     lap("select");
-    const fitOf = (t: TrackProfile) => seedFitOf(t, seeds);
-    const top = candidates.filter((t) => feelsLikeSeed(t, seeds)).sort((a, b) => fitOf(b) - fitOf(a)).slice(0, LISTEN_TOP);
+    const top = candidates.slice(0, LISTEN_TOP);
     const withClip = top.filter((t) => t.audioSource !== "none");
     onStep("Listening to the songs");
-    const listenP = listenCandidates(userId, withClip, seeds, (d, t) => onStep("Listening to the songs", d, t));
+    const listenP = listenCandidates(userId, withClip, seeds, vibe, (d, t) => onStep("Listening to the songs", d, t));
     const noClip = top.filter((t) => t.audioSource === "none");
     const textP = noClip.length ? scoreCandidates(userId, vibe, noClip, seeds) : Promise.resolve(new Map<string, number>());
-    const [{ scores: ear, seedHeard, unheard }, text] = await Promise.all([listenP, textP]);
-    // Clip missing at listen time, or seed without a clip → text review for those.
-    const late = top.filter((t) => !ear.has(t.id) && !text.has(t.id) && (!seedHeard || unheard.has(t.id)));
+    const [{ scores: ear, unheard }, text] = await Promise.all([listenP, textP]);
+    const late = top.filter((t) => !ear.has(t.id) && !text.has(t.id) && unheard.has(t.id));
     const text2 = late.length ? await scoreCandidates(userId, vibe, late, seeds) : new Map<string, number>();
     scores = new Map([...text, ...text2, ...ear]);
-    pool = top.filter((t) => (scores.get(t.id) ?? 0) >= MIN_SCORE);
+    pool = top.filter((t) => {
+      const sc = scores.get(t.id) ?? 0;
+      const strong = seeds.some((x) => !t.feeling || !x.feeling || strongFeelPair(t, x));
+      const neighbor = seeds.some((x) => (feelingScore(t, x) ?? 0) >= 0.5);
+      return earAdmits(sc, strong, neighbor);
+    });
     approved = pool.length;
   } else {
     scores = await scoreCandidates(userId, vibe, candidates, seeds, (d, t) => onStep("Finding songs that feel the same", d, t));

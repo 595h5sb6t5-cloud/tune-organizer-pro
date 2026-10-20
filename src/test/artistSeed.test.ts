@@ -10,10 +10,10 @@ describe("artist as seed", () => {
     expect(m?.name).toBe("Marvin Gaye");
     expect(m?.tracks.map((t) => t.id)).toEqual(["1"]);
   });
-  it("picks the 3 songs most alike in style, scene and feeling", () => {
-    const s = (id: string, style: string, feeling: string) => ({ id, style, scene: null, feeling });
-    const out = representativeSongs([s("a", "classic-soul", "sensual"), s("b", "classic-soul", "sensual"), s("c", "funk", "groovy-carefree"), s("d", "classic-soul", "sensual")]);
-    expect(out.map((x) => x.id).sort()).toEqual(["a", "b", "d"]);
+  it("picks 3 varied seeds covering the artist's most common feelings", () => {
+    const s = (id: string, feeling: string) => ({ id, style: "classic-soul", scene: null, feeling });
+    const out = representativeSongs([s("a", "sensual"), s("b", "sensual"), s("c", "groovy-carefree"), s("d", "introspective"), s("e", "sensual"), s("f", "groovy-carefree")]);
+    expect(out.map((x) => x.feeling).sort()).toEqual(["groovy-carefree", "introspective", "sensual"]);
   });
 });
 
@@ -31,5 +31,16 @@ describe("listening rescue", () => {
     expect(rescuedScore(6, 7, true)).toBe(6);
     expect(rescuedScore(6, 9, false)).toBe(6);
     expect(rescuedScore(8, 2, false)).toBe(8);
+  });
+});
+
+import { earAdmits } from "@/lib/playlist/vibe";
+describe("strict ear", () => {
+  it("strong feeling needs 8+, neighbor-only needs 9+", () => {
+    expect(earAdmits(8, true, true)).toBe(true);
+    expect(earAdmits(7, true, true)).toBe(false);
+    expect(earAdmits(8, false, true)).toBe(false);
+    expect(earAdmits(9, false, true)).toBe(true);
+    expect(earAdmits(10, false, false)).toBe(false);
   });
 });
