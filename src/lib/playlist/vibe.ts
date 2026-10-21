@@ -430,12 +430,13 @@ export function selectVibeTracks(cands: TrackProfile[], scores: Map<string, numb
     picked = [...picked, ...sevens];
   }
   if (!seeds.length) {
-    // No seed: keep the old group cohesion check.
+    // No seed: group cohesion only for text-only songs — the ear's 8+ is final for songs Gemini heard.
     while (picked.length > 1) {
+      if (!picked.some((t) => !heard.has(t.id))) break;
       const avgs = picked.map((t) => picked.reduce((a, o) => a + (o === t ? 0 : compatibility(t, o)), 0) / (picked.length - 1));
-      let worst = 0;
-      for (let i = 1; i < avgs.length; i++) if (avgs[i] < avgs[worst]) worst = i;
-      if (avgs[worst] >= MIN_COHESION) break;
+      let worst = -1;
+      for (let i = 0; i < avgs.length; i++) if (!heard.has(picked[i].id) && (worst < 0 || avgs[i] < avgs[worst])) worst = i;
+      if (worst < 0 || avgs[worst] >= MIN_COHESION) break;
       picked.splice(worst, 1);
     }
   }
@@ -492,6 +493,7 @@ export async function buildVibePlaylist(
   const finish = async <T extends VibeResult>(r: T) => {
     timings.total = Math.round(performance.now() - t0);
     console.info(`[vibe] timings (ms) ${JSON.stringify(timings)}`);
+    console.info(`[vibe] funnel ${JSON.stringify((r as VibeResult).funnel ?? null)} approved=${(r as VibeResult).approved} tracks=${r.tracks.length}`);
     supabase.from("vibe_timings").insert({ user_id: userId, vibe, steps: timings as any, total_ms: timings.total, tracks: r.tracks.length }).then(() => {});
     return { ...r, timings };
   };
@@ -544,7 +546,7 @@ export async function buildVibePlaylist(
     const approved = pool.length;
     lap("listen");
     onStep("Putting them in order");
-    const sel = selectVibeTracks(pool, scores, []);
+    const sel = selectVibeTracks(pool, scores, [], undefined, new Set(ear.keys()));
     lap("order");
     return finish({ spec, lang, tracks: sel.tracks, candidates: candidates.length, approved, eights: sel.eights, sevens: sel.sevens,
       funnel: { ...funnel, listened: top.length } });
