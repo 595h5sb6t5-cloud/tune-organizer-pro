@@ -16,6 +16,15 @@ const CONCURRENCY = 5;
 const HOP_MS = 45_000;
 const MAX_DEPTH = 80;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** The vibe builder has priority: while a user builds a vibe, background work waits. */
+async function waitIfPaused(admin: any) {
+  for (let i = 0; i < 24; i++) {
+    const { data } = await admin.from("background_control").select("paused_until").eq("id", 1).maybeSingle();
+    if (!data?.paused_until || new Date(data.paused_until).getTime() < Date.now()) return;
+    await sleep(5000);
+  }
+}
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
 interface Row { spotify_track_id: string; isrc: string | null; track_name: string; artist_name: string }
