@@ -67,6 +67,9 @@ export default function VibePlaylistPanel() {
   const [seeds, setSeeds] = useState<SeedMatch[]>([]);
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
   const [artistSeed, setArtistSeed] = useState<{ name: string; tracks: SpotifyTrack[] } | null>(null);
+  const [understood, setUnderstood] = useState<{ phrase: string; spec: VibeSpec } | null>(null);
+  const [clarify, setClarify] = useState<{ question: string; options: string[] } | null>(null);
+  const runRef = useRef(0);
 
   useEffect(() => {
     if (user) loadLikedTracks(user.id).then(setLiked).catch(() => setLiked([]));
@@ -169,22 +172,89 @@ export default function VibePlaylistPanel() {
     );
   }
 
-  async function create() {
+  async function create(opts: { spec?: VibeSpec; text?: string } = {}) {
     if (!user || !canCreate) return;
-    setError(null); setTracks(null); setSavedUrl(null);
+    const run = ++runRef.current;
+    setError(null); setTracks(null); setSavedUrl(null); setClarify(null);
     try {
       const p = await getProfiles();
+      if (runRef.current !== run) return;
       const seedProfiles = seeds.map((s) => p.find((x) => x.id === s.track.id)).filter((x): x is TrackProfile => !!x);
-      const words = seeds.length ? keywords : vibe.trim();
-      const res = await buildVibePlaylist(user.id, words, p, lang, (label, done, total) => setStep({ label, done, total }), seedProfiles, artistSeed?.name,
-        (live) => setTracks(live));
+      const words = opts.text ?? (seeds.length ? keywords : vibe.trim());
+      let preset = opts.spec;
+      let corrections: SpecCorrection[] = [];
+      if (words && !preset) {
+        setStep({ label: "Reading the vibe" });
+        corrections = await loadCorrections(user.id);
+        const spec = await readVibeSpec(user.id, words, seedProfiles, corrections);
+        if (runRef.current !== run) return;
+        // Ambiguous description without a seed: ask ONE quick question instead of guessing.
+        if (spec.clarify && !seedProfiles.length) { setClarify(spec.clarify); setStep(null); return; }
+        setUnderstood({ phrase: words, spec });
+        preset = spec;
+      }
+      const res = await buildVibePlaylist(user.id, words, p, lang,
+        (label, done, total) => { if (runRef.current === run) setStep({ label, done, total }); },
+        seedProfiles, artistSeed?.name,
+        (live) => { if (runRef.current === run) setTracks(live); },
+        { presetSpec: preset, corrections });
+      if (runRef.current !== run) return;
       setName(res.spec.name);
       setTracks(res.tracks);
+      if (res.clarify) setClarify(res.clarify);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Something went wrong.");
+      if (runRef.current === run) setError(e instanceof Error ? e.message : "Something went wrong.");
     } finally {
-      setStep(null);
+      if (runRef.current === run) setStep(null);
     }
+  }
+
+  /** Edit or remove a chip from "Lo que entendí": saves the correction and rebuilds with the new recipe. */
+  function editSpec(key: string, value: string | null) {
+    if (!understood || !user) return;
+    const s = { ...understood.spec };
+    if (key === "vocals") s.vocals = (value as VibeSpec["vocals"]) ?? "any";
+    else if (key === "listening") s.listening = (value as VibeSpec["listening"]) ?? "any";
+    else if (key === "moment") s.moment = (value as VibeSpec["moment"]) ?? "any";
+    else if (key === "energy") { s.energy_min = 0; s.energy_max = 1; }
+    else if (key === "warmth") { s.warmth_min = 0; s.warmth_max = 1; }
+    else if (key === "feelings") s.feelings_allowed = [];
+    else if (key === "instruments_preferred") s.instruments_preferred = [];
+    else if (key === "instruments_excluded") s.instruments_excluded = [];
+    setUnderstood({ phrase: understood.phrase, spec: s });
+    void saveCorrection(user.id, understood.phrase, s);
+    void create({ spec: s });
+  }
+
+  function understoodChips(spec: VibeSpec) {
+    const eMid = (spec.energy_min + spec.energy_max) / 2;
+    const wMid = ((spec.warmth_min ?? 0) + (spec.warmth_max ?? 1)) / 2;
+    const chipSelect = (key: string, value: string, labels: Record<string, string>) => (
+      <select key={key} value={value} onChange={(e) => editSpec(key, e.target.value)} aria-label={key}
+        className="h-7 rounded-full border border-border/60 bg-muted/40 px-2 text-xs">
+        {Object.entries(labels).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+      </select>
+    );
+    const chipX = (key: string, label: string) => (
+      <span key={key} className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-muted/40 px-2.5 py-1 text-xs">
+        {label}
+        <button type="button" aria-label={`Remove ${label}`} onClick={() => editSpec(key, null)} className="text-muted-foreground hover:text-foreground">
+          <X className="w-3 h-3" />
+        </button>
+      </span>
+    );
+    return [
+      spec.vocals && spec.vocals !== "any" ? chipSelect("vocals", spec.vocals, VOCAL_LABEL) : null,
+      spec.listening && spec.listening !== "any" ? chipSelect("listening", spec.listening, LISTEN_LABEL) : null,
+      spec.moment && spec.moment !== "any" ? chipSelect("moment", spec.moment, MOMENT_LABEL) : null,
+      spec.energy_min > 0.05 || spec.energy_max < 0.95
+        ? chipX("energy", eMid < 0.35 ? "Low energy" : eMid < 0.65 ? "Mid energy" : "High energy") : null,
+      (spec.warmth_min ?? 0) > 0.05 || (spec.warmth_max ?? 1) < 0.95
+        ? chipX("warmth", wMid >= 0.5 ? "Warm" : "Cold / dark") : null,
+      spec.feelings_allowed?.length ? chipX("feelings", `Feels: ${spec.feelings_allowed.join(", ")}`) : null,
+      spec.instruments_preferred?.length ? chipX("instruments_preferred", `With: ${spec.instruments_preferred.join(", ")}`) : null,
+      spec.instruments_excluded?.length ? chipX("instruments_excluded", `Without: ${spec.instruments_excluded.join(", ")}`) : null,
+    ];
   }
 
   async function save() {
