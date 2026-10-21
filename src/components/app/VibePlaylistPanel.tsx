@@ -292,11 +292,39 @@ export default function VibePlaylistPanel() {
       <div className="rounded-3xl border border-border/50 bg-card/40 p-6 space-y-4">
         <Input
           value={vibe}
-          onChange={(e) => setVibe(e.target.value.slice(0, 300))}
-          placeholder="late night drives, chill, forms of love & me"
+          onChange={(e) => { setVibe(e.target.value.slice(0, 300)); setUnderstood(null); setClarify(null); }}
+          placeholder="chill platica buena, full instrumental sunset, late night drive…"
           aria-label="Vibe keywords"
           onKeyDown={(e) => e.key === "Enter" && !step && create()}
         />
+        <div className="flex flex-wrap gap-2">
+          {QUICK_CHIPS.map((c) => (
+            <button key={c} type="button"
+              onClick={() => { setVibe((v) => (v.trim() ? `${v.trim()}, ${c.toLowerCase()}` : c.toLowerCase()).slice(0, 300)); setUnderstood(null); setClarify(null); }}
+              className="rounded-full border border-border/60 bg-muted/30 px-3 py-1 text-xs text-muted-foreground hover:text-foreground hover:border-border">
+              {c}
+            </button>
+          ))}
+        </div>
+        {clarify && (
+          <div className="rounded-xl border border-border/60 bg-muted/30 p-4 space-y-3">
+            <p className="text-sm font-medium">{clarify.question}</p>
+            <div className="flex flex-wrap gap-2">
+              {clarify.options.map((o) => (
+                <Button key={o} variant="outline" size="sm"
+                  onClick={() => { const text = `${vibe.trim()} ${o}`.slice(0, 300); setVibe(text); setClarify(null); void create({ text }); }}>
+                  {o}
+                </Button>
+              ))}
+            </div>
+          </div>
+        )}
+        {understood && !clarify && (
+          <div className="space-y-2">
+            <p className="text-xs uppercase tracking-[0.15em] text-muted-foreground">Lo que entendí</p>
+            <div className="flex flex-wrap items-center gap-2">{understoodChips(understood.spec)}</div>
+          </div>
+        )}
         {matches.length > 0 && (
           <ul className="rounded-xl border border-border/50 divide-y divide-border/40" aria-label="Songs from your Liked Songs">
             {matches.map((m) => (
