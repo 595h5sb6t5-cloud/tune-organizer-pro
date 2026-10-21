@@ -14,6 +14,18 @@ export interface VibeSpec {
   language: Lang | null;
   era_min: number | null; era_max: number | null;
   name: string;
+  // Rich recipe (optional for cached specs from before these existed)
+  vocals?: "none" | "sparse" | "soft" | "lead" | "any" | null;
+  listening?: "background" | "focused" | "any" | null;
+  moment?: "sunrise" | "day" | "golden-hour-sunset" | "night" | "late-night" | "any" | null;
+  instruments_preferred?: string[];
+  instruments_excluded?: string[];
+  warmth_min?: number | null; warmth_max?: number | null;
+  texture_min?: number | null; texture_max?: number | null;
+  percussive_drive_min?: number | null; percussive_drive_max?: number | null;
+  melodic_focus_min?: number | null; melodic_focus_max?: number | null;
+  feelings_allowed?: string[];
+  clarify?: { question: string; options: string[] } | null;
 }
 
 export interface VibeResult {
