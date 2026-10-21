@@ -172,7 +172,7 @@ export default function VibePlaylistPanel() {
     );
   }
 
-  async function create(opts: { spec?: VibeSpec; text?: string } = {}) {
+  async function create(opts: { spec?: VibeSpec; text?: string; answered?: boolean } = {}) {
     if (!user || !canCreate) return;
     const run = ++runRef.current;
     setError(null); setTracks(null); setSavedUrl(null); setClarify(null);
@@ -189,9 +189,10 @@ export default function VibePlaylistPanel() {
         const spec = await readVibeSpec(user.id, words, seedProfiles, corrections);
         if (runRef.current !== run) return;
         // Ambiguous description without a seed: ask ONE quick question instead of guessing.
-        if (spec.clarify && !seedProfiles.length) { setClarify(spec.clarify); setStep(null); return; }
+        // Once the user answered (opts.answered), never ask again — build with the answer.
+        if (spec.clarify && !seedProfiles.length && !opts.answered) { setClarify(spec.clarify); setStep(null); return; }
         setUnderstood({ phrase: words, spec });
-        preset = spec;
+        preset = { ...spec, clarify: null };
       }
       const res = await buildVibePlaylist(user.id, words, p, lang,
         (label, done, total) => { if (runRef.current === run) setStep({ label, done, total }); },
@@ -312,7 +313,7 @@ export default function VibePlaylistPanel() {
             <div className="flex flex-wrap gap-2">
               {clarify.options.map((o) => (
                 <Button key={o} variant="outline" size="sm"
-                  onClick={() => { const text = `${vibe.trim()} ${o}`.slice(0, 300); setVibe(text); setClarify(null); void create({ text }); }}>
+                  onClick={() => { const text = `${vibe.trim()} ${o}`.slice(0, 300); setVibe(text); setClarify(null); void create({ text, answered: true }); }}>
                   {o}
                 </Button>
               ))}
