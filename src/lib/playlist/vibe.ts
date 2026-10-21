@@ -2,7 +2,7 @@
 // Never fills with songs that failed a filter.
 import { supabase } from "@/integrations/supabase/client";
 import type { Lang, Mood, TrackProfile } from "./features";
-import { compatibility, sequence, isDance, sameOrNeighborStyle, MOOD_NEIGHBORS, melodicKin, feelingScore, feelingNeighbors, soundMatch, FEELING_NAMES } from "./organize";
+import { compatibility, sequence, isDance, sameOrNeighborStyle, MOOD_NEIGHBORS, melodicKin, feelingScore, feelingNeighbors, soundMatch, FEELING_NAMES, isCleanName } from "./organize";
 import { ensureSeedFeeling, ensureSeedAudio } from "./ai";
 
 export interface VibeSpec {
