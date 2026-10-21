@@ -1323,6 +1323,36 @@ export type Database = {
         }
         Relationships: []
       }
+      moment_tags_state: {
+        Row: {
+          done: number
+          id: number
+          last_error: string | null
+          lease_until: string | null
+          paused_until: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          done?: number
+          id?: number
+          last_error?: string | null
+          lease_until?: string | null
+          paused_until?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          done?: number
+          id?: number
+          last_error?: string | null
+          lease_until?: string | null
+          paused_until?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       playlist_feedback: {
         Row: {
           action: string
@@ -1574,6 +1604,7 @@ export type Database = {
       prebuilt_playlists: {
         Row: {
           analyzed_count: number
+          analyzing: Json
           built_at: string | null
           error: string | null
           lease_until: string | null
@@ -1586,6 +1617,7 @@ export type Database = {
         }
         Insert: {
           analyzed_count?: number
+          analyzing?: Json
           built_at?: string | null
           error?: string | null
           lease_until?: string | null
@@ -1598,6 +1630,7 @@ export type Database = {
         }
         Update: {
           analyzed_count?: number
+          analyzing?: Json
           built_at?: string | null
           error?: string | null
           lease_until?: string | null
@@ -2431,6 +2464,8 @@ export type Database = {
           lang: string
           manual_sound: Json | null
           melodic_focus: number | null
+          moment_story: string | null
+          moments: Json | null
           mood: string
           original_year: number | null
           scale: number | null
@@ -2463,6 +2498,8 @@ export type Database = {
           lang: string
           manual_sound?: Json | null
           melodic_focus?: number | null
+          moment_story?: string | null
+          moments?: Json | null
           mood: string
           original_year?: number | null
           scale?: number | null
@@ -2495,6 +2532,8 @@ export type Database = {
           lang?: string
           manual_sound?: Json | null
           melodic_focus?: number | null
+          moment_story?: string | null
+          moments?: Json | null
           mood?: string
           original_year?: number | null
           scale?: number | null
@@ -2530,6 +2569,9 @@ export type Database = {
           lang: string | null
           lastfm_checked: boolean
           melodic_focus: number | null
+          moment_story: string | null
+          moments: Json | null
+          moments_checked: boolean
           mood: string | null
           original_year: number | null
           scale: number | null
@@ -2566,6 +2608,9 @@ export type Database = {
           lang?: string | null
           lastfm_checked?: boolean
           melodic_focus?: number | null
+          moment_story?: string | null
+          moments?: Json | null
+          moments_checked?: boolean
           mood?: string | null
           original_year?: number | null
           scale?: number | null
@@ -2602,6 +2647,9 @@ export type Database = {
           lang?: string | null
           lastfm_checked?: boolean
           melodic_focus?: number | null
+          moment_story?: string | null
+          moments?: Json | null
+          moments_checked?: boolean
           mood?: string | null
           original_year?: number | null
           scale?: number | null
@@ -3213,6 +3261,25 @@ export type Database = {
       }
       enrich_resume_arm: { Args: { _on: boolean }; Returns: undefined }
       hydrate_track_analysis: { Args: { _user_id: string }; Returns: number }
+      moment_queue_next: {
+        Args: { _limit?: number }
+        Returns: {
+          arc: string
+          artist_name: string
+          energy: number
+          feeling: string
+          feeling_2: string
+          instruments: string[]
+          melodic_focus: number
+          scene: string
+          spotify_track_id: string
+          style: string
+          tags: Json
+          track_name: string
+          year: number
+          youtube_summary: string
+        }[]
+      }
       reconcile_liked_songs: {
         Args: {
           _full_reconcile?: boolean

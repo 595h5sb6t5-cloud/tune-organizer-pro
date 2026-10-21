@@ -64,6 +64,8 @@ export interface TrackProfile {
   vocalStyle?: string | null; // none | soft-intimate | crooner | soulful | powerful-belter | raspy-rock | rap | choir-group
   lyricTheme?: string | null; // love | heartbreak | hope | party | life-reflection | other (low weight)
   soundEdited?: boolean; // user corrected the sound by hand
+  moments?: { m: string; s: number }[]; // up to 3 life moments (see moments.ts), score 0–1
+  momentStory?: string | null; // one human phrase: the perfect moment for this song
 }
 
 // ---------- Genre families ----------

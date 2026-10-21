@@ -3,6 +3,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import type { Lang, Mood, TrackProfile } from "./features";
 import { compatibility, sequence, isDance, sameOrNeighborStyle, MOOD_NEIGHBORS, melodicKin, feelingScore, feelingNeighbors, soundMatch, FEELING_NAMES, isCleanName } from "./organize";
+import { MOMENT_LABEL } from "./moments";
 import { ensureSeedFeeling, ensureSeedAudio } from "./ai";
 
 export interface VibeSpec {
@@ -18,6 +19,7 @@ export interface VibeSpec {
   vocals?: "none" | "sparse" | "soft" | "lead" | "any" | null;
   listening?: "background" | "focused" | "any" | null;
   moment?: "sunrise" | "day" | "golden-hour-sunset" | "night" | "late-night" | "any" | null;
+  moments?: string[]; // up to 3 ranked life moments from the official 30-moment list
   instruments_preferred?: string[];
   instruments_excluded?: string[];
   warmth_min?: number | null; warmth_max?: number | null;
@@ -90,6 +92,11 @@ function distance(t: TrackProfile, s: VibeSpec): number {
     const own = [t.feeling, t.feeling2].filter(Boolean) as string[];
     if (own.length) d += own.some((f) => s.feelings_allowed!.includes(f)) ? -0.3
       : own.some((f) => s.feelings_allowed!.some((a) => feelingNeighbors(a, f))) ? -0.1 : 0.3;
+  }
+  // Life moments rank candidates too (they never discard).
+  if (s.moments?.length && t.moments?.length) {
+    const hit = t.moments.some((m) => s.moments!.includes(m.m) && m.s >= 0.5);
+    d += hit ? -0.35 : 0.2;
   }
   return d;
 }
@@ -186,7 +193,8 @@ export function filterCandidates(profiles: TrackProfile[], spec: VibeSpec, langC
   else if (spec.language) lang = spec.language;
   else lang = topLang(hard, "en");
   const langOk = (t: TrackProfile) =>
-    langFree || t.lang === lang || (isDance(t) && seeds.some((x) => isDance(x) && sameOrNeighborStyle(x.style, t.style)));
+    langFree || t.lang === lang || t.lang === "instrumental" || // instrumentals join any language
+    (isDance(t) && seeds.some((x) => isDance(x) && sameOrNeighborStyle(x.style, t.style)));
   const inLang = hard.filter(langOk);
 
   // Artist as seed: its 3 songs span its sound, so a song only needs to fit one of them.
@@ -224,6 +232,7 @@ const seedBodyOf = (seeds: TrackProfile[]) => seeds.map((t) => ({
   name: t.name, artists: t.artists, year: t.year, genres: t.genres.slice(0, 6), lang: t.lang,
   energy: t.energy, valence: t.valence, danceability: t.danceability, tempo: t.tempo, mood: t.mood,
   style: t.style ?? null, scene: t.scene ?? null, instruments: t.instruments ?? [], feeling: t.feeling ?? null, feeling_2: t.feeling2 ?? null, arc: t.arc ?? null, melodic_focus: t.melodicFocus ?? null,
+  moments: t.moments ?? null, moment_story: t.momentStory ?? null,
 }));
 
 /** Reads the vibe into a recipe: cache first, then vibe-spec (with the user's past corrections). An exact-phrase correction wins. */
@@ -318,6 +327,7 @@ const earSeed = (t: TrackProfile) => ({
   name: t.name, artists: t.artists, instruments: t.instruments, piano: (t as any).piano ?? null,
   melodic_focus: r2n(t.melodicFocus), percussive_drive: r2n(t.percussiveDrive), texture: r2n(t.texture), warmth: r2n(t.warmth),
   scale: r2n(t.scale), groove: t.groove, energy: r2n(t.energy), style: t.style ?? null, feeling: t.feeling, feeling_2: t.feeling2 ?? null, arc: t.arc,
+  moments: t.moments?.map((m) => m.m), moment_story: t.momentStory ?? undefined,
 });
 
 /** Human-readable interpretation of the recipe, sent to the ear so it judges with the full picture. */
@@ -330,6 +340,7 @@ export function specContext(s: VibeSpec, vibe: string): string {
   else if (s.vocals === "lead") parts.push("lead vocals up front");
   if (s.listening === "background") parts.push("background music: steady energy, no drops or sudden changes, nothing that distracts from conversation");
   else if (s.listening === "focused") parts.push("for attentive listening");
+  if (s.moments?.length) parts.push(`moments: ${s.moments.map((m) => MOMENT_LABEL[m] ?? m).join(", ")}`);
   if (s.moment && s.moment !== "any") parts.push(`moment: ${s.moment}`);
   if (s.feelings_allowed?.length) parts.push(`feelings: ${s.feelings_allowed.join(", ")}`);
   if (s.instruments_preferred?.length) parts.push(`instruments: ${s.instruments_preferred.join(", ")}`);
@@ -345,7 +356,7 @@ export function specContext(s: VibeSpec, vibe: string): string {
  *  Batches of 8, every request at once. Each (seed, context, candidate) score is cached. `onBatch` fires as each batch lands.
  *  Without seeds, `description` mode: each song is judged against the vibe description itself. */
 async function listenCandidates(userId: string, cands: TrackProfile[], seeds: TrackProfile[], context: string,
-  onProgress?: (d: number, t: number) => void, onBatch?: (scores: Map<string, number>) => void, description?: string) {
+  onProgress?: (d: number, t: number) => void, onBatch?: (scores: Map<string, number>) => void, description?: string, deadline?: number) {
   const scores = new Map<string, number>();
   const unheard = new Set<string>();
   const bySeed = new Map<string, string[]>();
@@ -365,12 +376,22 @@ async function listenCandidates(userId: string, cands: TrackProfile[], seeds: Tr
   let done = 0;
   onProgress?.(0, total);
   if (scores.size) onBatch?.(scores);
-  await Promise.all(jobs.map(async (j) => {
+  const runAll = Promise.all(jobs.map(async (j) => {
+    // Past the time budget: don't start new listens — the songs are omitted, never rejected.
+    if (deadline && performance.now() > deadline) { for (const id of j.ids) unheard.add(id); return; }
     const seed = seeds.find((x) => x.id === j.seed);
     const body = seed ? { seed: earSeed(seed), ids: j.ids, context: ctx } : { description: description ?? context, ids: j.ids };
     const call = () => supabase.functions.invoke("vibe-listen", { body });
     let { data, error } = await call();
-    if (error || data?.error) ({ data, error } = await call()); // one retry for a busy moment
+    if (error || data?.error) {
+      const msg = `${error?.message ?? ""} ${data?.error ?? ""}`;
+      const retryable = /429|5\d\d|rate|timeout|busy/i.test(msg);
+      const wait = 1200 + Math.random() * 1200;
+      if (retryable && (!deadline || performance.now() + wait < deadline)) {
+        await new Promise((r) => setTimeout(r, wait)); // bounded backoff, never immediate
+        ({ data, error } = await call());
+      }
+    }
     if (error || data?.error) { for (const id of j.ids) unheard.add(id); return; } // falls back to the text review
     for (const id of data.unheard ?? []) unheard.add(id);
     const rows = (data.results ?? []).map((r: any) => { scores.set(r.id, r.score); return { user_id: userId, vibe_key: keyOf(j.seed), spotify_track_id: r.id, score: r.score }; });
@@ -378,6 +399,11 @@ async function listenCandidates(userId: string, cands: TrackProfile[], seeds: Tr
     done += j.ids.length; onProgress?.(done, total);
     onBatch?.(scores);
   }));
+  if (deadline) {
+    // Hard budget: when time runs out, whatever hasn't landed is omitted (not rejected).
+    await Promise.race([runAll, new Promise((r) => setTimeout(r, Math.max(0, deadline - performance.now())))]);
+    for (const j of jobs) for (const id of j.ids) if (!scores.has(id)) unheard.add(id);
+  } else await runAll;
   return { scores, unheard };
 }
 
@@ -487,6 +513,7 @@ export async function buildVibePlaylist(
   opts: { presetSpec?: VibeSpec; corrections?: SpecCorrection[] } = {},
 ): Promise<VibeResult & { timings: VibeTimings }> {
   const t0 = performance.now();
+  const deadline = t0 + 20_000; // a vibe never takes more than 20 seconds
   const timings: VibeTimings = { seed: 0, recipe: 0, filter: 0, select: 0, listen: 0, order: 0, name: 0, first: 0, total: 0 };
   let mark = t0;
   const lap = (k: keyof VibeTimings) => { const now = performance.now(); timings[k] = Math.round(now - mark); mark = now; };
@@ -534,12 +561,18 @@ export async function buildVibePlaylist(
       onPartial?.(ok.slice(0, MAX_TRACKS));
     };
     const listenP = withClip.length
-      ? listenCandidates(userId, withClip, [], ctx, (d, t) => onStep("Listening to the songs", d, t), live, ctx)
+      ? listenCandidates(userId, withClip, [], ctx, (d, t) => onStep("Listening to the songs", d, t), live, ctx, deadline)
       : Promise.resolve({ scores: new Map<string, number>(), unheard: new Set<string>() });
     const textP = noClip.length ? scoreCandidates(userId, ctx, noClip, []) : Promise.resolve(new Map<string, number>());
-    const [{ scores: ear, unheard }, text] = await Promise.all([listenP, textP]);
+    // Hard budget: text scoring that outlives the deadline is abandoned — its songs are
+    // omitted (never rejected), and the ear's verdicts still land.
+    const text = await Promise.race([
+      textP,
+      new Promise<Map<string, number>>((r) => setTimeout(() => r(new Map()), Math.max(0, deadline - performance.now()))),
+    ]);
+    const { scores: ear, unheard } = await listenP; // self-bounded by the same deadline
     const late = top.filter((t) => !ear.has(t.id) && !text.has(t.id) && unheard.has(t.id));
-    const text2 = late.length ? await scoreCandidates(userId, ctx, late, []) : new Map<string, number>();
+    const text2 = late.length && performance.now() < deadline ? await scoreCandidates(userId, ctx, late, []) : new Map<string, number>();
     const scores = new Map([...text, ...text2, ...ear]);
     // Strict ear: only 8 or more gets in (no 7-fill without a seed).
     const pool = top.filter((t) => (scores.get(t.id) ?? 0) >= MIN_SCORE);
@@ -588,11 +621,17 @@ export async function buildVibePlaylist(
     if (!timings.first) timings.first = Math.round(performance.now() - t0);
     onPartial?.([...seeds, ...ok.slice(0, MAX_TRACKS - seeds.length)]);
   };
-  const listenP = listenCandidates(userId, withClip, seeds, vibe, (d, t) => onStep("Listening to the songs", d, t), live);
+  const listenP = listenCandidates(userId, withClip, seeds, vibe, (d, t) => onStep("Listening to the songs", d, t), live, undefined, deadline);
   const textP = noClip.length ? scoreCandidates(userId, vibe, noClip, seeds) : Promise.resolve(new Map<string, number>());
-  const [{ scores: ear, unheard }, text] = await Promise.all([listenP, textP]);
+  // Hard budget: text scoring that outlives the deadline is abandoned — its songs are
+  // omitted (never rejected), and the ear's verdicts still land.
+  const text = await Promise.race([
+    textP,
+    new Promise<Map<string, number>>((r) => setTimeout(() => r(new Map()), Math.max(0, deadline - performance.now()))),
+  ]);
+  const { scores: ear, unheard } = await listenP; // self-bounded by the same deadline
   const late = top.filter((t) => !ear.has(t.id) && !text.has(t.id) && unheard.has(t.id));
-  const text2 = late.length ? await scoreCandidates(userId, vibe, late, seeds) : new Map<string, number>();
+  const text2 = late.length && performance.now() < deadline ? await scoreCandidates(userId, vibe, late, seeds) : new Map<string, number>();
   const scores = new Map([...text, ...text2, ...ear]);
   const pool = top.filter((t) => admits(t, scores.get(t.id) ?? 0));
   lap("listen");

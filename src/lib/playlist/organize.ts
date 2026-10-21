@@ -10,12 +10,14 @@
 //    (warm up → peak → cool down) and no artist twice in a row.
 
 import { type Mood, type TrackProfile } from "./features";
+import { MOMENT_NAMES, MOMENT_DESC, MOMENT_CURVE } from "./moments";
 
 export interface PlaylistDraft {
   key: string;
   name: string;
   description: string;
   lang: string;
+  moment?: string | null; // the life moment this playlist soundtracks
   cohesion: number; // 0–1, average compatibility inside the playlist
   tracks: TrackProfile[];
 }
@@ -257,11 +259,21 @@ export function compatibility(a: TrackProfile, b: TrackProfile): number {
   if (style === 0 && melodicKin(a, b)) style = 0.5; // feeling outranks style for melodic songs
   let scene = sceneMatch(a, b);
   if (scene === 0 && aligned) scene = 0.5; // feeling outranks scene: count as neighbor
+  // life-moment affinity — the human "when" of the song
+  const momentMatch = (() => {
+    if (!a.moments?.length || !b.moments?.length) return null;
+    let best = 0;
+    for (const ma of a.moments) for (const mb of b.moments) {
+      if (ma.m === mb.m) best = Math.max(best, Math.min(ma.s, mb.s));
+    }
+    return best;
+  })();
   const parts: [number | null, number][] = [
     [style, 0.35],
     [soundMatch(a, b), 0.35],
     [scene, 0.3],
     [feelMatch(a, b), 0.35],
+    [momentMatch, 0.3],
     [jaccard(a.families, b.families) * 0.75 + jaccard(a.genres, b.genres) * 0.25, 0.32],
     [closeness(a.energy, b.energy, 0.45), 0.12],
     [a.mood && b.mood ? (a.mood === b.mood ? 1 : MOOD_NEIGHBORS[a.mood].includes(b.mood) ? 0.6 : 0) : null, 0.08],
@@ -403,13 +415,16 @@ function percentile(values: number[], p: number) {
   return sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))];
 }
 
-/** Warm up → peak around 65% → cool down a little at the end. */
-function energyTarget(position: number, lo: number, hi: number) {
-  const curve = position <= 0.65 ? position / 0.65 : 1 - ((position - 0.65) / 0.35) * 0.45;
-  return lo + (hi - lo) * curve;
+/** Energy arc over the playlist: "peak" warms up → peaks at 65% → cools a little;
+ *  "rise" builds all the way up; "fall" starts strong and winds down. */
+function energyTarget(position: number, lo: number, hi: number, curve: "rise" | "fall" | "peak" = "peak") {
+  const c = curve === "rise" ? position
+    : curve === "fall" ? 1 - position * 0.7
+    : position <= 0.65 ? position / 0.65 : 1 - ((position - 0.65) / 0.35) * 0.45;
+  return lo + (hi - lo) * c;
 }
 
-export function sequence(tracks: TrackProfile[], startId?: string): TrackProfile[] {
+export function sequence(tracks: TrackProfile[], startId?: string, curve?: "rise" | "fall" | "peak"): TrackProfile[] {
   if (tracks.length <= 2) {
     const first = tracks.find((t) => t.id === startId);
     return first ? [first, ...tracks.filter((t) => t !== first)] : tracks;
@@ -437,7 +452,7 @@ export function sequence(tracks: TrackProfile[], startId?: string): TrackProfile
     }
 
     if (hasEnergy && candidate.energy !== null) {
-      cost += 0.8 * Math.abs(candidate.energy - energyTarget(position, lo, hi));
+      cost += 0.8 * Math.abs(candidate.energy - energyTarget(position, lo, hi, curve));
     }
     if (prev && prev.artistIds.some((id) => candidate.artistIds.includes(id))) cost += 1;
     if (prev2 && prev2.artistIds.some((id) => candidate.artistIds.includes(id))) cost += 0.35;
@@ -473,7 +488,7 @@ export function sequence(tracks: TrackProfile[], startId?: string): TrackProfile
 // Simple, elegant names: 2–3 words that evoke a feeling or a moment — never the genre,
 // never a year, never "Vibes"/"Flow"/"Grooves"/"Mix" or middle dots.
 
-const BANNED_NAME = /\b(vibes?|flow|grooves?|mix|mixtape)\b|[·•]|\b(19|20)\d0s?\b|\b\d{2}s\b/i;
+const BANNED_NAME = /\b(vibes?|flow|grooves?|mix|mixtape|luminous|timeless|reflections?|moods?|echoes|layers?|pulse|bliss)\b|[·•]|\b(19|20)\d0s?\b|\b\d{2}s\b/i;
 const GENRE_WORDS = /\b(house|techno|trance|disco|rock|pop|rap|trap|hip[\s-]?hop|rnb|r&b|soul|jazz|blues|metal|punk|folk|country|reggaeton|salsa|bachata|cumbia|bossa|samba|ambient|lo[\s-]?fi|classical|soundtrack|indie|dance|electronic|afro|melodic|deep|tech|minimal|progressive|boom[\s-]?bap|corrido|banda|norteno|grupero|k[\s-]?pop|j[\s-]?pop|funk|gospel|blues|swing|dubstep|garage|drum|bass|edm|ballads?|anthems?|classics?|mainstream|conscious|dreamscape|french touch|keinemusik|afterlife|anjunadeep|innervisions|diynamic)\b/i;
 /** A curator/AI name passes only if it's clean: no banned words, genres, scenes or years. */
 export const isCleanName = (name: string) => {
@@ -512,24 +527,51 @@ const MOOD_NAMES: Record<Mood, string[]> = {
 };
 const FALLBACK_NAMES = ["Quiet Corners", "Hidden Gems", "Second Wind", "Far Places", "Home Bound"];
 
-function nameFor(tracks: TrackProfile[], _lang: string, used: Set<string>): string {
+/** The dominant life moment of a group of songs (highest total score). */
+export function dominantMoment(tracks: TrackProfile[]): string | null {
+  const tally = new Map<string, number>();
+  for (const t of tracks) for (const m of t.moments ?? []) {
+    tally.set(m.m, (tally.get(m.m) ?? 0) + m.s);
+  }
+  let best: string | null = null;
+  let bestScore = 0;
+  for (const [m, s] of tally) if (s > bestScore) { best = m; bestScore = s; }
+  return bestScore > 0 ? best : null;
+}
+
+const NAME_ARTICLES = new Set(["a", "an", "the", "of", "and", "at", "in", "on", "de", "la", "el", "los", "las", "con", "en", "y", "un", "una"]);
+const nameWords = (name: string) => name.toLowerCase().split(/[^a-záéíóúñü]+/i).filter((w) => w && !NAME_ARTICLES.has(w));
+
+function nameFor(tracks: TrackProfile[], _lang: string, used: Set<string>, usedWords: Set<string>): string {
+  const moment = dominantMoment(tracks);
   const feeling = mostCommon(tracks.map((t) => t.feeling).filter((f): f is string => !!f));
   const mood = mostCommon(tracks.map((t) => t.mood).filter((m): m is Mood => m !== null));
   const pool = [
+    ...(moment ? MOMENT_NAMES[moment] ?? [] : []),
     ...(feeling ? FEELING_NAMES[feeling] ?? [] : []),
     ...(mood ? MOOD_NAMES[mood] ?? [] : []),
     ...FALLBACK_NAMES,
-  ];
+  ].filter(isCleanName);
   // Vary the starting point by contents so similar playlists get different names.
   const start = tracks.reduce((a, t) => a + t.id.charCodeAt(0), 0) % pool.length;
+  const claim = (name: string) => {
+    used.add(name);
+    nameWords(name).forEach((w) => usedWords.add(w));
+    return name;
+  };
+  // First pass: a fresh name whose words haven't been used in another playlist.
   for (let i = 0; i < pool.length; i++) {
     const name = pool[(start + i) % pool.length];
-    if (!used.has(name)) { used.add(name); return name; }
+    if (!used.has(name) && !nameWords(name).some((w) => usedWords.has(w))) return claim(name);
+  }
+  // Second pass: any unused name.
+  for (let i = 0; i < pool.length; i++) {
+    const name = pool[(start + i) % pool.length];
+    if (!used.has(name)) return claim(name);
   }
   let unique = pool[start];
   for (let i = 2; used.has(unique); i++) unique = `${pool[start]} ${i}`;
-  used.add(unique);
-  return unique;
+  return claim(unique);
 }
 
 // ---------- Main entry ----------
@@ -553,10 +595,21 @@ export function organizeLibrary(all: TrackProfile[], options: OrganizeOptions = 
       leftovers.push(...tracks);
       continue;
     }
-    const { groups: g, leftovers: l } = clusterBucket(tracks, minSize, maxSize, threshold);
+    // Moments first: split the language bucket by each song's main life moment,
+    // then cluster by sound inside each moment pool.
+    const pools = new Map<string, TrackProfile[]>();
+    for (const t of tracks) {
+      const m = t.moments?.[0];
+      const mk = m && m.s >= 0.5 ? m.m : "_";
+      pools.set(mk, [...(pools.get(mk) ?? []), t]);
+    }
     const lang = key.replace("lang:", "");
-    g.forEach((tracksInGroup) => groups.push({ lang, tracks: tracksInGroup }));
-    leftovers.push(...l);
+    for (const pool of pools.values()) {
+      if (pool.length < minSize) { leftovers.push(...pool); continue; }
+      const { groups: g, leftovers: l } = clusterBucket(pool, minSize, maxSize, threshold);
+      g.forEach((tracksInGroup) => groups.push({ lang, tracks: tracksInGroup }));
+      leftovers.push(...l);
+    }
   }
 
   // Second chance: place leftovers in the playlist they fit best, only if they truly fit.
@@ -587,16 +640,21 @@ export function organizeLibrary(all: TrackProfile[], options: OrganizeOptions = 
   leftovers = stillLeft;
 
   const used = new Set<string>();
+  const usedWords = new Set<string>();
   const playlists: PlaylistDraft[] = groups
     .sort((a, b) => b.tracks.length - a.tracks.length)
     .map((g, i) => {
-      const ordered = sequence(g.tracks);
-      const name = nameFor(ordered, g.lang, used);
+      const moment = dominantMoment(g.tracks);
+      const curve = moment ? (MOMENT_CURVE[moment] === "rise" ? "rise" : "peak") : undefined;
+      const ordered = sequence(g.tracks, undefined, curve);
+      const name = nameFor(ordered, g.lang, used, usedWords);
       return {
         key: `${g.lang}-${i}`,
         name,
-        description: `Organized by Tempo from your Liked Songs · ${ordered.length} songs`,
+        description: (moment && MOMENT_DESC[moment]) ||
+          `Organized by Tempo from your Liked Songs · ${ordered.length} songs`,
         lang: g.lang,
+        moment,
         cohesion: cohesionOf(ordered),
         tracks: ordered,
       };
@@ -662,13 +720,16 @@ export async function curateLibrary(
   const playlists: PlaylistDraft[] = [];
   for (const p of kept) {
     if (p.tracks.length < minSize) { unsorted.push(...p.tracks); continue; }
-    const ordered = sequence(p.tracks);
-    let name = p.name;
+    const moment = p.moment ?? dominantMoment(p.tracks);
+    const curve = moment ? (MOMENT_CURVE[moment] === "rise" ? "rise" : "peak") : undefined;
+    const ordered = sequence(p.tracks, undefined, curve);
+    let name = isCleanName(p.name) ? p.name : nameFor(ordered, p.lang, used, new Set());
     for (let i = 2; used.has(name); i++) name = `${p.name} ${i}`;
     used.add(name);
     playlists.push({
-      ...p, name, tracks: ordered, cohesion: cohesionOf(ordered),
-      description: `Organized by Tempo from your Liked Songs · ${ordered.length} songs`,
+      ...p, name, moment, tracks: ordered, cohesion: cohesionOf(ordered),
+      description: (moment && MOMENT_DESC[moment]) ||
+        `Organized by Tempo from your Liked Songs · ${ordered.length} songs`,
     });
   }
   return { playlists, unsorted, reasons };

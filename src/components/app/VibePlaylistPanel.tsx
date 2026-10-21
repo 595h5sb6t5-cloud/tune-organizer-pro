@@ -11,6 +11,7 @@ import { buildProfiles, type TrackProfile } from "@/lib/playlist/features";
 import { enrichWithAI } from "@/lib/playlist/ai";
 import { sequence } from "@/lib/playlist/organize";
 import { buildVibePlaylist, readVibeSpec, type VibeSpec, type SpecCorrection } from "@/lib/playlist/vibe";
+import { MOMENT_LABEL as LIFE_MOMENT_LABEL, MOMENT_DESC } from "@/lib/playlist/moments";
 import { recordRemoval } from "@/lib/playlist/feedback";
 import EditSoundDialog from "@/components/app/EditSoundDialog";
 import { loadLikedTracks, loadArtistGenres } from "@/components/app/OrganizeLibraryPanel";
@@ -214,7 +215,8 @@ export default function VibePlaylistPanel() {
   function editSpec(key: string, value: string | null) {
     if (!understood || !user) return;
     const s = { ...understood.spec };
-    if (key === "vocals") s.vocals = (value as VibeSpec["vocals"]) ?? "any";
+    if (key.startsWith("moment-")) s.moments = (s.moments ?? []).filter((x) => x !== key.slice(7));
+    else if (key === "vocals") s.vocals = (value as VibeSpec["vocals"]) ?? "any";
     else if (key === "listening") s.listening = (value as VibeSpec["listening"]) ?? "any";
     else if (key === "moment") s.moment = (value as VibeSpec["moment"]) ?? "any";
     else if (key === "energy") { s.energy_min = 0; s.energy_max = 1; }
@@ -245,6 +247,8 @@ export default function VibePlaylistPanel() {
       </span>
     );
     return [
+      // The human moment comes first — it's what the user asked for.
+      ...(spec.moments ?? []).map((m) => chipX(`moment-${m}`, LIFE_MOMENT_LABEL[m] ?? m)),
       spec.vocals && spec.vocals !== "any" ? chipSelect("vocals", spec.vocals, VOCAL_LABEL) : null,
       spec.listening && spec.listening !== "any" ? chipSelect("listening", spec.listening, LISTEN_LABEL) : null,
       spec.moment && spec.moment !== "any" ? chipSelect("moment", spec.moment, MOMENT_LABEL) : null,
@@ -261,13 +265,16 @@ export default function VibePlaylistPanel() {
   async function save() {
     if (!user || !tracks?.length) return;
     setSaving(true); setError(null);
+    // A human moment description when we have one; otherwise the vibe text.
+    const firstMoment = understood?.spec.moments?.[0];
+    const description = (firstMoment && MOMENT_DESC[firstMoment]) || `Vibe: ${vibe}`;
     try {
       const { data: gp, error: gpErr } = await supabase.from("generated_playlists").insert({
-        user_id: user.id, name, description: `Vibe: ${vibe}`, status: "draft", created_by_ai: true, track_ids: tracks.map((t) => t.id),
+        user_id: user.id, name, description, status: "draft", created_by_ai: true, track_ids: tracks.map((t) => t.id),
       }).select("id").single();
       if (gpErr) throw new Error(gpErr.message);
       const { data, error } = await supabase.functions.invoke("spotify-export-playlist", {
-        body: { generated_playlist_id: gp.id, name, description: `Vibe: ${vibe}`, track_ids: tracks.map((t) => t.id), is_public: false },
+        body: { generated_playlist_id: gp.id, name, description, track_ids: tracks.map((t) => t.id), is_public: false },
       });
       const paused = spotifyPausedMessage(data);
       if (paused) throw new Error(`${paused} Your playlist is saved in Playlists so you can send it then.`);

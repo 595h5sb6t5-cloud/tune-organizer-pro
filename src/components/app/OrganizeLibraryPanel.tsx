@@ -81,6 +81,7 @@ export default function OrganizeLibraryPanel({ onSaved }: { onSaved: () => void 
   const [error, setError] = useState<string | null>(null);
   const [playlists, setPlaylists] = useState<PlaylistDraft[]>([]);
   const [unsorted, setUnsorted] = useState<TrackProfile[]>([]);
+  const [analyzing, setAnalyzing] = useState<TrackProfile[]>([]);
   const [open, setOpen] = useState<string | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
   const [saved, setSaved] = useState<Record<string, string>>({});
@@ -98,7 +99,7 @@ export default function OrganizeLibraryPanel({ onSaved }: { onSaved: () => void 
       if (!alive) return;
       setLoaded(true);
       if (set?.built_at && set.built_at !== builtAt && !dirty) {
-        setPlaylists(set.playlists); setUnsorted(set.unsorted); setBuiltAt(set.built_at);
+        setPlaylists(set.playlists); setUnsorted(set.unsorted); setAnalyzing(set.analyzing ?? []); setBuiltAt(set.built_at);
         void markPrebuiltSeen(user.id);
       }
     };
@@ -134,7 +135,7 @@ export default function OrganizeLibraryPanel({ onSaved }: { onSaved: () => void 
       const ok = await maybePrebuild(user.id, true);
       if (!ok) throw new Error("A rebuild is already running. Your playlists will update on their own in a moment.");
       const set = await loadPrebuilt(user.id);
-      if (set) { setPlaylists(set.playlists); setUnsorted(set.unsorted); setBuiltAt(set.built_at); setSaved({}); setDirty(false); }
+      if (set) { setPlaylists(set.playlists); setUnsorted(set.unsorted); setAnalyzing(set.analyzing ?? []); setBuiltAt(set.built_at); setSaved({}); setDirty(false); }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong while reading your library.");
     } finally {
@@ -279,6 +280,9 @@ export default function OrganizeLibraryPanel({ onSaved }: { onSaved: () => void 
                     <ChevronDown className={`w-4 h-4 transition-transform ${isOpen ? "rotate-180" : ""}`} />
                   </Button>
                 </div>
+                {p.description && (
+                  <p className="px-4 pb-3 -mt-1 text-sm text-muted-foreground">{p.description}</p>
+                )}
 
                 {isOpen && (
                   <ol className="border-t border-border/50 divide-y divide-border/40">
@@ -309,6 +313,22 @@ export default function OrganizeLibraryPanel({ onSaved }: { onSaved: () => void 
               </article>
             );
           })}
+        </section>
+      )}
+
+      {analyzing.length > 0 && (
+        <section className="space-y-2">
+          <h2 className="font-heading text-xl">Analyzing… ({analyzing.length})</h2>
+          <p className="text-sm text-muted-foreground">
+            These songs are still being analyzed in the background. They'll join your playlists automatically
+            on the next rebuild — they're not rejected.
+          </p>
+          <ul className="text-sm text-muted-foreground columns-1 sm:columns-2 gap-6">
+            {analyzing.slice(0, 40).map((t) => (
+              <li key={t.id} className="truncate py-0.5">{t.name} · {t.artists[0]}</li>
+            ))}
+            {analyzing.length > 40 && <li className="py-0.5">…and {analyzing.length - 40} more</li>}
+          </ul>
         </section>
       )}
 

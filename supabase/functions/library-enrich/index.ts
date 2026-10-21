@@ -363,6 +363,10 @@ async function process(admin: any, userId: string, depth: number, force: boolean
       const a = fetch(`${SUPABASE_URL}/functions/v1/audio-analyze`, { method: "POST", headers: { Authorization: `Bearer ${SERVICE_KEY}`, apikey: SERVICE_KEY, "Content-Type": "application/json" }, body: "{}" }).catch((e) => console.error("[library-enrich] audio-analyze kick failed", e));
       // @ts-ignore EdgeRuntime
       if (typeof EdgeRuntime !== "undefined" && EdgeRuntime.waitUntil) EdgeRuntime.waitUntil(a);
+      // Life moments (shared per song, text-only from stored evidence); lease keeps it single-flight.
+      const m = fetch(`${SUPABASE_URL}/functions/v1/moment-tags`, { method: "POST", headers: { Authorization: `Bearer ${SERVICE_KEY}`, apikey: SERVICE_KEY, "Content-Type": "application/json" }, body: "{}" }).catch((e) => console.error("[library-enrich] moment-tags kick failed", e));
+      // @ts-ignore EdgeRuntime
+      if (typeof EdgeRuntime !== "undefined" && EdgeRuntime.waitUntil) EdgeRuntime.waitUntil(m);
     }
     return { status: done ? "done" : "running", ...r };
   } catch (e) {
