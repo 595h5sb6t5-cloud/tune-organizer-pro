@@ -150,7 +150,8 @@ export default function VibePlaylistPanel() {
       const p = await getProfiles();
       const seedProfiles = seeds.map((s) => p.find((x) => x.id === s.track.id)).filter((x): x is TrackProfile => !!x);
       const words = seeds.length ? keywords : vibe.trim();
-      const res = await buildVibePlaylist(user.id, words, p, lang, (label, done, total) => setStep({ label, done, total }), seedProfiles, artistSeed?.name);
+      const res = await buildVibePlaylist(user.id, words, p, lang, (label, done, total) => setStep({ label, done, total }), seedProfiles, artistSeed?.name,
+        (live) => setTracks(live));
       setName(res.spec.name);
       setTracks(res.tracks);
     } catch (e) {
@@ -299,7 +300,7 @@ export default function VibePlaylistPanel() {
                     <a href={savedUrl} target="_blank" rel="noreferrer"><Check className="w-4 h-4 mr-1" /> Open in Spotify <ExternalLink className="w-3 h-3 ml-1" /></a>
                   </Button>
                 ) : (
-                  <Button size="sm" onClick={save} disabled={saving}>
+                  <Button size="sm" onClick={save} disabled={saving || !!step}>
                     {saving && <Loader2 className="w-4 h-4 mr-1 animate-spin" />} Save to Spotify
                   </Button>
                 )}
