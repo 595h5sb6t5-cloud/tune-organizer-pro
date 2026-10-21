@@ -17,6 +17,12 @@ instrument palette (piano, synths, organic percussion, vocals…), melody-led vs
 10 = could be the next track in the same set; 8 = clearly the same world; 7 = close with one small difference; 6 or less = a listener would notice it doesn't belong.
 Judge ONLY what you hear. Return ONLY JSON: {"results":[{"n":<song number>,"s":<score>}]}`;
 
+const PROMPT_DESC = `You are a DJ checking if songs fit a described vibe.
+Read the VIBE description, then listen to each numbered SONG clip (15 s from the middle of the song). For each song rate 0–10 how well what you HEAR fits the vibe:
+voices (or lack of them), instrument palette, melody-led vs groove/percussion-led, texture (organic vs synthetic), warmth, energy and drive, and the moment it evokes.
+10 = perfect for that moment; 8 = clearly fits; 7 = fits with one small difference; 6 or less = a listener in that moment would skip it.
+Judge ONLY what you hear. Return ONLY JSON: {"results":[{"n":<song number>,"s":<score>}]}`;
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
