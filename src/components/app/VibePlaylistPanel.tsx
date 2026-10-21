@@ -1,5 +1,5 @@
 import { spotifyPausedMessage } from "@/lib/spotify-paused";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, Check, X, ExternalLink, Sparkles } from "lucide-react";
 import AnalysisNote from "@/components/app/AnalysisNote";
 import { Button } from "@/components/ui/button";
@@ -10,7 +10,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { buildProfiles, type TrackProfile } from "@/lib/playlist/features";
 import { enrichWithAI } from "@/lib/playlist/ai";
 import { sequence } from "@/lib/playlist/organize";
-import { buildVibePlaylist } from "@/lib/playlist/vibe";
+import { buildVibePlaylist, readVibeSpec, type VibeSpec, type SpecCorrection } from "@/lib/playlist/vibe";
 import { recordRemoval } from "@/lib/playlist/feedback";
 import EditSoundDialog from "@/components/app/EditSoundDialog";
 import { loadLikedTracks, loadArtistGenres } from "@/components/app/OrganizeLibraryPanel";
@@ -24,6 +24,32 @@ const LANG_LABEL: Record<string, string> = {
 };
 
 type Step = { label: string; done?: number; total?: number };
+
+const QUICK_CHIPS = ["Sunset", "Late night", "Instrumental", "Background talk", "Inspirational", "Focus", "Pregame", "Rainy day"];
+const VOCAL_LABEL: Record<string, string> = { none: "No vocals", sparse: "Few vocals", soft: "Soft vocals", lead: "Lead vocals", any: "Any vocals" };
+const LISTEN_LABEL: Record<string, string> = { background: "Background", focused: "Focused", any: "Any listening" };
+const MOMENT_LABEL: Record<string, string> = { sunrise: "Sunrise", day: "Day", "golden-hour-sunset": "Golden hour", night: "Night", "late-night": "Late night", any: "Any moment" };
+
+const normPhrase = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
+
+async function loadCorrections(userId: string): Promise<SpecCorrection[]> {
+  const { data } = await supabase.from("vibe_spec_corrections").select("phrase, spec").eq("user_id", userId)
+    .order("created_at", { ascending: false }).limit(20);
+  return (data ?? []).map((r) => ({ phrase: r.phrase, spec: r.spec as Partial<VibeSpec> }));
+}
+
+/** Saves the user's edit to "Lo que entendí" so the next similar phrase is interpreted the same way. */
+async function saveCorrection(userId: string, phrase: string, spec: VibeSpec) {
+  const sub: Partial<VibeSpec> = {
+    vocals: spec.vocals ?? "any", listening: spec.listening ?? "any", moment: spec.moment ?? "any",
+    energy_min: spec.energy_min, energy_max: spec.energy_max,
+    warmth_min: spec.warmth_min ?? 0, warmth_max: spec.warmth_max ?? 1,
+    feelings_allowed: spec.feelings_allowed ?? [],
+    instruments_preferred: spec.instruments_preferred ?? [],
+    instruments_excluded: spec.instruments_excluded ?? [],
+  };
+  await supabase.from("vibe_spec_corrections").upsert({ user_id: userId, phrase: normPhrase(phrase), spec: sub as any }, { onConflict: "user_id,phrase" });
+}
 
 export default function VibePlaylistPanel() {
   const { user } = useAuth();
