@@ -55,9 +55,11 @@ Deno.serve(async (req) => {
     if (!songs.length) return json({ results: [], unheard });
 
     const f = (v: unknown) => (v === null || v === undefined || v === "" ? "?" : Array.isArray(v) ? v.slice(0, 8).map(String).join(", ") : String(v).slice(0, 80));
-    const seedText = `SEED: "${f(seed.name)}" by ${f(seed.artists)} | instruments: ${f(seed.instruments)} | piano: ${f(seed.piano)} | melodic_focus: ${f(seed.melodic_focus)} | percussive_drive: ${f(seed.percussive_drive)} | texture: ${f(seed.texture)} | warmth: ${f(seed.warmth)} | scale: ${f(seed.scale)} | groove: ${f(seed.groove)} | energy: ${f(seed.energy)} | style: ${f(seed.style)} | feeling: ${f(seed.feeling)}${seed.feeling_2 ? ` (also ${f(seed.feeling_2)})` : ""} | arc: ${f(seed.arc)}`;
+    const seedText = seed
+      ? `SEED: "${f(seed.name)}" by ${f(seed.artists)} | instruments: ${f(seed.instruments)} | piano: ${f(seed.piano)} | melodic_focus: ${f(seed.melodic_focus)} | percussive_drive: ${f(seed.percussive_drive)} | texture: ${f(seed.texture)} | warmth: ${f(seed.warmth)} | scale: ${f(seed.scale)} | groove: ${f(seed.groove)} | energy: ${f(seed.energy)} | style: ${f(seed.style)} | feeling: ${f(seed.feeling)}${seed.feeling_2 ? ` (also ${f(seed.feeling_2)})` : ""} | arc: ${f(seed.arc)}`
+      : `VIBE: ${description}`;
     const ctxText = context ? `\nAdemás de sonar del mismo mundo que la semilla, ¿encaja con este contexto: ${context}? A song that sounds right but does not fit this context scores 7 or less.` : "";
-    const content: any[] = [{ type: "text", text: PROMPT + ctxText }, { type: "text", text: seedText }];
+    const content: any[] = [{ type: "text", text: (seed ? PROMPT : PROMPT_DESC) + ctxText }, { type: "text", text: seedText }];
     songs.forEach((s, i) => {
       content.push({ type: "text", text: `SONG ${i + 1}: ${s.label}` });
       content.push({ type: "input_audio", input_audio: { data: s.b64, format: "mp3" } });
