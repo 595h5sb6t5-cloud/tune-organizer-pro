@@ -3123,6 +3123,30 @@ export type Database = {
         }
         Relationships: []
       }
+      vibe_spec_corrections: {
+        Row: {
+          created_at: string
+          id: string
+          phrase: string
+          spec: Json
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          phrase: string
+          spec: Json
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          phrase?: string
+          spec?: Json
+          user_id?: string
+        }
+        Relationships: []
+      }
       vibe_timings: {
         Row: {
           created_at: string
