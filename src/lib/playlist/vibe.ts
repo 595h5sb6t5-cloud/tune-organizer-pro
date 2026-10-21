@@ -406,7 +406,13 @@ async function listenCandidates(userId: string, cands: TrackProfile[], seeds: Tr
     if (rows.length) supabase.from("vibe_select_cache").upsert(rows, { onConflict: "user_id,vibe_key,spotify_track_id" }).then(() => {});
     done += j.ids.length; onProgress?.(done, total);
     onBatch?.(scores);
-  }));
+  };
+  // Priority: the first batch (best 8 candidates, all with stored audio) runs alone so
+  // the first results show as fast as possible; the rest follow together.
+  const runAll = (async () => {
+    if (jobs.length) await runJob(jobs[0]);
+    await Promise.all(jobs.slice(1).map(runJob));
+  })();
   if (deadline) {
     // Hard budget: when time runs out, whatever hasn't landed is omitted (not rejected).
     await Promise.race([runAll, new Promise((r) => setTimeout(r, Math.max(0, deadline - performance.now())))]);
