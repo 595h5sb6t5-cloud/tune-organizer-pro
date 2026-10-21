@@ -452,7 +452,7 @@ export function sequence(tracks: TrackProfile[], startId?: string, curve?: "rise
     }
 
     if (hasEnergy && candidate.energy !== null) {
-      cost += 0.8 * Math.abs(candidate.energy - energyTarget(position, lo, hi));
+      cost += 0.8 * Math.abs(candidate.energy - energyTarget(position, lo, hi, curve));
     }
     if (prev && prev.artistIds.some((id) => candidate.artistIds.includes(id))) cost += 1;
     if (prev2 && prev2.artistIds.some((id) => candidate.artistIds.includes(id))) cost += 0.35;
