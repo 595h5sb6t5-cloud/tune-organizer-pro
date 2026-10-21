@@ -60,6 +60,8 @@ async function runList(admin: any, list: Row[], deadline: number, twice = false)
   let stop: GatewayStop | null = null;
   const worker = async () => {
     while (!stop && i < list.length && Date.now() < deadline) {
+      await waitIfPaused(admin); // the vibe builder has priority over background work
+      if (stop || i >= list.length || Date.now() >= deadline) break;
       const t = list[i++];
       for (let attempt = 0; attempt < 3; attempt++) {
         try { await analyzeOne(admin, t, twice); done++; break; }

@@ -102,6 +102,8 @@ async function hop(admin: any, depth: number) {
   const started = Date.now();
   const worker = async () => {
     while (!paused && batches.length && Date.now() - started < HOP_MS) {
+      await waitIfPaused(admin); // the vibe builder has priority over background work
+      if (paused || !batches.length || Date.now() - started >= HOP_MS) break;
       const batch = batches.shift()!;
       try {
         const r = await tagBatch(apiKey, batch);
