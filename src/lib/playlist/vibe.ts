@@ -540,7 +540,9 @@ export async function buildVibePlaylist(
 
   // With seeds — "wide net, strict ear".
   const local = seedSpec(seeds, !!capArtist);
-  const recipeP = vibe.trim()
+  const recipeP = opts.presetSpec
+    ? Promise.resolve(opts.presetSpec)
+    : vibe.trim()
     ? readRecipe().then((s) => { timings.recipe = Math.round(performance.now() - t0); return s; }).catch(() => local)
     : Promise.resolve(local);
   onStep("Finding songs that feel the same");
