@@ -81,6 +81,7 @@ export default function OrganizeLibraryPanel({ onSaved }: { onSaved: () => void 
   const [error, setError] = useState<string | null>(null);
   const [playlists, setPlaylists] = useState<PlaylistDraft[]>([]);
   const [unsorted, setUnsorted] = useState<TrackProfile[]>([]);
+  const [analyzing, setAnalyzing] = useState<TrackProfile[]>([]);
   const [open, setOpen] = useState<string | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
   const [saved, setSaved] = useState<Record<string, string>>({});
@@ -98,7 +99,7 @@ export default function OrganizeLibraryPanel({ onSaved }: { onSaved: () => void 
       if (!alive) return;
       setLoaded(true);
       if (set?.built_at && set.built_at !== builtAt && !dirty) {
-        setPlaylists(set.playlists); setUnsorted(set.unsorted); setBuiltAt(set.built_at);
+        setPlaylists(set.playlists); setUnsorted(set.unsorted); setAnalyzing(set.analyzing ?? []); setBuiltAt(set.built_at);
         void markPrebuiltSeen(user.id);
       }
     };
@@ -134,7 +135,7 @@ export default function OrganizeLibraryPanel({ onSaved }: { onSaved: () => void 
       const ok = await maybePrebuild(user.id, true);
       if (!ok) throw new Error("A rebuild is already running. Your playlists will update on their own in a moment.");
       const set = await loadPrebuilt(user.id);
-      if (set) { setPlaylists(set.playlists); setUnsorted(set.unsorted); setBuiltAt(set.built_at); setSaved({}); setDirty(false); }
+      if (set) { setPlaylists(set.playlists); setUnsorted(set.unsorted); setAnalyzing(set.analyzing ?? []); setBuiltAt(set.built_at); setSaved({}); setDirty(false); }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong while reading your library.");
     } finally {
