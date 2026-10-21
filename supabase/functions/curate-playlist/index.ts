@@ -19,7 +19,7 @@ Quita todo lo que no pase la prueba. Es mejor una playlist de 15 canciones perfe
 Responde SOLO JSON con esta forma exacta:
 {"remove": [{"id": "<id>", "reason": "<razón corta>"}], "name": "<nombre en inglés>"}`;
 
-const NAME_SYSTEM = `Eres un curador musical. Las canciones ya fueron elegidas; NO quites ninguna. Solo ponle a la playlist un nombre de 2 o 3 palabras, simple y elegante, que evoque el sentimiento o el momento (ej. 'Golden Hour', 'Velvet Nights', 'Slow Sundays', 'Midnight Blue', 'Sunday Soul', 'Open Roads'). PROHIBIDO: 'Vibes', 'Flow', 'Grooves', 'Mix', puntos medios (·), nombres de géneros o escenas, años o décadas, y títulos de canciones.
+const NAME_SYSTEM = `Eres un curador musical. Las canciones ya fueron elegidas; NO quites ninguna. Solo ponle a la playlist un nombre de 2 o 3 palabras, simple y elegante, que evoque el sentimiento o el momento (ej. 'Golden Hour', 'Velvet Nights', 'Slow Sundays', 'Midnight Blue', 'Sunday Soul', 'Open Roads'). PROHIBIDO: 'Vibes', 'Flow', 'Grooves', 'Mix', 'Classics', 'Luminous', 'Timeless', 'Reflections', 'Moods', 'Echoes', 'Layers', 'Pulse', 'Bliss', puntos medios (·), nombres de géneros o escenas, años o décadas, nombres de artistas y títulos de canciones.
 Responde SOLO JSON: {"remove": [], "name": "<nombre>"}`;
 
 Deno.serve(async (req) => {
