@@ -96,6 +96,7 @@ async function hop(admin: any, depth: number) {
   const songs = (list ?? []) as SongRow[];
   let done = 0;
   let paused = false;
+  let pauseReason = "ai_rate_limit";
   const batches: SongRow[][] = [];
   for (let i = 0; i < songs.length; i += BATCH) batches.push(songs.slice(i, i + BATCH));
   const started = Date.now();
@@ -119,6 +120,7 @@ async function hop(admin: any, depth: number) {
       } catch (e) {
         console.error("[moment-tags]", e instanceof Error ? e.message : e);
         paused = true;
+        pauseReason = e instanceof Error ? e.message.slice(0, 200) : "unknown_error";
         batches.unshift(batch);
       }
     }
@@ -138,8 +140,8 @@ async function hop(admin: any, depth: number) {
     .eq("moments_checked", false);
   const remaining = left ?? 0;
   if (paused) {
-    await admin.from("moment_tags_state").update({ status: "paused", lease_until: null, paused_until: new Date(Date.now() + 120_000).toISOString(), last_error: "ai_rate_limit", done: (st?.done ?? 0) + done, updated_at: new Date().toISOString() }).eq("id", 1);
-    return { status: "paused", reason: "ai_rate_limit", done, remaining };
+    await admin.from("moment_tags_state").update({ status: "paused", lease_until: null, paused_until: new Date(Date.now() + 120_000).toISOString(), last_error: pauseReason, done: (st?.done ?? 0) + done, updated_at: new Date().toISOString() }).eq("id", 1);
+    return { status: "paused", reason: pauseReason, done, remaining };
   }
   const finished = remaining === 0 || !songs.length;
   await admin.from("moment_tags_state").update({ status: finished ? "done" : "running", lease_until: null, last_error: null, done: (st?.done ?? 0) + done, updated_at: new Date().toISOString() }).eq("id", 1);
