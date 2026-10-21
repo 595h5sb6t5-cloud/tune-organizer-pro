@@ -69,20 +69,39 @@ export async function buildAndSave(userId: string, signal: number, onProgress?: 
   const t0 = performance.now();
   const tracks = await loadLikedTracks(userId);
   const genres = await loadArtistGenres(tracks.flatMap((t) => t.artists.map((a) => a.id)), () => {});
-  const profiles = (await enrichWithAI(buildProfiles(tracks, genres))).filter((p) => !!p.style);
+  const all = await enrichWithAI(buildProfiles(tracks, genres));
+  // Songs whose analysis hasn't finished yet are not "Not placed" — they're "Analyzing…"
+  // and the background enrichment keeps working on them.
+  const analyzing = all.filter((p) => !p.style);
+  const profiles = all.filter((p) => !!p.style);
   const curated = await curateLibrary(organizeLibrary(profiles), (t) => askCurator(t), () => {});
   // The ear: Gemini hears every playlist against its anchors; only 8+ stays.
   onProgress?.("Listening to the playlists", 0, 0);
   const heard = await earCheckPlaylists(userId, curated.playlists, (d, t) => onProgress?.("Listening to the playlists", d, t));
-  const result = { playlists: heard.playlists, unsorted: [...curated.unsorted, ...heard.rejected] };
-  console.info(`[prebuild] ${result.playlists.length} playlists, ${result.unsorted.length} not placed, ear listened to ${heard.listened} songs in ${Math.round(performance.now() - t0)}ms`);
+  let playlists = heard.playlists;
+  let unsorted = [...curated.unsorted, ...heard.rejected];
+  let listened = heard.listened;
+  // Regroup "Not placed" with the same rules and the same ear, up to 3 passes total.
+  for (let pass = 2; pass <= 3 && unsorted.length >= 8; pass++) {
+    onProgress?.(`Regrouping Not placed (pass ${pass}/3)`);
+    const retry = organizeLibrary(unsorted);
+    if (!retry.playlists.length) break;
+    const retryHeard = await earCheckPlaylists(userId, retry.playlists, (d, t) => onProgress?.(`Listening (pass ${pass}/3)`, d, t));
+    listened += retryHeard.listened;
+    playlists = [...playlists, ...retryHeard.playlists];
+    unsorted = [...retry.unsorted, ...retryHeard.rejected];
+    console.info(`[prebuild] pass ${pass}: +${retryHeard.playlists.length} playlists, ${unsorted.length} still not placed`);
+  }
+  playlists.forEach((p, i) => { p.key = `set-${i}`; });
+  const result = { playlists, unsorted };
+  console.info(`[prebuild] ${result.playlists.length} playlists, ${result.unsorted.length} not placed, ${analyzing.length} analyzing, ear listened to ${listened} songs in ${Math.round(performance.now() - t0)}ms`);
   const row = {
-    playlists: result.playlists as any, unsorted: result.unsorted as any, analyzed_count: signal,
+    playlists: result.playlists as any, unsorted: result.unsorted as any, analyzing: analyzing as any, analyzed_count: signal,
     status: "ready", lease_until: null, built_at: new Date().toISOString(), error: null, updated_at: new Date().toISOString(),
   };
   const { error } = await supabase.from("prebuilt_playlists").update(row).eq("user_id", userId);
   if (error) throw new Error(error.message);
-  return { playlists: result.playlists, unsorted: result.unsorted, built_at: row.built_at, seen_at: null, analyzed_count: signal, status: "ready" };
+  return { playlists: result.playlists, unsorted: result.unsorted, analyzing, built_at: row.built_at, seen_at: null, analyzed_count: signal, status: "ready" };
 }
 
 /** Checks whether a rebuild is due and runs it. Safe to call often: a DB lease keeps it single-flight. */
