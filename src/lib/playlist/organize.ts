@@ -720,13 +720,16 @@ export async function curateLibrary(
   const playlists: PlaylistDraft[] = [];
   for (const p of kept) {
     if (p.tracks.length < minSize) { unsorted.push(...p.tracks); continue; }
-    const ordered = sequence(p.tracks);
-    let name = p.name;
+    const moment = p.moment ?? dominantMoment(p.tracks);
+    const curve = moment ? MOMENT_CURVE[moment] : undefined;
+    const ordered = sequence(p.tracks, undefined, curve);
+    let name = isCleanName(p.name) ? p.name : nameFor(ordered, p.lang, used, new Set());
     for (let i = 2; used.has(name); i++) name = `${p.name} ${i}`;
     used.add(name);
     playlists.push({
-      ...p, name, tracks: ordered, cohesion: cohesionOf(ordered),
-      description: `Organized by Tempo from your Liked Songs · ${ordered.length} songs`,
+      ...p, name, moment, tracks: ordered, cohesion: cohesionOf(ordered),
+      description: (moment && MOMENT_DESC[moment]) ||
+        `Organized by Tempo from your Liked Songs · ${ordered.length} songs`,
     });
   }
   return { playlists, unsorted, reasons };
