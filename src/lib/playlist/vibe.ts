@@ -335,6 +335,7 @@ const earSeed = (t: TrackProfile) => ({
   name: t.name, artists: t.artists, instruments: t.instruments, piano: (t as any).piano ?? null,
   melodic_focus: r2n(t.melodicFocus), percussive_drive: r2n(t.percussiveDrive), texture: r2n(t.texture), warmth: r2n(t.warmth),
   scale: r2n(t.scale), groove: t.groove, energy: r2n(t.energy), style: t.style ?? null, feeling: t.feeling, feeling_2: t.feeling2 ?? null, arc: t.arc,
+  drum_sound: t.drumSound ?? null, mix_character: t.mixCharacter ?? null, vocal_space: t.vocalSpace ?? null,
   moments: t.moments?.map((m) => m.m), moment_story: t.momentStory ?? undefined,
 });
 
@@ -380,6 +381,10 @@ async function listenCandidates(userId: string, cands: TrackProfile[], seeds: Tr
     const todo = ids.filter((id) => !scores.has(id));
     for (let i = 0; i < todo.length; i += LISTEN_BATCH) jobs.push({ seed, ids: todo.slice(i, i + LISTEN_BATCH) });
   }));
+  // The first job must be the best-ranked candidates (cands arrive already ranked):
+  // sort jobs by the best rank position they contain, so job[0] holds the top 8.
+  const rankPos = new Map(cands.map((c, i) => [c.id, i]));
+  jobs.sort((a, b) => Math.min(...a.ids.map((id) => rankPos.get(id) ?? 1e9)) - Math.min(...b.ids.map((id) => rankPos.get(id) ?? 1e9)));
   const total = jobs.reduce((a, j) => a + j.ids.length, 0);
   let done = 0;
   onProgress?.(0, total);
@@ -588,6 +593,9 @@ export async function buildVibePlaylist(
     const late = top.filter((t) => !ear.has(t.id) && !text.has(t.id) && unheard.has(t.id));
     const text2 = late.length && performance.now() < deadline ? await scoreCandidates(userId, ctx, late, []) : new Map<string, number>();
     const scores = new Map([...text, ...text2, ...ear]);
+    // Songs without stored audio (omitted, never rejected) go to the background analysis queue.
+    const toQueue = [...new Set([...noClip.map((t) => t.id), ...unheard])].slice(0, 30);
+    if (toQueue.length) void supabase.functions.invoke("audio-analyze", { body: { ids: toQueue } }).catch(() => null);
     // Strict ear: only 8 or more gets in (no 7-fill without a seed).
     const pool = top.filter((t) => (scores.get(t.id) ?? 0) >= MIN_SCORE);
     const approved = pool.length;
@@ -647,6 +655,9 @@ export async function buildVibePlaylist(
   const late = top.filter((t) => !ear.has(t.id) && !text.has(t.id) && unheard.has(t.id));
   const text2 = late.length && performance.now() < deadline ? await scoreCandidates(userId, vibe, late, seeds) : new Map<string, number>();
   const scores = new Map([...text, ...text2, ...ear]);
+  // Songs without stored audio (omitted, never rejected) go to the background analysis queue.
+  const toQueue = [...new Set([...noClip.map((t) => t.id), ...unheard])].slice(0, 30);
+  if (toQueue.length) void supabase.functions.invoke("audio-analyze", { body: { ids: toQueue } }).catch(() => null);
   const pool = top.filter((t) => admits(t, scores.get(t.id) ?? 0));
   lap("listen");
 

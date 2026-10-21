@@ -41,6 +41,9 @@ function mergeTwo(a: ReturnType<typeof cleanSound>, b: ReturnType<typeof cleanSo
     texture: avg(a.texture, b.texture), warmth: avg(a.warmth, b.warmth), scale: avg(a.scale, b.scale),
     groove: a.groove === b.groove ? a.groove : a.groove ?? b.groove,
     production_era: a.production_era === b.production_era ? a.production_era : a.production_era ?? b.production_era,
+    drum_sound: a.drum_sound === b.drum_sound ? a.drum_sound : a.drum_sound ?? b.drum_sound,
+    mix_character: a.mix_character === b.mix_character ? a.mix_character : a.mix_character ?? b.mix_character,
+    vocal_space: a.vocal_space === b.vocal_space ? a.vocal_space : a.vocal_space ?? b.vocal_space,
     vocal_style: a.vocal_style === b.vocal_style ? a.vocal_style : a.vocal_style ?? b.vocal_style,
     lyric_theme: a.lyric_theme === b.lyric_theme ? a.lyric_theme : a.lyric_theme ?? b.lyric_theme,
   };

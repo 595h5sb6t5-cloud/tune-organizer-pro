@@ -15,12 +15,15 @@ const PROMPT = `You are a DJ checking if songs belong in the same playlist as th
 Read the SEED's sound description (heard earlier), then listen to each numbered SONG clip (15 s from the middle of the song). For each song rate 0–10 how much it SOUNDS like the same sonic world as the seed:
 instrument palette (piano, synths, organic percussion, vocals…), melody-led vs groove/percussion-led, texture (organic vs synthetic), warmth and drive.
 10 = could be the next track in the same set; 8 = clearly the same world; 7 = close with one small difference; 6 or less = a listener would notice it doesn't belong.
+Considera la producción: ¿la grabación, la batería y la mezcla suenan del mismo mundo, aunque sean de épocas distintas? Dos canciones del mismo género con producciones que chocan no encajan.
 Judge ONLY what you hear. Return ONLY JSON: {"results":[{"n":<song number>,"s":<score>}]}`;
 
 const PROMPT_DESC = `You are a DJ checking if songs fit a described vibe.
 Read the VIBE description, then listen to each numbered SONG clip (15 s from the middle of the song). For each song rate 0–10 how well what you HEAR fits the vibe:
 voices (or lack of them), instrument palette, melody-led vs groove/percussion-led, texture (organic vs synthetic), warmth, energy and drive, and the moment it evokes.
 10 = perfect for that moment; 8 = clearly fits; 7 = fits with one small difference; 6 or less = a listener in that moment would skip it.
+Considera la producción: ¿la grabación, la batería y la mezcla suenan del mismo mundo, aunque sean de épocas distintas? Dos canciones del mismo género con producciones que chocan no encajan.
+Si el vibe es música de fondo (background, para platicar o acompañar), todas las canciones deben compartir UN solo mundo sonoro: misma producción, instrumentación y tipo de voz. Compartir solo una etiqueta como "chill" NO basta; una canción de otro mundo sonoro es 6 o menos.
 Judge ONLY what you hear. Return ONLY JSON: {"results":[{"n":<song number>,"s":<score>}]}`;
 
 Deno.serve(async (req) => {
@@ -56,7 +59,7 @@ Deno.serve(async (req) => {
 
     const f = (v: unknown) => (v === null || v === undefined || v === "" ? "?" : Array.isArray(v) ? v.slice(0, 8).map(String).join(", ") : String(v).slice(0, 80));
     const seedText = seed
-      ? `SEED: "${f(seed.name)}" by ${f(seed.artists)} | instruments: ${f(seed.instruments)} | piano: ${f(seed.piano)} | melodic_focus: ${f(seed.melodic_focus)} | percussive_drive: ${f(seed.percussive_drive)} | texture: ${f(seed.texture)} | warmth: ${f(seed.warmth)} | scale: ${f(seed.scale)} | groove: ${f(seed.groove)} | energy: ${f(seed.energy)} | style: ${f(seed.style)} | feeling: ${f(seed.feeling)}${seed.feeling_2 ? ` (also ${f(seed.feeling_2)})` : ""} | arc: ${f(seed.arc)}`
+      ? `SEED: "${f(seed.name)}" by ${f(seed.artists)} | instruments: ${f(seed.instruments)} | piano: ${f(seed.piano)} | melodic_focus: ${f(seed.melodic_focus)} | percussive_drive: ${f(seed.percussive_drive)} | texture: ${f(seed.texture)} | warmth: ${f(seed.warmth)} | scale: ${f(seed.scale)} | groove: ${f(seed.groove)} | energy: ${f(seed.energy)} | style: ${f(seed.style)} | feeling: ${f(seed.feeling)}${seed.feeling_2 ? ` (also ${f(seed.feeling_2)})` : ""} | arc: ${f(seed.arc)} | drums: ${f(seed.drum_sound)} | mix: ${f(seed.mix_character)} | vocal_space: ${f(seed.vocal_space)}`
       : `VIBE: ${description}`;
     const ctxText = context ? `\nAdemás de sonar del mismo mundo que la semilla, ¿encaja con este contexto: ${context}? A song that sounds right but does not fit this context scores 7 or less.` : "";
     const content: any[] = [{ type: "text", text: (seed ? PROMPT : PROMPT_DESC) + ctxText }, { type: "text", text: seedText }];
