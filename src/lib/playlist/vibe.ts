@@ -356,7 +356,7 @@ export function specContext(s: VibeSpec, vibe: string): string {
  *  Batches of 8, every request at once. Each (seed, context, candidate) score is cached. `onBatch` fires as each batch lands.
  *  Without seeds, `description` mode: each song is judged against the vibe description itself. */
 async function listenCandidates(userId: string, cands: TrackProfile[], seeds: TrackProfile[], context: string,
-  onProgress?: (d: number, t: number) => void, onBatch?: (scores: Map<string, number>) => void, description?: string) {
+  onProgress?: (d: number, t: number) => void, onBatch?: (scores: Map<string, number>) => void, description?: string, deadline?: number) {
   const scores = new Map<string, number>();
   const unheard = new Set<string>();
   const bySeed = new Map<string, string[]>();
@@ -376,12 +376,22 @@ async function listenCandidates(userId: string, cands: TrackProfile[], seeds: Tr
   let done = 0;
   onProgress?.(0, total);
   if (scores.size) onBatch?.(scores);
-  await Promise.all(jobs.map(async (j) => {
+  const runAll = Promise.all(jobs.map(async (j) => {
+    // Past the time budget: don't start new listens — the songs are omitted, never rejected.
+    if (deadline && performance.now() > deadline) { for (const id of j.ids) unheard.add(id); return; }
     const seed = seeds.find((x) => x.id === j.seed);
     const body = seed ? { seed: earSeed(seed), ids: j.ids, context: ctx } : { description: description ?? context, ids: j.ids };
     const call = () => supabase.functions.invoke("vibe-listen", { body });
     let { data, error } = await call();
-    if (error || data?.error) ({ data, error } = await call()); // one retry for a busy moment
+    if (error || data?.error) {
+      const msg = `${error?.message ?? ""} ${data?.error ?? ""}`;
+      const retryable = /429|5\d\d|rate|timeout|busy/i.test(msg);
+      const wait = 1200 + Math.random() * 1200;
+      if (retryable && (!deadline || performance.now() + wait < deadline)) {
+        await new Promise((r) => setTimeout(r, wait)); // bounded backoff, never immediate
+        ({ data, error } = await call());
+      }
+    }
     if (error || data?.error) { for (const id of j.ids) unheard.add(id); return; } // falls back to the text review
     for (const id of data.unheard ?? []) unheard.add(id);
     const rows = (data.results ?? []).map((r: any) => { scores.set(r.id, r.score); return { user_id: userId, vibe_key: keyOf(j.seed), spotify_track_id: r.id, score: r.score }; });
@@ -389,6 +399,11 @@ async function listenCandidates(userId: string, cands: TrackProfile[], seeds: Tr
     done += j.ids.length; onProgress?.(done, total);
     onBatch?.(scores);
   }));
+  if (deadline) {
+    // Hard budget: when time runs out, whatever hasn't landed is omitted (not rejected).
+    await Promise.race([runAll, new Promise((r) => setTimeout(r, Math.max(0, deadline - performance.now())))]);
+    for (const j of jobs) for (const id of j.ids) if (!scores.has(id)) unheard.add(id);
+  } else await runAll;
   return { scores, unheard };
 }
 
