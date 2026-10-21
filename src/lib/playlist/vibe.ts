@@ -279,11 +279,18 @@ async function scoreCandidates(userId: string, vibe: string, cands: TrackProfile
   onProgress?.(0, todo.length);
   const batches: TrackProfile[][] = [];
   for (let i = 0; i < todo.length; i += SELECT_BATCH) batches.push(todo.slice(i, i + SELECT_BATCH));
+  let failed = 0;
   await Promise.all(batches.map(async (batch) => {
-    const { data, error } = await supabase.functions.invoke("vibe-select", {
+    const call = () => supabase.functions.invoke("vibe-select", {
       body: { vibe, tracks: batch.map(brief), seeds: seeds.map(seedProfile) },
     });
-    if (error || data?.error) throw new Error(data?.error ?? error?.message ?? "The AI review failed.");
+    let { data, error } = await call();
+    if (error || data?.error) {
+      // One retry before giving up on the batch; its songs are omitted, never rejected.
+      await new Promise((r) => setTimeout(r, 1200 + Math.random() * 1200));
+      ({ data, error } = await call());
+    }
+    if (error || data?.error) { failed += batch.length; return; }
     const rows = [];
     for (const r of data.results ?? []) {
       scores.set(r.id, r.score);
@@ -293,6 +300,7 @@ async function scoreCandidates(userId: string, vibe: string, cands: TrackProfile
     done += batch.length;
     onProgress?.(done, todo.length);
   }));
+  if (todo.length && failed === todo.length) throw new Error("The AI review failed.");
   return scores;
 }
 
