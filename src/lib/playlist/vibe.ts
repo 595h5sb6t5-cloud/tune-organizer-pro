@@ -510,7 +510,8 @@ export async function buildVibePlaylist(
   const readRecipe = () => readVibeSpec(userId, vibe, seeds, opts.corrections ?? []);
 
   if (!seeds.length) {
-    const spec = opts.presetSpec ?? await readRecipe();
+    const spec0 = opts.presetSpec ?? await readRecipe();
+    const spec = { ...spec0, name: spec0.name || "New Sounds" };
     lap("recipe");
     if (spec.clarify) return finish({ spec, lang: "en", tracks: [], candidates: 0, approved: 0, clarify: spec.clarify });
     onStep("Finding songs that feel the same");
