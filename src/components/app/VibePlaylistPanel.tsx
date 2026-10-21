@@ -1,5 +1,5 @@
 import { spotifyPausedMessage } from "@/lib/spotify-paused";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, Check, X, ExternalLink, Sparkles } from "lucide-react";
 import AnalysisNote from "@/components/app/AnalysisNote";
 import { Button } from "@/components/ui/button";
@@ -10,7 +10,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { buildProfiles, type TrackProfile } from "@/lib/playlist/features";
 import { enrichWithAI } from "@/lib/playlist/ai";
 import { sequence } from "@/lib/playlist/organize";
-import { buildVibePlaylist } from "@/lib/playlist/vibe";
+import { buildVibePlaylist, readVibeSpec, type VibeSpec, type SpecCorrection } from "@/lib/playlist/vibe";
 import { recordRemoval } from "@/lib/playlist/feedback";
 import EditSoundDialog from "@/components/app/EditSoundDialog";
 import { loadLikedTracks, loadArtistGenres } from "@/components/app/OrganizeLibraryPanel";
@@ -24,6 +24,32 @@ const LANG_LABEL: Record<string, string> = {
 };
 
 type Step = { label: string; done?: number; total?: number };
+
+const QUICK_CHIPS = ["Sunset", "Late night", "Instrumental", "Background talk", "Inspirational", "Focus", "Pregame", "Rainy day"];
+const VOCAL_LABEL: Record<string, string> = { none: "No vocals", sparse: "Few vocals", soft: "Soft vocals", lead: "Lead vocals", any: "Any vocals" };
+const LISTEN_LABEL: Record<string, string> = { background: "Background", focused: "Focused", any: "Any listening" };
+const MOMENT_LABEL: Record<string, string> = { sunrise: "Sunrise", day: "Day", "golden-hour-sunset": "Golden hour", night: "Night", "late-night": "Late night", any: "Any moment" };
+
+const normPhrase = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
+
+async function loadCorrections(userId: string): Promise<SpecCorrection[]> {
+  const { data } = await supabase.from("vibe_spec_corrections").select("phrase, spec").eq("user_id", userId)
+    .order("created_at", { ascending: false }).limit(20);
+  return (data ?? []).map((r) => ({ phrase: r.phrase, spec: r.spec as Partial<VibeSpec> }));
+}
+
+/** Saves the user's edit to "Lo que entendí" so the next similar phrase is interpreted the same way. */
+async function saveCorrection(userId: string, phrase: string, spec: VibeSpec) {
+  const sub: Partial<VibeSpec> = {
+    vocals: spec.vocals ?? "any", listening: spec.listening ?? "any", moment: spec.moment ?? "any",
+    energy_min: spec.energy_min, energy_max: spec.energy_max,
+    warmth_min: spec.warmth_min ?? 0, warmth_max: spec.warmth_max ?? 1,
+    feelings_allowed: spec.feelings_allowed ?? [],
+    instruments_preferred: spec.instruments_preferred ?? [],
+    instruments_excluded: spec.instruments_excluded ?? [],
+  };
+  await supabase.from("vibe_spec_corrections").upsert({ user_id: userId, phrase: normPhrase(phrase), spec: sub as any }, { onConflict: "user_id,phrase" });
+}
 
 export default function VibePlaylistPanel() {
   const { user } = useAuth();
@@ -41,6 +67,9 @@ export default function VibePlaylistPanel() {
   const [seeds, setSeeds] = useState<SeedMatch[]>([]);
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
   const [artistSeed, setArtistSeed] = useState<{ name: string; tracks: SpotifyTrack[] } | null>(null);
+  const [understood, setUnderstood] = useState<{ phrase: string; spec: VibeSpec } | null>(null);
+  const [clarify, setClarify] = useState<{ question: string; options: string[] } | null>(null);
+  const runRef = useRef(0);
 
   useEffect(() => {
     if (user) loadLikedTracks(user.id).then(setLiked).catch(() => setLiked([]));
@@ -143,22 +172,90 @@ export default function VibePlaylistPanel() {
     );
   }
 
-  async function create() {
+  async function create(opts: { spec?: VibeSpec; text?: string; answered?: boolean } = {}) {
     if (!user || !canCreate) return;
-    setError(null); setTracks(null); setSavedUrl(null);
+    const run = ++runRef.current;
+    setError(null); setTracks(null); setSavedUrl(null); setClarify(null);
     try {
       const p = await getProfiles();
+      if (runRef.current !== run) return;
       const seedProfiles = seeds.map((s) => p.find((x) => x.id === s.track.id)).filter((x): x is TrackProfile => !!x);
-      const words = seeds.length ? keywords : vibe.trim();
-      const res = await buildVibePlaylist(user.id, words, p, lang, (label, done, total) => setStep({ label, done, total }), seedProfiles, artistSeed?.name,
-        (live) => setTracks(live));
+      const words = opts.text ?? (seeds.length ? keywords : vibe.trim());
+      let preset = opts.spec;
+      let corrections: SpecCorrection[] = [];
+      if (words && !preset) {
+        setStep({ label: "Reading the vibe" });
+        corrections = await loadCorrections(user.id);
+        const spec = await readVibeSpec(user.id, words, seedProfiles, corrections);
+        if (runRef.current !== run) return;
+        // Ambiguous description without a seed: ask ONE quick question instead of guessing.
+        // Once the user answered (opts.answered), never ask again — build with the answer.
+        if (spec.clarify && !seedProfiles.length && !opts.answered) { setClarify(spec.clarify); setStep(null); return; }
+        setUnderstood({ phrase: words, spec });
+        preset = { ...spec, clarify: null };
+      }
+      const res = await buildVibePlaylist(user.id, words, p, lang,
+        (label, done, total) => { if (runRef.current === run) setStep({ label, done, total }); },
+        seedProfiles, artistSeed?.name,
+        (live) => { if (runRef.current === run) setTracks(live); },
+        { presetSpec: preset, corrections });
+      if (runRef.current !== run) return;
       setName(res.spec.name);
       setTracks(res.tracks);
+      if (res.clarify) setClarify(res.clarify);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Something went wrong.");
+      if (runRef.current === run) setError(e instanceof Error ? e.message : "Something went wrong.");
     } finally {
-      setStep(null);
+      if (runRef.current === run) setStep(null);
     }
+  }
+
+  /** Edit or remove a chip from "Lo que entendí": saves the correction and rebuilds with the new recipe. */
+  function editSpec(key: string, value: string | null) {
+    if (!understood || !user) return;
+    const s = { ...understood.spec };
+    if (key === "vocals") s.vocals = (value as VibeSpec["vocals"]) ?? "any";
+    else if (key === "listening") s.listening = (value as VibeSpec["listening"]) ?? "any";
+    else if (key === "moment") s.moment = (value as VibeSpec["moment"]) ?? "any";
+    else if (key === "energy") { s.energy_min = 0; s.energy_max = 1; }
+    else if (key === "warmth") { s.warmth_min = 0; s.warmth_max = 1; }
+    else if (key === "feelings") s.feelings_allowed = [];
+    else if (key === "instruments_preferred") s.instruments_preferred = [];
+    else if (key === "instruments_excluded") s.instruments_excluded = [];
+    setUnderstood({ phrase: understood.phrase, spec: s });
+    void saveCorrection(user.id, understood.phrase, s);
+    void create({ spec: s });
+  }
+
+  function understoodChips(spec: VibeSpec) {
+    const eMid = (spec.energy_min + spec.energy_max) / 2;
+    const wMid = ((spec.warmth_min ?? 0) + (spec.warmth_max ?? 1)) / 2;
+    const chipSelect = (key: string, value: string, labels: Record<string, string>) => (
+      <select key={key} value={value} onChange={(e) => editSpec(key, e.target.value)} aria-label={key}
+        className="h-7 rounded-full border border-border/60 bg-muted/40 px-2 text-xs">
+        {Object.entries(labels).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+      </select>
+    );
+    const chipX = (key: string, label: string) => (
+      <span key={key} className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-muted/40 px-2.5 py-1 text-xs">
+        {label}
+        <button type="button" aria-label={`Remove ${label}`} onClick={() => editSpec(key, null)} className="text-muted-foreground hover:text-foreground">
+          <X className="w-3 h-3" />
+        </button>
+      </span>
+    );
+    return [
+      spec.vocals && spec.vocals !== "any" ? chipSelect("vocals", spec.vocals, VOCAL_LABEL) : null,
+      spec.listening && spec.listening !== "any" ? chipSelect("listening", spec.listening, LISTEN_LABEL) : null,
+      spec.moment && spec.moment !== "any" ? chipSelect("moment", spec.moment, MOMENT_LABEL) : null,
+      spec.energy_min > 0.05 || spec.energy_max < 0.95
+        ? chipX("energy", eMid < 0.35 ? "Low energy" : eMid < 0.65 ? "Mid energy" : "High energy") : null,
+      (spec.warmth_min ?? 0) > 0.05 || (spec.warmth_max ?? 1) < 0.95
+        ? chipX("warmth", wMid >= 0.5 ? "Warm" : "Cold / dark") : null,
+      spec.feelings_allowed?.length ? chipX("feelings", `Feels: ${spec.feelings_allowed.join(", ")}`) : null,
+      spec.instruments_preferred?.length ? chipX("instruments_preferred", `With: ${spec.instruments_preferred.join(", ")}`) : null,
+      spec.instruments_excluded?.length ? chipX("instruments_excluded", `Without: ${spec.instruments_excluded.join(", ")}`) : null,
+    ];
   }
 
   async function save() {
@@ -196,11 +293,39 @@ export default function VibePlaylistPanel() {
       <div className="rounded-3xl border border-border/50 bg-card/40 p-6 space-y-4">
         <Input
           value={vibe}
-          onChange={(e) => setVibe(e.target.value.slice(0, 300))}
-          placeholder="late night drives, chill, forms of love & me"
+          onChange={(e) => { setVibe(e.target.value.slice(0, 300)); setUnderstood(null); setClarify(null); }}
+          placeholder="chill platica buena, full instrumental sunset, late night drive…"
           aria-label="Vibe keywords"
           onKeyDown={(e) => e.key === "Enter" && !step && create()}
         />
+        <div className="flex flex-wrap gap-2">
+          {QUICK_CHIPS.map((c) => (
+            <button key={c} type="button"
+              onClick={() => { setVibe((v) => (v.trim() ? `${v.trim()}, ${c.toLowerCase()}` : c.toLowerCase()).slice(0, 300)); setUnderstood(null); setClarify(null); }}
+              className="rounded-full border border-border/60 bg-muted/30 px-3 py-1 text-xs text-muted-foreground hover:text-foreground hover:border-border">
+              {c}
+            </button>
+          ))}
+        </div>
+        {clarify && (
+          <div className="rounded-xl border border-border/60 bg-muted/30 p-4 space-y-3">
+            <p className="text-sm font-medium">{clarify.question}</p>
+            <div className="flex flex-wrap gap-2">
+              {clarify.options.map((o) => (
+                <Button key={o} variant="outline" size="sm"
+                  onClick={() => { const text = `${vibe.trim()} ${o}`.slice(0, 300); setVibe(text); setClarify(null); void create({ text, answered: true }); }}>
+                  {o}
+                </Button>
+              ))}
+            </div>
+          </div>
+        )}
+        {understood && !clarify && (
+          <div className="space-y-2">
+            <p className="text-xs uppercase tracking-[0.15em] text-muted-foreground">Lo que entendí</p>
+            <div className="flex flex-wrap items-center gap-2">{understoodChips(understood.spec)}</div>
+          </div>
+        )}
         {matches.length > 0 && (
           <ul className="rounded-xl border border-border/50 divide-y divide-border/40" aria-label="Songs from your Liked Songs">
             {matches.map((m) => (
@@ -270,7 +395,7 @@ export default function VibePlaylistPanel() {
             <option value="auto">Auto</option>
             {langs.map((l) => <option key={l} value={l}>{LANG_LABEL[l]}</option>)}
           </select>
-          <Button variant="hero" onClick={create} disabled={!!step || !canCreate}>
+          <Button variant="hero" onClick={() => create()} disabled={!!step || !canCreate}>
             {step ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
             Create playlist
           </Button>
