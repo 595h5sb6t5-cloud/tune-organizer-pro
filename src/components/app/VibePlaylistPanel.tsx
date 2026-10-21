@@ -177,6 +177,10 @@ export default function VibePlaylistPanel() {
     if (!user || !canCreate) return;
     const run = ++runRef.current;
     setError(null); setTracks(null); setSavedUrl(null); setClarify(null);
+    // The vibe has priority: pause background analysis (moments, audio) while it builds.
+    const pauseBg = () => { void supabase.from("background_control").upsert({ id: 1, paused_until: new Date(Date.now() + 90_000).toISOString(), reason: "vibe", updated_at: new Date().toISOString() }).then(() => {}); };
+    pauseBg();
+    const bgTimer = setInterval(pauseBg, 30_000);
     try {
       const p = await getProfiles();
       if (runRef.current !== run) return;
@@ -207,6 +211,9 @@ export default function VibePlaylistPanel() {
     } catch (e) {
       if (runRef.current === run) setError(e instanceof Error ? e.message : "Something went wrong.");
     } finally {
+      clearInterval(bgTimer);
+      // Release the background pause so tagging and audio analysis resume.
+      void supabase.from("background_control").update({ paused_until: null, updated_at: new Date().toISOString() }).eq("id", 1).then(() => {});
       if (runRef.current === run) setStep(null);
     }
   }
