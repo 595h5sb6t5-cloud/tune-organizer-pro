@@ -593,6 +593,9 @@ export async function buildVibePlaylist(
     const late = top.filter((t) => !ear.has(t.id) && !text.has(t.id) && unheard.has(t.id));
     const text2 = late.length && performance.now() < deadline ? await scoreCandidates(userId, ctx, late, []) : new Map<string, number>();
     const scores = new Map([...text, ...text2, ...ear]);
+    // Songs without stored audio (omitted, never rejected) go to the background analysis queue.
+    const toQueue = [...new Set([...noClip.map((t) => t.id), ...unheard])].slice(0, 30);
+    if (toQueue.length) void supabase.functions.invoke("audio-analyze", { body: { ids: toQueue } }).catch(() => null);
     // Strict ear: only 8 or more gets in (no 7-fill without a seed).
     const pool = top.filter((t) => (scores.get(t.id) ?? 0) >= MIN_SCORE);
     const approved = pool.length;
@@ -652,6 +655,9 @@ export async function buildVibePlaylist(
   const late = top.filter((t) => !ear.has(t.id) && !text.has(t.id) && unheard.has(t.id));
   const text2 = late.length && performance.now() < deadline ? await scoreCandidates(userId, vibe, late, seeds) : new Map<string, number>();
   const scores = new Map([...text, ...text2, ...ear]);
+  // Songs without stored audio (omitted, never rejected) go to the background analysis queue.
+  const toQueue = [...new Set([...noClip.map((t) => t.id), ...unheard])].slice(0, 30);
+  if (toQueue.length) void supabase.functions.invoke("audio-analyze", { body: { ids: toQueue } }).catch(() => null);
   const pool = top.filter((t) => admits(t, scores.get(t.id) ?? 0));
   lap("listen");
 
