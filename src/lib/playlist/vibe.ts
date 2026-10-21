@@ -36,6 +36,7 @@ export interface VibeResult {
   approved: number;
   eights?: number;
   sevens?: number;
+  clarify?: { question: string; options: string[] } | null;
 }
 
 const E_TOL = 0.08;
@@ -206,6 +207,31 @@ export function filterCandidates(profiles: TrackProfile[], spec: VibeSpec, langC
 }
 
 const vibeKey = (v: string) => v.toLowerCase().replace(/\s+/g, " ").trim();
+
+/** A past user correction to the interpretation of a phrase. */
+export interface SpecCorrection { phrase: string; spec: Partial<VibeSpec> }
+
+const seedBodyOf = (seeds: TrackProfile[]) => seeds.map((t) => ({
+  name: t.name, artists: t.artists, year: t.year, genres: t.genres.slice(0, 6), lang: t.lang,
+  energy: t.energy, valence: t.valence, danceability: t.danceability, tempo: t.tempo, mood: t.mood,
+  style: t.style ?? null, scene: t.scene ?? null, instruments: t.instruments ?? [], feeling: t.feeling ?? null, feeling_2: t.feeling2 ?? null, arc: t.arc ?? null, melodic_focus: t.melodicFocus ?? null,
+}));
+
+/** Reads the vibe into a recipe: cache first, then vibe-spec (with the user's past corrections). An exact-phrase correction wins. */
+export async function readVibeSpec(userId: string, vibe: string, seeds: TrackProfile[], corrections: SpecCorrection[] = []): Promise<VibeSpec> {
+  const specKey = "s2|" + vibeKey(vibe) + "|" + seeds.map((x) => `${x.id}~${x.feeling ?? ""}~${x.feeling2 ?? ""}~${x.arc ?? ""}~${x.scene ?? ""}`).join(",");
+  const { data: cached } = await supabase.from("vibe_spec_cache").select("spec").eq("user_id", userId).eq("spec_key", specKey).maybeSingle();
+  let raw = cached?.spec as unknown as VibeSpec | undefined;
+  if (!raw) {
+    const { data, error } = await supabase.functions.invoke("vibe-spec", { body: { vibe, seeds: seedBodyOf(seeds), corrections: corrections.slice(0, 10) } });
+    if (error || data?.error) throw new Error(data?.error ?? error?.message ?? "Couldn't read the vibe.");
+    raw = data as VibeSpec;
+    supabase.from("vibe_spec_cache").upsert({ user_id: userId, spec_key: specKey, spec: raw as any }, { onConflict: "user_id,spec_key" }).then(() => {});
+  }
+  const normalized = normalizeSpec({ ...raw }, vibe, seeds.length > 0);
+  const exact = corrections.find((c) => vibeKey(c.phrase) === vibeKey(vibe));
+  return exact ? { ...normalized, ...exact.spec, name: normalized.name, clarify: null } : normalized;
+}
 
 /** Step 3: AI review with per-(vibe, song) cache. */
 const r2 = (x: number | null) => (x === null ? null : Math.round(x * 100) / 100);
