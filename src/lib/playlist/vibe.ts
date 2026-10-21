@@ -2,7 +2,7 @@
 // Never fills with songs that failed a filter.
 import { supabase } from "@/integrations/supabase/client";
 import type { Lang, Mood, TrackProfile } from "./features";
-import { compatibility, sequence, isDance, sameOrNeighborStyle, MOOD_NEIGHBORS, melodicKin, feelingScore, feelingNeighbors, soundMatch } from "./organize";
+import { compatibility, sequence, isDance, sameOrNeighborStyle, MOOD_NEIGHBORS, melodicKin, feelingScore, feelingNeighbors, soundMatch, FEELING_NAMES } from "./organize";
 import { ensureSeedFeeling, ensureSeedAudio } from "./ai";
 
 export interface VibeSpec {
@@ -37,6 +37,7 @@ export interface VibeResult {
   eights?: number;
   sevens?: number;
   clarify?: { question: string; options: string[] } | null;
+  funnel?: { total: number; hard: number; inLang: number; listened: number };
 }
 
 const E_TOL = 0.08;
@@ -84,6 +85,12 @@ function distance(t: TrackProfile, s: VibeSpec): number {
   d += rangeD(t.melodicFocus, s.melodic_focus_min, s.melodic_focus_max, 1.5);
   if (s.instruments_preferred?.length && t.instruments.length)
     d += t.instruments.some((i) => s.instruments_preferred!.includes(i)) ? -0.2 : 0.1;
+  // Feelings rank candidates too (they never discard: only vocals, excluded instruments and language do).
+  if (s.feelings_allowed?.length) {
+    const own = [t.feeling, t.feeling2].filter(Boolean) as string[];
+    if (own.length) d += own.some((f) => s.feelings_allowed!.includes(f)) ? -0.3
+      : own.some((f) => s.feelings_allowed!.some((a) => feelingNeighbors(a, f))) ? -0.1 : 0.3;
+  }
   return d;
 }
 
@@ -191,8 +198,9 @@ export function filterCandidates(profiles: TrackProfile[], spec: VibeSpec, langC
         .sort((a, b) => (b.c + preferenceBonus(b.t, spec)) - (a.c + preferenceBonus(a.t, spec))).map((x) => x.t)
     : list.map((t) => ({ t, d: distance(t, spec) })).sort((a, b) => a.d - b.d).map((x) => x.t);
 
-  // Seeds: mood/era/tempo are preferences only. Without seeds they start as filters.
-  const active = new Set<Soft>(seeds.length ? [] : RELAX_ORDER);
+  // Only the clear rules discard (vocals = none, excluded instruments, language — all in
+  // passesHardRules). Mood, feeling, era and tempo only RANK the candidates (distance()).
+  const active = new Set<Soft>();
   let candidates = rank(inLang.filter((t) => passesSoft(t, spec, active)));
   const relaxed: Soft[] = [];
   // Plan B: too few candidates but enough compatible songs → relax mood, then era, then tempo.
@@ -203,7 +211,8 @@ export function filterCandidates(profiles: TrackProfile[], spec: VibeSpec, langC
     active.delete(r); relaxed.push(r);
     candidates = rank(inLang.filter((t) => passesSoft(t, spec, active)));
   }
-  return { lang, candidates: candidates.slice(0, seedRank ? MAX_CANDIDATES * 2 : MAX_CANDIDATES), relaxed };
+  return { lang, candidates: candidates.slice(0, seedRank ? MAX_CANDIDATES * 2 : MAX_CANDIDATES), relaxed,
+    funnel: { total: profiles.length, hard: hard.length, inLang: inLang.length } };
 }
 
 const vibeKey = (v: string) => v.toLowerCase().replace(/\s+/g, " ").trim();
@@ -278,7 +287,8 @@ async function scoreCandidates(userId: string, vibe: string, cands: TrackProfile
 }
 
 const LISTEN_TOP = 40;
-const LISTEN_BATCH = 8; // 5 requests for 40 songs, all at once
+const LISTEN_TOP_NOSEED = 80; // wide net for text-only vibes: 10 batches of 8, all at once
+const LISTEN_BATCH = 8;
 
 const near = (x: number | null | undefined, y: number | null | undefined, tol = 0.35) =>
   x == null || y == null ? null : Math.max(0, 1 - Math.abs(x - y) / tol);
@@ -409,7 +419,7 @@ export function selectVibeTracks(cands: TrackProfile[], scores: Map<string, numb
   let picked = top.slice(0, room);
   let sevens: TrackProfile[] = [];
   const target = Math.min(FILL_TARGET, MAX_TRACKS) - seeds.length;
-  if (picked.length < target) {
+  if (picked.length < target && seeds.length) { // 7-fill only for seeded vibes; text vibes stay strict (8+)
     const base = picked;
     const rank = (t: TrackProfile) => seeds.length ? seedFitOf(t, seeds)
       : base.length ? base.reduce((a, o) => a + compatibility(t, o), 0) / base.length : 0;
@@ -445,13 +455,11 @@ async function removedForSeeds(userId: string, seeds: TrackProfile[]): Promise<S
 
 export type VibeTimings = Record<"seed" | "recipe" | "filter" | "select" | "listen" | "order" | "name" | "first" | "total", number>;
 
-const cap = (s: string) => s.replace(/(^|[\s-])\w/g, (m) => m.toUpperCase());
-/** Local name when there are no keywords (no recipe is asked for). */
+/** Local name when there are no keywords (no recipe is asked for): evocative, never the genre. */
 export const seedName = (seeds: TrackProfile[]) => {
-  const s = seeds[0];
-  const feel = s?.feeling ? cap(s.feeling.replace(/-/g, " ")) : "";
-  const style = s?.style ? cap(s.style.replace(/-/g, " ")) : "Sound";
-  return `${feel} ${style}`.trim();
+  const f = seeds[0]?.feeling;
+  const pool = f ? FEELING_NAMES[f] : null;
+  return pool?.[0] ?? "New Sounds";
 };
 
 /** Seeds only: the listening net needs no recipe — energy around the seeds, nothing else. */
@@ -506,12 +514,12 @@ export async function buildVibePlaylist(
     if (spec.clarify) return finish({ spec, lang: "en", tracks: [], candidates: 0, approved: 0, clarify: spec.clarify });
     onStep("Finding songs that feel the same");
     fitPool = [];
-    const { lang, candidates } = filterCandidates(profiles, spec, langChoice, []);
+    const { lang, candidates, funnel } = filterCandidates(profiles, spec, langChoice, []);
     lap("filter");
-    if (!candidates.length) return finish({ spec, lang, tracks: [], candidates: 0, approved: 0 });
+    if (!candidates.length) return finish({ spec, lang, tracks: [], candidates: 0, approved: 0, funnel: { ...funnel, listened: 0 } });
     // The ear judges against the full interpretation; songs without a clip keep the text review.
     const ctx = specContext(spec, vibe);
-    const top = candidates.slice(0, LISTEN_TOP);
+    const top = candidates.slice(0, LISTEN_TOP_NOSEED);
     const withClip = top.filter((t) => t.audioSource !== "none");
     const noClip = top.filter((t) => t.audioSource === "none");
     onStep("Listening to the songs");
@@ -529,13 +537,15 @@ export async function buildVibePlaylist(
     const late = top.filter((t) => !ear.has(t.id) && !text.has(t.id) && unheard.has(t.id));
     const text2 = late.length ? await scoreCandidates(userId, ctx, late, []) : new Map<string, number>();
     const scores = new Map([...text, ...text2, ...ear]);
-    const pool = top.filter((t) => (scores.get(t.id) ?? 0) >= FILL_SCORE);
-    const approved = top.filter((t) => (scores.get(t.id) ?? 0) >= MIN_SCORE).length;
+    // Strict ear: only 8 or more gets in (no 7-fill without a seed).
+    const pool = top.filter((t) => (scores.get(t.id) ?? 0) >= MIN_SCORE);
+    const approved = pool.length;
     lap("listen");
     onStep("Putting them in order");
     const sel = selectVibeTracks(pool, scores, []);
     lap("order");
-    return finish({ spec, lang, tracks: sel.tracks, candidates: candidates.length, approved, eights: sel.eights, sevens: sel.sevens });
+    return finish({ spec, lang, tracks: sel.tracks, candidates: candidates.length, approved, eights: sel.eights, sevens: sel.sevens,
+      funnel: { ...funnel, listened: top.length } });
   }
 
   // With seeds — "wide net, strict ear".

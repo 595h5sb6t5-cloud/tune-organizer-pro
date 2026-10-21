@@ -2630,15 +2630,18 @@ export type Database = {
           confidence: number | null
           groove: string | null
           instruments: string[] | null
+          lyric_theme: string | null
           melodic_focus: number | null
           model: string | null
           percussive_drive: number | null
           piano: boolean | null
+          production_era: string | null
           scale: number | null
           section: string | null
           source: string
           spotify_track_id: string
           texture: number | null
+          vocal_style: string | null
           warmth: number | null
         }
         Insert: {
@@ -2646,15 +2649,18 @@ export type Database = {
           confidence?: number | null
           groove?: string | null
           instruments?: string[] | null
+          lyric_theme?: string | null
           melodic_focus?: number | null
           model?: string | null
           percussive_drive?: number | null
           piano?: boolean | null
+          production_era?: string | null
           scale?: number | null
           section?: string | null
           source: string
           spotify_track_id: string
           texture?: number | null
+          vocal_style?: string | null
           warmth?: number | null
         }
         Update: {
@@ -2662,15 +2668,18 @@ export type Database = {
           confidence?: number | null
           groove?: string | null
           instruments?: string[] | null
+          lyric_theme?: string | null
           melodic_focus?: number | null
           model?: string | null
           percussive_drive?: number | null
           piano?: boolean | null
+          production_era?: string | null
           scale?: number | null
           section?: string | null
           source?: string
           spotify_track_id?: string
           texture?: number | null
+          vocal_style?: string | null
           warmth?: number | null
         }
         Relationships: []

@@ -6,6 +6,7 @@ import { buildProfiles } from "./features";
 import { enrichWithAI } from "./ai";
 import { organizeLibrary, curateLibrary, type PlaylistDraft } from "./organize";
 import { askCurator } from "./curate";
+import { earCheckPlaylists } from "./earcheck";
 import { loadLikedTracks, loadArtistGenres } from "@/components/app/OrganizeLibraryPanel";
 import type { TrackProfile } from "./features";
 
@@ -62,11 +63,17 @@ async function takeLease(userId: string): Promise<boolean> {
 }
 
 /** Builds and saves the set. Only analyzed songs take part, so early sets are already coherent. */
-export async function buildAndSave(userId: string, signal: number): Promise<PrebuiltSet> {
+export async function buildAndSave(userId: string, signal: number, onProgress?: (label: string, done?: number, total?: number) => void): Promise<PrebuiltSet> {
+  const t0 = performance.now();
   const tracks = await loadLikedTracks(userId);
   const genres = await loadArtistGenres(tracks.flatMap((t) => t.artists.map((a) => a.id)), () => {});
   const profiles = (await enrichWithAI(buildProfiles(tracks, genres))).filter((p) => !!p.style);
-  const result = await curateLibrary(organizeLibrary(profiles), (t) => askCurator(t), () => {});
+  const curated = await curateLibrary(organizeLibrary(profiles), (t) => askCurator(t), () => {});
+  // The ear: Gemini hears every playlist against its anchors; only 8+ stays.
+  onProgress?.("Listening to the playlists", 0, 0);
+  const heard = await earCheckPlaylists(userId, curated.playlists, (d, t) => onProgress?.("Listening to the playlists", d, t));
+  const result = { playlists: heard.playlists, unsorted: [...curated.unsorted, ...heard.rejected] };
+  console.info(`[prebuild] ${result.playlists.length} playlists, ${result.unsorted.length} not placed, ear listened to ${heard.listened} songs in ${Math.round(performance.now() - t0)}ms`);
   const row = {
     playlists: result.playlists as any, unsorted: result.unsorted as any, analyzed_count: signal,
     status: "ready", lease_until: null, built_at: new Date().toISOString(), error: null, updated_at: new Date().toISOString(),
