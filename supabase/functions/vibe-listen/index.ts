@@ -35,8 +35,9 @@ Deno.serve(async (req) => {
     const str = (a: unknown, n: number) => Array.isArray(a) ? a.filter((x) => typeof x === "string").slice(0, n) as string[] : [];
     const ids = str(body?.ids, 8);
     const seed = body?.seed && typeof body.seed === "object" ? body.seed : null;
+    const description = typeof body?.description === "string" ? body.description.trim().slice(0, 400) : "";
     const context = typeof body?.context === "string" ? body.context.trim().slice(0, 120) : "";
-    if (!seed || !ids.length) return json({ error: "Send a seed profile and 1–8 songs." }, 400);
+    if ((!seed && !description) || !ids.length) return json({ error: "Send a seed profile or a description, and 1–8 songs." }, 400);
 
     const { data: rows } = await admin.from("liked_songs").select("spotify_track_id, isrc, track_name, artist_name")
       .eq("user_id", user.id).in("spotify_track_id", ids);
