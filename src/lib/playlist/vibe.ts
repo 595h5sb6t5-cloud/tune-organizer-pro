@@ -3,6 +3,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import type { Lang, Mood, TrackProfile } from "./features";
 import { compatibility, sequence, isDance, sameOrNeighborStyle, MOOD_NEIGHBORS, melodicKin, feelingScore, feelingNeighbors, soundMatch, FEELING_NAMES, isCleanName } from "./organize";
+import { MOMENT_LABEL } from "./moments";
 import { ensureSeedFeeling, ensureSeedAudio } from "./ai";
 
 export interface VibeSpec {
@@ -18,6 +19,7 @@ export interface VibeSpec {
   vocals?: "none" | "sparse" | "soft" | "lead" | "any" | null;
   listening?: "background" | "focused" | "any" | null;
   moment?: "sunrise" | "day" | "golden-hour-sunset" | "night" | "late-night" | "any" | null;
+  moments?: string[]; // up to 3 ranked life moments from the official 30-moment list
   instruments_preferred?: string[];
   instruments_excluded?: string[];
   warmth_min?: number | null; warmth_max?: number | null;
@@ -90,6 +92,11 @@ function distance(t: TrackProfile, s: VibeSpec): number {
     const own = [t.feeling, t.feeling2].filter(Boolean) as string[];
     if (own.length) d += own.some((f) => s.feelings_allowed!.includes(f)) ? -0.3
       : own.some((f) => s.feelings_allowed!.some((a) => feelingNeighbors(a, f))) ? -0.1 : 0.3;
+  }
+  // Life moments rank candidates too (they never discard).
+  if (s.moments?.length && t.moments?.length) {
+    const hit = t.moments.some((m) => s.moments!.includes(m.m) && m.s >= 0.5);
+    d += hit ? -0.35 : 0.2;
   }
   return d;
 }
@@ -186,7 +193,8 @@ export function filterCandidates(profiles: TrackProfile[], spec: VibeSpec, langC
   else if (spec.language) lang = spec.language;
   else lang = topLang(hard, "en");
   const langOk = (t: TrackProfile) =>
-    langFree || t.lang === lang || (isDance(t) && seeds.some((x) => isDance(x) && sameOrNeighborStyle(x.style, t.style)));
+    langFree || t.lang === lang || t.lang === "instrumental" || // instrumentals join any language
+    (isDance(t) && seeds.some((x) => isDance(x) && sameOrNeighborStyle(x.style, t.style)));
   const inLang = hard.filter(langOk);
 
   // Artist as seed: its 3 songs span its sound, so a song only needs to fit one of them.
