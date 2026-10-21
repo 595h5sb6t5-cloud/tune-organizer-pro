@@ -133,16 +133,11 @@ export async function earCheckPlaylists(
   const kept: PlaylistDraft[] = [];
   const rejected: TrackProfile[] = [];
   for (const x of plans) {
-    const stay = x.rest.filter((t) => {
-      const k = x.key(x.near(t));
-      const s = scores.get(`${k}|${t.id}`);
-      return s !== undefined && s >= MIN_EAR; // unheard songs (no clip) stay out of the ear's way: they keep their place
-    });
-    const noScore = x.rest.filter((t) => scores.get(`${x.key(x.near(t))}|${t.id}`) === undefined && unheard.has(t.id));
-    const out = x.rest.filter((t) => {
-      const s = scores.get(`${x.key(x.near(t))}|${t.id}`);
-      return s !== undefined && s < MIN_EAR;
-    });
+    const scored = (t: TrackProfile) => scores.get(`${x.key(x.near(t))}|${t.id}`);
+    const stay = x.rest.filter((t) => { const s = scored(t); return s !== undefined && s >= MIN_EAR; });
+    // No score (failed batch or no clip): the ear didn't reject it, so it keeps its place.
+    const noScore = x.rest.filter((t) => scored(t) === undefined);
+    const out = x.rest.filter((t) => { const s = scored(t); return s !== undefined && s < MIN_EAR; });
     rejected.push(...out);
     kept.push({ ...x.p, tracks: [...x.anchors, ...stay, ...noScore] });
   }

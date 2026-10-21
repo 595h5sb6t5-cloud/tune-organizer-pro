@@ -46,7 +46,7 @@ Deno.serve(async (req) => {
       : `"${String(s?.name ?? "").slice(0, 200)}" – ${(Array.isArray(s?.artists) ? s.artists : []).slice(0, 4).join(", ")} | año original: ${s?.year ?? "?"} | style: ${s?.style ?? "?"} | idioma: ${s?.lang ?? "?"} | families: ${(s?.families ?? []).join(", ") || "?"} | genres: ${(s?.genres ?? []).slice(0, 5).join(", ") || "?"} | energy: ${s?.energy ?? "?"} | valence: ${s?.valence ?? "?"} | tempo: ${s?.tempo ?? "?"} | mood: ${s?.mood ?? "?"} | instruments: ${(s?.instruments ?? []).join(", ") || "?"} | texture: ${s?.texture ?? "?"} | warmth: ${s?.warmth ?? "?"} | scale: ${s?.scale ?? "?"} | groove: ${s?.groove ?? "?"} | scene: ${s?.scene ?? "?"} | feeling: ${s?.feeling ?? "?"} | melodic_focus: ${s?.melodic_focus ?? "?"} | arc: ${s?.arc ?? "?"}`;
     const seeds = Array.isArray(body.seeds) ? body.seeds.slice(0, 3).map(seedStr) : [];
 
-    const keySrc = JSON.stringify({ v: 5, nameOnly, ids: tracks.map((t: any) => t.id).sort(), vibe, seeds });
+    const keySrc = JSON.stringify({ v: 6, nameOnly, ids: tracks.map((t: any) => t.id).sort(), vibe, seeds });
     const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(keySrc));
     const key = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
     const { data: cached } = await sb.from("curator_cache").select("result").eq("user_id", user.id).eq("cache_key", key).maybeSingle();

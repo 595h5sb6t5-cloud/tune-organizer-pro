@@ -473,6 +473,14 @@ export function sequence(tracks: TrackProfile[], startId?: string): TrackProfile
 // Simple, elegant names: 2–3 words that evoke a feeling or a moment — never the genre,
 // never a year, never "Vibes"/"Flow"/"Grooves"/"Mix" or middle dots.
 
+const BANNED_NAME = /\b(vibes?|flow|grooves?|mix|mixtape)\b|[·•]|\b(19|20)\d0s?\b|\b\d{2}s\b/i;
+const GENRE_WORDS = /\b(house|techno|trance|disco|rock|pop|rap|trap|hip[\s-]?hop|rnb|r&b|soul|jazz|blues|metal|punk|folk|country|reggaeton|salsa|bachata|cumbia|bossa|samba|ambient|lo[\s-]?fi|classical|soundtrack|indie|dance|electronic|afro|melodic|deep|tech|minimal|progressive|boom[\s-]?bap|corrido|banda|norteno|grupero|k[\s-]?pop|j[\s-]?pop|funk|gospel|blues|swing|dubstep|garage|drum|bass|edm|ballads?|anthems?|classics?|mainstream|conscious|dreamscape|french touch|keinemusik|afterlife|anjunadeep|innervisions|diynamic)\b/i;
+/** A curator/AI name passes only if it's clean: no banned words, genres, scenes or years. */
+export const isCleanName = (name: string) => {
+  const n = name.trim();
+  return n.length >= 3 && n.length <= 40 && !BANNED_NAME.test(n) && !GENRE_WORDS.test(n);
+};
+
 function mostCommon<T>(items: T[]): T | null {
   const counts = new Map<T, number>();
   for (const item of items) counts.set(item, (counts.get(item) ?? 0) + 1);
