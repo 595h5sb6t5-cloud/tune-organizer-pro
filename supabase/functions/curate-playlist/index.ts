@@ -14,12 +14,12 @@ EJEMPLO MALO: una playlist de house melódico/afro house (WhoMadeWho, Mochakk, R
 La instrumentación es lo que más define si una canción encaja. Dos canciones del mismo estilo pero con paletas de instrumentos distintas NO encajan. Ejemplo: con 'Forms Of Love' (house orgánico, cálido, percusión orgánica, groove relajado) NO encajan 'Dune – Moonwalk' (sintetizadores épicos y oscuros, estilo Afterlife) ni 'calvera – fyodor, Apéro' (instrumentación de jazz), aunque tengan energía y mood parecidos. Quita cualquier canción cuya paleta de instrumentos no se parezca a la de la semilla.
 Canciones de escenas distintas no encajan aunque compartan estilo, salvo que sean escenas vecinas.
 La pregunta clave es: ¿el oyente seguiría sintiendo lo mismo? Si la semilla te hace sentir inspirado por la melodía y los instrumentos, una canción de groove repetitivo rompe ese sentimiento aunque sea de la misma escena; quítala. Ejemplo: 'Forms Of Love' (piano tranquilo que crece hasta un clímax melódico e inspiracional) no encaja con house de groove percusivo.
-Quita todo lo que no pase la prueba. Es mejor una playlist de 15 canciones perfecta que una de 40 con 3 skips. El nombre debe ser corto, evocador y describir el mundo sonoro (ej. 'Velvet Soul Sundays', 'Desert Sunrise House'), sin usar 'Mix'.
+Quita todo lo que no pase la prueba. Es mejor una playlist de 15 canciones perfecta que una de 40 con 3 skips. El nombre: 2 o 3 palabras, simple y elegante, que evoque el sentimiento o el momento (ej. 'Golden Hour', 'Velvet Nights', 'Slow Sundays', 'Midnight Blue', 'Sunday Soul', 'Open Roads'). PROHIBIDO: 'Vibes', 'Flow', 'Grooves', 'Mix', puntos medios (·), nombres de géneros o escenas (house, soul, rock…), años o décadas, y títulos de canciones.
 
 Responde SOLO JSON con esta forma exacta:
 {"remove": [{"id": "<id>", "reason": "<razón corta>"}], "name": "<nombre en inglés>"}`;
 
-const NAME_SYSTEM = `Eres un curador musical. Las canciones ya fueron elegidas; NO quites ninguna. Solo ponle a la playlist un nombre corto y evocador en inglés que describa su mundo sonoro (ej. 'Velvet Soul Sundays', 'Desert Sunrise House'), sin 'Mix' y sin títulos de canciones.
+const NAME_SYSTEM = `Eres un curador musical. Las canciones ya fueron elegidas; NO quites ninguna. Solo ponle a la playlist un nombre de 2 o 3 palabras, simple y elegante, que evoque el sentimiento o el momento (ej. 'Golden Hour', 'Velvet Nights', 'Slow Sundays', 'Midnight Blue', 'Sunday Soul', 'Open Roads'). PROHIBIDO: 'Vibes', 'Flow', 'Grooves', 'Mix', puntos medios (·), nombres de géneros o escenas, años o décadas, y títulos de canciones.
 Responde SOLO JSON: {"remove": [], "name": "<nombre>"}`;
 
 Deno.serve(async (req) => {
@@ -46,7 +46,7 @@ Deno.serve(async (req) => {
       : `"${String(s?.name ?? "").slice(0, 200)}" – ${(Array.isArray(s?.artists) ? s.artists : []).slice(0, 4).join(", ")} | año original: ${s?.year ?? "?"} | style: ${s?.style ?? "?"} | idioma: ${s?.lang ?? "?"} | families: ${(s?.families ?? []).join(", ") || "?"} | genres: ${(s?.genres ?? []).slice(0, 5).join(", ") || "?"} | energy: ${s?.energy ?? "?"} | valence: ${s?.valence ?? "?"} | tempo: ${s?.tempo ?? "?"} | mood: ${s?.mood ?? "?"} | instruments: ${(s?.instruments ?? []).join(", ") || "?"} | texture: ${s?.texture ?? "?"} | warmth: ${s?.warmth ?? "?"} | scale: ${s?.scale ?? "?"} | groove: ${s?.groove ?? "?"} | scene: ${s?.scene ?? "?"} | feeling: ${s?.feeling ?? "?"} | melodic_focus: ${s?.melodic_focus ?? "?"} | arc: ${s?.arc ?? "?"}`;
     const seeds = Array.isArray(body.seeds) ? body.seeds.slice(0, 3).map(seedStr) : [];
 
-    const keySrc = JSON.stringify({ v: 5, nameOnly, ids: tracks.map((t: any) => t.id).sort(), vibe, seeds });
+    const keySrc = JSON.stringify({ v: 6, nameOnly, ids: tracks.map((t: any) => t.id).sort(), vibe, seeds });
     const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(keySrc));
     const key = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
     const { data: cached } = await sb.from("curator_cache").select("result").eq("user_id", user.id).eq("cache_key", key).maybeSingle();

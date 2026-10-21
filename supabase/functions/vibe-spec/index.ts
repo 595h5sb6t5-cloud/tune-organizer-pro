@@ -34,7 +34,7 @@ Return ONLY JSON with exactly these keys:
 - "warmth_min","warmth_max","texture_min","texture_max","percussive_drive_min","percussive_drive_max","melodic_focus_min","melodic_focus_max": numbers 0–1 (use the full 0–1 range when the description says nothing about them)
 - "feelings_allowed": array using ONLY: ${FEELINGS.join(", ")} — the feelings (main or secondary) a song may have; empty array when unspecified
 - "clarify": null, or {"question": "...", "options": ["...", "..."]} — ONLY when the description is so ambiguous that a curator could not choose a sound (e.g. "algo chido para la noche"): ONE short question in the user's language with 2–3 short answer options (e.g. "¿Para bailar o para relajarte?"). When the description is clear enough, null.
-- "name": a short, beautiful playlist name (2–5 words) that captures the vibe. Do NOT copy the keywords literally.
+- "name": 2 or 3 words, simple and elegant, evoking the feeling or the moment — never the genre (e.g. "Golden Hour", "Velvet Nights", "Slow Sundays", "Midnight Blue", "Sunday Soul", "Open Roads"). Do NOT copy the keywords literally. FORBIDDEN: "Vibes", "Flow", "Grooves", "Mix", middle dots (·), genre or scene names, years or decades, song titles.
 Examples of how to think:
 - "chill platica buena" → background, vocals sparse/soft, steady mid-low energy, warm, no drops or sudden changes.
 - "full instrumental sunset" → vocals none, warm and golden, mid energy coming down, melodic.

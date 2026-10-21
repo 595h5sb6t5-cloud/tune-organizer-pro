@@ -84,7 +84,10 @@ const SOUND_KEYS = `{"instruments":[up to 6 lowercase instruments you hear, e.g.
 "texture":0-1 (0 organic/acoustic, 1 synthetic/electronic),
 "warmth":0-1 (0 cold/dark, 1 warm/sunny),
 "scale":0-1 (0 intimate, 1 epic),
-"groove":"straight"|"swung"|"broken"|"half-time"}`;
+"groove":"straight"|"swung"|"broken"|"half-time",
+"production_era": how the PRODUCTION sounds (not the release year): "50s-60s-analog"|"70s-warm-analog"|"80s-glossy"|"90s"|"2000s"|"modern",
+"vocal_style":"none"|"soft-intimate"|"crooner"|"soulful"|"powerful-belter"|"raspy-rock"|"rap"|"choir-group",
+"lyric_theme": from any lyrics you hear: "love"|"heartbreak"|"hope"|"party"|"life-reflection"|"other"}`;
 
 export const audioPrompt = (name: string, artist: string) =>
   `Listen to this 30-second preview of "${name}" by ${artist}. Describe ONLY the SOUND you hear (not the emotion). Return JSON exactly:\n${SOUND_KEYS}`;
@@ -93,6 +96,9 @@ export const textPrompt = (name: string, artist: string) =>
 
 const c01 = (n: unknown) => { const v = Number(n); return Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : null; };
 const GROOVES = ["straight", "swung", "broken", "half-time"];
+export const PRODUCTION_ERAS = ["50s-60s-analog", "70s-warm-analog", "80s-glossy", "90s", "2000s", "modern"];
+export const VOCAL_STYLES = ["none", "soft-intimate", "crooner", "soulful", "powerful-belter", "raspy-rock", "rap", "choir-group"];
+export const LYRIC_THEMES = ["love", "heartbreak", "hope", "party", "life-reflection", "other"];
 export function cleanSound(r: any) {
   return {
     instruments: Array.isArray(r?.instruments) ? r.instruments.map((x: unknown) => String(x).toLowerCase().slice(0, 30)).slice(0, 6) : null,
@@ -100,5 +106,8 @@ export function cleanSound(r: any) {
     melodic_focus: c01(r?.melodic_focus), percussive_drive: c01(r?.percussive_drive),
     texture: c01(r?.texture), warmth: c01(r?.warmth), scale: c01(r?.scale),
     groove: GROOVES.includes(r?.groove) ? r.groove : null,
+    production_era: PRODUCTION_ERAS.includes(r?.production_era) ? r.production_era : null,
+    vocal_style: VOCAL_STYLES.includes(r?.vocal_style) ? r.vocal_style : null,
+    lyric_theme: LYRIC_THEMES.includes(r?.lyric_theme) ? r.lyric_theme : null,
   };
 }

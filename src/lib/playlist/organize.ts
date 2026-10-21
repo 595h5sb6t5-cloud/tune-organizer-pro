@@ -9,7 +9,7 @@
 // 4. Each playlist is then sequenced: smooth transitions, an energy arc
 //    (warm up → peak → cool down) and no artist twice in a row.
 
-import { FAMILY_LABEL, type Mood, type TrackProfile } from "./features";
+import { type Mood, type TrackProfile } from "./features";
 
 export interface PlaylistDraft {
   key: string;
@@ -239,6 +239,15 @@ export function melodicKin(a: TrackProfile, b: TrackProfile): boolean {
     a.energy !== null && b.energy !== null && Math.abs(a.energy - b.energy) < 0.25;
 }
 
+/** How the production SOUNDS (heard), oldest → newest. Non-adjacent eras clash hard. */
+export const PRODUCTION_ERAS = ["50s-60s-analog", "70s-warm-analog", "80s-glossy", "90s", "2000s", "modern"];
+const eraIndex = (t: TrackProfile) => t.productionEra ? PRODUCTION_ERAS.indexOf(t.productionEra) : -1;
+/** Production eras known and more than one step apart (60s analog vs. 80s glossy, 70s vs. 2000s…). */
+export const eraClash = (a: TrackProfile, b: TrackProfile) => {
+  const x = eraIndex(a), y = eraIndex(b);
+  return x >= 0 && y >= 0 && Math.abs(x - y) >= 2;
+};
+
 export function compatibility(a: TrackProfile, b: TrackProfile): number {
   if (!languagesCompatible(a, b)) return 0;
   if (warmColdClash(a, b)) return 0;
@@ -260,6 +269,8 @@ export function compatibility(a: TrackProfile, b: TrackProfile): number {
     [tempoCloseness(a.tempo, b.tempo), 0.08],
     [closeness(a.danceability, b.danceability, 0.5), 0.05],
     [a.year && b.year ? Math.max(0, 1 - Math.abs(a.year - b.year) / 15) : null, 0.18],
+    [a.vocalStyle && b.vocalStyle ? (a.vocalStyle === b.vocalStyle ? 1 : 0.4) : null, 0.06],
+    [a.lyricTheme && b.lyricTheme ? (a.lyricTheme === b.lyricTheme ? 1 : 0.5) : null, 0.05],
     [a.explicit === b.explicit ? 1 : 0.6, 0.03],
   ];
 
@@ -276,6 +287,7 @@ export function compatibility(a: TrackProfile, b: TrackProfile): number {
   if (a.energy !== null && b.energy !== null && Math.abs(a.energy - b.energy) > 0.55) score *= 0.5;
   if (a.year && b.year && Math.abs(a.year - b.year) > 25) score *= 0.6;
   if (style === 0) score *= 0.3; // different sound worlds
+  if (eraClash(a, b)) score *= 0.4; // 60s analog production vs. 80s glossy, etc. (heard)
   if (feelClash(a, b)) score *= 0.3; // listener would feel something else
   if (scene === 0) score *= 0.4; // different, non-neighbor scenes
   if (soundClash(a, b)) score *= 0.5; // different instrument palette / groove
@@ -458,21 +470,15 @@ export function sequence(tracks: TrackProfile[], startId?: string): TrackProfile
 }
 
 // ---------- Naming ----------
+// Simple, elegant names: 2–3 words that evoke a feeling or a moment — never the genre,
+// never a year, never "Vibes"/"Flow"/"Grooves"/"Mix" or middle dots.
 
-const MOOD_LABEL: Record<Mood, string> = {
-  chill: "Chill",
-  melancholic: "Late Night Feelings",
-  romantic: "Romantic",
-  upbeat: "Good Mood",
-  party: "Party",
-  intense: "High Energy",
-  dreamy: "Dreamy",
-  empowering: "Main Character",
-};
-
-const LANG_LABEL: Record<string, string> = {
-  es: "en español", en: "in English", pt: "em português", fr: "en français",
-  it: "in italiano", de: "auf Deutsch", ko: "K", ja: "J", zh: "C",
+const BANNED_NAME = /\b(vibes?|flow|grooves?|mix|mixtape)\b|[·•]|\b(19|20)\d0s?\b|\b\d{2}s\b/i;
+const GENRE_WORDS = /\b(house|techno|trance|disco|rock|pop|rap|trap|hip[\s-]?hop|rnb|r&b|soul|jazz|blues|metal|punk|folk|country|reggaeton|salsa|bachata|cumbia|bossa|samba|ambient|lo[\s-]?fi|classical|soundtrack|indie|dance|electronic|afro|melodic|deep|tech|minimal|progressive|boom[\s-]?bap|corrido|banda|norteno|grupero|k[\s-]?pop|j[\s-]?pop|funk|gospel|blues|swing|dubstep|garage|drum|bass|edm|ballads?|anthems?|classics?|mainstream|conscious|dreamscape|french touch|keinemusik|afterlife|anjunadeep|innervisions|diynamic)\b/i;
+/** A curator/AI name passes only if it's clean: no banned words, genres, scenes or years. */
+export const isCleanName = (name: string) => {
+  const n = name.trim();
+  return n.length >= 3 && n.length <= 40 && !BANNED_NAME.test(n) && !GENRE_WORDS.test(n);
 };
 
 function mostCommon<T>(items: T[]): T | null {
@@ -481,23 +487,47 @@ function mostCommon<T>(items: T[]): T | null {
   return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
 }
 
-function nameFor(tracks: TrackProfile[], lang: string, used: Set<string>): string {
-  const family = mostCommon(tracks.flatMap((t) => t.families));
-  const mood = mostCommon(tracks.map((t) => t.mood).filter((m): m is Mood => m !== null));
-  const years = tracks.map((t) => t.year).filter((y): y is number => y !== null);
-  const decade = years.length ? Math.floor(percentile(years, 0.5) / 10) * 10 : null;
+/** Evocative name pools by dominant listener feeling. */
+export const FEELING_NAMES: Record<string, string[]> = {
+  inspirational: ["Golden Hour", "Open Roads", "Morning Light", "New Horizons", "Higher Ground"],
+  peaceful: ["Slow Sundays", "Quiet Hours", "Soft Focus", "Still Water", "Gentle Tide"],
+  nostalgic: ["Sepia Tones", "Old Photographs", "Yesterday's Radio", "Faded Postcards"],
+  melancholic: ["Midnight Blue", "Rainy Windows", "Blue Hour", "Empty Rooms"],
+  introspective: ["Late Thoughts", "Low Light", "Inner Voice", "Quiet Mind"],
+  euphoric: ["Full Bloom", "Bright Lights", "Sky High", "Electric Heart"],
+  "groovy-carefree": ["Sun Drenched", "Easy Days", "Barefoot", "Warm Breeze"],
+  sensual: ["Velvet Nights", "After Dark", "Candlelight", "Slow Dance"],
+  hypnotic: ["Night Drive", "Deep Current", "Silver Moon", "Endless Corridor"],
+  "dark-tense": ["Black Coffee", "Shadow Play", "Storm Warning", "Cold Fire"],
+};
+const MOOD_NAMES: Record<Mood, string[]> = {
+  chill: ["Lazy Afternoon", "Soft Landing", "Drift Away"],
+  melancholic: ["Blue Hour", "Rainy Windows", "Empty Rooms"],
+  romantic: ["Sunday Soul", "Slow Dance", "Sweet Nothings"],
+  upbeat: ["Good Company", "Sunshine State", "Bright Side"],
+  party: ["Late Checkout", "House Lights", "Last Dance"],
+  intense: ["Full Throttle", "Red Line", "High Voltage"],
+  dreamy: ["Daydream", "Cloud Nine", "Weightless"],
+  empowering: ["Main Character", "Unstoppable", "Own Lane"],
+};
+const FALLBACK_NAMES = ["Quiet Corners", "Hidden Gems", "Second Wind", "Far Places", "Home Bound"];
 
-  const base = family ? FAMILY_LABEL[family] : lang === "instrumental" ? "Instrumental" : "Mix";
-  let name = mood ? `${base} · ${MOOD_LABEL[mood]}` : base;
-  if ((!family || used.has(name)) && LANG_LABEL[lang]) name = `${name} ${LANG_LABEL[lang]}`;
-  const decadeCounts = new Map<number, number>();
-  for (const y of years) { const d = Math.floor(y / 10) * 10; decadeCounts.set(d, (decadeCounts.get(d) ?? 0) + 1); }
-  const top = [...decadeCounts.entries()].sort((x, y) => y[1] - x[1])[0];
-  const strongDecade = top && top[1] / tracks.length >= 0.7 ? top[0] : null;
-  if (strongDecade !== null) name = `${name} · ${strongDecade}s`;
-  else if (used.has(name) && decade) name = `${name} · ${String(decade).slice(2)}s`;
-  let unique = name;
-  for (let i = 2; used.has(unique); i++) unique = `${name} ${i}`;
+function nameFor(tracks: TrackProfile[], _lang: string, used: Set<string>): string {
+  const feeling = mostCommon(tracks.map((t) => t.feeling).filter((f): f is string => !!f));
+  const mood = mostCommon(tracks.map((t) => t.mood).filter((m): m is Mood => m !== null));
+  const pool = [
+    ...(feeling ? FEELING_NAMES[feeling] ?? [] : []),
+    ...(mood ? MOOD_NAMES[mood] ?? [] : []),
+    ...FALLBACK_NAMES,
+  ];
+  // Vary the starting point by contents so similar playlists get different names.
+  const start = tracks.reduce((a, t) => a + t.id.charCodeAt(0), 0) % pool.length;
+  for (let i = 0; i < pool.length; i++) {
+    const name = pool[(start + i) % pool.length];
+    if (!used.has(name)) { used.add(name); return name; }
+  }
+  let unique = pool[start];
+  for (let i = 2; used.has(unique); i++) unique = `${pool[start]} ${i}`;
   used.add(unique);
   return unique;
 }

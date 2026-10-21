@@ -134,6 +134,13 @@
       "when": 1792542372149,
       "tag": "0018_vibe_spec_corrections",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1792543430892,
+      "tag": "0019_audio_era_vocal_theme",
+      "breakpoints": true
     }
   ]
 }

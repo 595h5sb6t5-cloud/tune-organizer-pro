@@ -1,6 +1,6 @@
 // Client wrapper around the curate-playlist function (rules live in organize.ts).
 import { supabase } from "@/integrations/supabase/client";
-import type { CuratorVerdict } from "./organize";
+import { isCleanName, type CuratorVerdict } from "./organize";
 import type { TrackProfile } from "./features";
 
 export async function askCurator(
@@ -28,7 +28,9 @@ export async function askCurator(
     },
   });
   if (error || data?.error) return null;
-  return { remove: data.remove ?? [], name: data.name ?? "" };
+  const name = String(data.name ?? "").trim();
+  // A name that breaks the naming rules falls back to the local evocative naming.
+  return { remove: data.remove ?? [], name: isCleanName(name) ? name : "" };
 }
 
 /** Wakes the vibe functions up so the first real request doesn't pay a cold start. */
