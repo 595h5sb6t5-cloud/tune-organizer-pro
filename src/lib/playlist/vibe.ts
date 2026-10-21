@@ -89,8 +89,20 @@ function distance(t: TrackProfile, s: VibeSpec): number {
 const MIN_CANDIDATES = 10;
 
 /** Relaxable rules, dropped in this order by Plan B. */
-type Soft = "mood" | "era" | "tempo";
-const RELAX_ORDER: Soft[] = ["mood", "era", "tempo"];
+type Soft = "mood" | "feel" | "era" | "tempo";
+const RELAX_ORDER: Soft[] = ["mood", "feel", "era", "tempo"];
+
+const VOCAL_INSTRUMENTS = ["lead-vocals", "vocal-chops", "choir"];
+/** vocals = none: no song with a sung voice (when we know the instruments). */
+const hasVoice = (t: TrackProfile) => t.instruments.some((i) => VOCAL_INSTRUMENTS.includes(i));
+/** Feeling gate: the song's main or secondary feeling is allowed (or a neighbor of an allowed one). */
+const feelAllowed = (t: TrackProfile, s: VibeSpec) => {
+  const allowed = s.feelings_allowed ?? [];
+  if (!allowed.length) return true;
+  const own = [t.feeling, t.feeling2].filter(Boolean) as string[];
+  if (!own.length) return true; // unknown feeling passes
+  return own.some((f) => allowed.includes(f) || allowed.some((a) => feelingNeighbors(a, f)));
+};
 
 function inTempo(t: TrackProfile, s: VibeSpec): boolean {
   if (t.tempo === null) return true;
