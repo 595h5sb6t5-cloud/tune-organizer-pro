@@ -279,18 +279,11 @@ async function scoreCandidates(userId: string, vibe: string, cands: TrackProfile
   onProgress?.(0, todo.length);
   const batches: TrackProfile[][] = [];
   for (let i = 0; i < todo.length; i += SELECT_BATCH) batches.push(todo.slice(i, i + SELECT_BATCH));
-  let failed = 0;
   await Promise.all(batches.map(async (batch) => {
-    const call = () => supabase.functions.invoke("vibe-select", {
+    const { data, error } = await supabase.functions.invoke("vibe-select", {
       body: { vibe, tracks: batch.map(brief), seeds: seeds.map(seedProfile) },
     });
-    let { data, error } = await call();
-    if (error || data?.error) {
-      // One retry before giving up on the batch; its songs are omitted, never rejected.
-      await new Promise((r) => setTimeout(r, 1200 + Math.random() * 1200));
-      ({ data, error } = await call());
-    }
-    if (error || data?.error) { failed += batch.length; return; }
+    if (error || data?.error) throw new Error(data?.error ?? error?.message ?? "The AI review failed.");
     const rows = [];
     for (const r of data.results ?? []) {
       scores.set(r.id, r.score);
@@ -300,7 +293,6 @@ async function scoreCandidates(userId: string, vibe: string, cands: TrackProfile
     done += batch.length;
     onProgress?.(done, todo.length);
   }));
-  if (todo.length && failed === todo.length) throw new Error("The AI review failed.");
   return scores;
 }
 
@@ -384,7 +376,7 @@ async function listenCandidates(userId: string, cands: TrackProfile[], seeds: Tr
   let done = 0;
   onProgress?.(0, total);
   if (scores.size) onBatch?.(scores);
-  const runJob = async (j: { seed: string; ids: string[] }) => {
+  const runAll = Promise.all(jobs.map(async (j) => {
     // Past the time budget: don't start new listens — the songs are omitted, never rejected.
     if (deadline && performance.now() > deadline) { for (const id of j.ids) unheard.add(id); return; }
     const seed = seeds.find((x) => x.id === j.seed);
@@ -406,13 +398,7 @@ async function listenCandidates(userId: string, cands: TrackProfile[], seeds: Tr
     if (rows.length) supabase.from("vibe_select_cache").upsert(rows, { onConflict: "user_id,vibe_key,spotify_track_id" }).then(() => {});
     done += j.ids.length; onProgress?.(done, total);
     onBatch?.(scores);
-  };
-  // Priority: the first batch (best 8 candidates, all with stored audio) runs alone so
-  // the first results show as fast as possible; the rest follow together.
-  const runAll = (async () => {
-    if (jobs.length) await runJob(jobs[0]);
-    await Promise.all(jobs.slice(1).map(runJob));
-  })();
+  }));
   if (deadline) {
     // Hard budget: when time runs out, whatever hasn't landed is omitted (not rejected).
     await Promise.race([runAll, new Promise((r) => setTimeout(r, Math.max(0, deadline - performance.now())))]);

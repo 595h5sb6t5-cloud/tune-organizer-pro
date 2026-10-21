@@ -512,27 +512,6 @@ export type Database = {
         }
         Relationships: []
       }
-      background_control: {
-        Row: {
-          id: number
-          paused_until: string | null
-          reason: string | null
-          updated_at: string
-        }
-        Insert: {
-          id?: number
-          paused_until?: string | null
-          reason?: string | null
-          updated_at?: string
-        }
-        Update: {
-          id?: number
-          paused_until?: string | null
-          reason?: string | null
-          updated_at?: string
-        }
-        Relationships: []
-      }
       cluster_candidate_tracks: {
         Row: {
           artist_context_fit: number | null
