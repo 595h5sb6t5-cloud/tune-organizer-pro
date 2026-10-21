@@ -524,24 +524,51 @@ const MOOD_NAMES: Record<Mood, string[]> = {
 };
 const FALLBACK_NAMES = ["Quiet Corners", "Hidden Gems", "Second Wind", "Far Places", "Home Bound"];
 
-function nameFor(tracks: TrackProfile[], _lang: string, used: Set<string>): string {
+/** The dominant life moment of a group of songs (highest total score). */
+export function dominantMoment(tracks: TrackProfile[]): string | null {
+  const tally = new Map<string, number>();
+  for (const t of tracks) for (const m of t.moments ?? []) {
+    tally.set(m.m, (tally.get(m.m) ?? 0) + m.s);
+  }
+  let best: string | null = null;
+  let bestScore = 0;
+  for (const [m, s] of tally) if (s > bestScore) { best = m; bestScore = s; }
+  return bestScore > 0 ? best : null;
+}
+
+const NAME_ARTICLES = new Set(["a", "an", "the", "of", "and", "at", "in", "on", "de", "la", "el", "los", "las", "con", "en", "y", "un", "una"]);
+const nameWords = (name: string) => name.toLowerCase().split(/[^a-záéíóúñü]+/i).filter((w) => w && !NAME_ARTICLES.has(w));
+
+function nameFor(tracks: TrackProfile[], _lang: string, used: Set<string>, usedWords: Set<string>): string {
+  const moment = dominantMoment(tracks);
   const feeling = mostCommon(tracks.map((t) => t.feeling).filter((f): f is string => !!f));
   const mood = mostCommon(tracks.map((t) => t.mood).filter((m): m is Mood => m !== null));
   const pool = [
+    ...(moment ? MOMENT_NAMES[moment] ?? [] : []),
     ...(feeling ? FEELING_NAMES[feeling] ?? [] : []),
     ...(mood ? MOOD_NAMES[mood] ?? [] : []),
     ...FALLBACK_NAMES,
-  ];
+  ].filter(isCleanName);
   // Vary the starting point by contents so similar playlists get different names.
   const start = tracks.reduce((a, t) => a + t.id.charCodeAt(0), 0) % pool.length;
+  const claim = (name: string) => {
+    used.add(name);
+    nameWords(name).forEach((w) => usedWords.add(w));
+    return name;
+  };
+  // First pass: a fresh name whose words haven't been used in another playlist.
   for (let i = 0; i < pool.length; i++) {
     const name = pool[(start + i) % pool.length];
-    if (!used.has(name)) { used.add(name); return name; }
+    if (!used.has(name) && !nameWords(name).some((w) => usedWords.has(w))) return claim(name);
+  }
+  // Second pass: any unused name.
+  for (let i = 0; i < pool.length; i++) {
+    const name = pool[(start + i) % pool.length];
+    if (!used.has(name)) return claim(name);
   }
   let unique = pool[start];
   for (let i = 2; used.has(unique); i++) unique = `${pool[start]} ${i}`;
-  used.add(unique);
-  return unique;
+  return claim(unique);
 }
 
 // ---------- Main entry ----------
