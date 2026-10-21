@@ -259,11 +259,21 @@ export function compatibility(a: TrackProfile, b: TrackProfile): number {
   if (style === 0 && melodicKin(a, b)) style = 0.5; // feeling outranks style for melodic songs
   let scene = sceneMatch(a, b);
   if (scene === 0 && aligned) scene = 0.5; // feeling outranks scene: count as neighbor
+  // life-moment affinity — the human "when" of the song
+  const momentMatch = (() => {
+    if (!a.moments?.length || !b.moments?.length) return null;
+    let best = 0;
+    for (const ma of a.moments) for (const mb of b.moments) {
+      if (ma.m === mb.m) best = Math.max(best, Math.min(ma.s, mb.s));
+    }
+    return best;
+  })();
   const parts: [number | null, number][] = [
     [style, 0.35],
     [soundMatch(a, b), 0.35],
     [scene, 0.3],
     [feelMatch(a, b), 0.35],
+    [momentMatch, 0.3],
     [jaccard(a.families, b.families) * 0.75 + jaccard(a.genres, b.genres) * 0.25, 0.32],
     [closeness(a.energy, b.energy, 0.45), 0.12],
     [a.mood && b.mood ? (a.mood === b.mood ? 1 : MOOD_NEIGHBORS[a.mood].includes(b.mood) ? 0.6 : 0) : null, 0.08],
