@@ -645,7 +645,7 @@ export function organizeLibrary(all: TrackProfile[], options: OrganizeOptions = 
     .sort((a, b) => b.tracks.length - a.tracks.length)
     .map((g, i) => {
       const moment = dominantMoment(g.tracks);
-      const curve = moment ? MOMENT_CURVE[moment] : undefined;
+      const curve = moment ? (MOMENT_CURVE[moment] === "rise" ? "rise" : "peak") : undefined;
       const ordered = sequence(g.tracks, undefined, curve);
       const name = nameFor(ordered, g.lang, used, usedWords);
       return {
@@ -721,7 +721,7 @@ export async function curateLibrary(
   for (const p of kept) {
     if (p.tracks.length < minSize) { unsorted.push(...p.tracks); continue; }
     const moment = p.moment ?? dominantMoment(p.tracks);
-    const curve = moment ? MOMENT_CURVE[moment] : undefined;
+    const curve = moment ? (MOMENT_CURVE[moment] === "rise" ? "rise" : "peak") : undefined;
     const ordered = sequence(p.tracks, undefined, curve);
     let name = isCleanName(p.name) ? p.name : nameFor(ordered, p.lang, used, new Set());
     for (let i = 2; used.has(name); i++) name = `${p.name} ${i}`;
