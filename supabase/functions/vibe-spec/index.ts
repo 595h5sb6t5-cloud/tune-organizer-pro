@@ -1,5 +1,6 @@
 // Edge Function: vibe-spec — turns free vibe text (English or colloquial Mexican Spanish) into a strict playlist "recipe".
 import { INSTRUMENTS } from "../_shared/sound.ts";
+import { MOMENTS as LIFE_MOMENTS } from "../_shared/moments.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -30,11 +31,12 @@ Return ONLY JSON with exactly these keys:
 - "vocals": one of ${VOCALS.join(", ")} — "none" when the user asks for instrumental / no voices; "sparse" or "soft" when voices should not be protagonists (e.g. background music for talking); "lead" when the user wants songs with a singer up front; "any" when unspecified
 - "listening": one of ${LISTENING.join(", ")} — "background" when the music accompanies an activity without distracting (talking, studying, dinner); with "background" the music must have STEADY energy, no sudden changes, no drops, no protagonist vocals. "focused" when the user will listen with attention; "any" when unspecified
 - "moment": one of ${MOMENTS.join(", ")} — the time of day the description evokes ("sunset", "atardecer", "golden hour" → "golden-hour-sunset"; "late night", "madrugada" → "late-night"; "noche" → "night"); "any" when unspecified
+- "moments": array of up to 3 life moments from ONLY this list, ranked best first: ${LIFE_MOMENTS.join(", ")} — the human situations the description evokes (e.g. "late night drive" → ["late-night-drive"]; "carne asada con la familia" → ["carne-asada","dinner-with-friends"]; "chill platica buena" → ["deep-talk","bohemia"]); empty array when nothing fits
 - "instruments_preferred","instruments_excluded": arrays using ONLY items from: ${INSTRUMENTS.join(", ")}
 - "warmth_min","warmth_max","texture_min","texture_max","percussive_drive_min","percussive_drive_max","melodic_focus_min","melodic_focus_max": numbers 0–1 (use the full 0–1 range when the description says nothing about them)
 - "feelings_allowed": array using ONLY: ${FEELINGS.join(", ")} — the feelings (main or secondary) a song may have; empty array when unspecified
 - "clarify": null, or {"question": "...", "options": ["...", "..."]} — ONLY when the description is so ambiguous that a curator could not choose a sound (e.g. "algo chido para la noche"): ONE short question in the user's language with 2–3 short answer options (e.g. "¿Para bailar o para relajarte?"). When the description is clear enough, null.
-- "name": 2 or 3 words, simple and elegant, evoking the feeling or the moment — never the genre (e.g. "Golden Hour", "Velvet Nights", "Slow Sundays", "Midnight Blue", "Sunday Soul", "Open Roads"). Do NOT copy the keywords literally. FORBIDDEN: "Vibes", "Flow", "Grooves", "Mix", middle dots (·), genre or scene names, years or decades, song titles.
+- "name": 2 or 3 words, simple and elegant, evoking the feeling or the moment — never the genre (e.g. "Golden Hour", "Velvet Nights", "Slow Sundays", "Midnight Blue", "Sunday Soul", "Open Roads"). Do NOT copy the keywords literally. FORBIDDEN: "Vibes", "Flow", "Grooves", "Mix", "Classics", "Luminous", "Timeless", "Reflections", "Moods", "Echoes", "Layers", "Pulse", "Bliss", middle dots (·), genre or scene names, years or decades, artist names, song titles.
 Examples of how to think:
 - "chill platica buena" → background, vocals sparse/soft, steady mid-low energy, warm, no drops or sudden changes.
 - "full instrumental sunset" → vocals none, warm and golden, mid energy coming down, melodic.
@@ -125,6 +127,7 @@ Deno.serve(async (req) => {
       vocals: one(r.vocals, VOCALS, "any"),
       listening: one(r.listening, LISTENING, "any"),
       moment: one(r.moment, MOMENTS, "any"),
+      moments: pick(r.moments, LIFE_MOMENTS as unknown as string[]).slice(0, 3),
       instruments_preferred: pick(r.instruments_preferred, INSTRUMENTS),
       instruments_excluded: pick(r.instruments_excluded, INSTRUMENTS),
       warmth_min: wMin, warmth_max: wMax,
