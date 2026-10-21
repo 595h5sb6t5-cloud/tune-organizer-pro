@@ -17,6 +17,7 @@ export const REBUILD_SHARE = 0.05;
 export interface PrebuiltSet {
   playlists: PlaylistDraft[];
   unsorted: TrackProfile[];
+  analyzing: TrackProfile[];
   built_at: string | null;
   seen_at: string | null;
   analyzed_count: number;
@@ -38,6 +39,7 @@ export async function loadPrebuilt(userId: string): Promise<PrebuiltSet | null> 
   if (!data) return null;
   return {
     playlists: (data.playlists as any) ?? [], unsorted: (data.unsorted as any) ?? [],
+    analyzing: (data.analyzing as any) ?? [],
     built_at: data.built_at, seen_at: data.seen_at, analyzed_count: data.analyzed_count, status: data.status,
   };
 }
