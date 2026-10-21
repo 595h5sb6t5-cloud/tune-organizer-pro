@@ -231,9 +231,12 @@ export function soundSimilarity(a: TrackProfile, b: TrackProfile): number {
   return w ? known.reduce((x, [v, k]) => x + v * k, 0) / w : 0;
 }
 
-/** Most similar seed for a candidate (the ear compares against that one). */
+/** Most similar seed for a candidate in stored sound. */
 export const nearestSeed = (t: TrackProfile, seeds: TrackProfile[]) =>
   seeds.reduce((best, x) => (soundSimilarity(t, x) > soundSimilarity(t, best) ? x : best), seeds[0]);
+/** The seed the candidate is judged against: the one whose feeling matches it (strong, then neighbor), else nearest in sound. */
+export const feelSeed = (t: TrackProfile, seeds: TrackProfile[]) =>
+  seeds.find((x) => strongFeelPair(t, x)) ?? seeds.find((x) => (feelingScore(t, x) ?? 0) >= 0.5) ?? nearestSeed(t, seeds);
 
 const r2n = (x: number | null | undefined) => (x == null ? null : Math.round(x * 100) / 100);
 const earSeed = (t: TrackProfile) => ({
@@ -242,15 +245,16 @@ const earSeed = (t: TrackProfile) => ({
   scale: r2n(t.scale), groove: t.groove, energy: r2n(t.energy), style: t.style ?? null, feeling: t.feeling, feeling_2: t.feeling2 ?? null, arc: t.arc,
 });
 
-/** Step 3: Gemini hears each candidate against its nearest seed's STORED analysis (the seed is not re-heard).
- *  Batches of 4, all in parallel. Each (seed, context, candidate) score is cached. */
-async function listenCandidates(userId: string, cands: TrackProfile[], seeds: TrackProfile[], context: string, onProgress?: (d: number, t: number) => void) {
+/** Step 3: Gemini hears each candidate (15 s from the middle of the clip) against its feeling-matched seed's STORED analysis.
+ *  Batches of 8, every request at once. Each (seed, context, candidate) score is cached. `onBatch` fires as each batch lands. */
+async function listenCandidates(userId: string, cands: TrackProfile[], seeds: TrackProfile[], context: string,
+  onProgress?: (d: number, t: number) => void, onBatch?: (scores: Map<string, number>) => void) {
   const scores = new Map<string, number>();
   const unheard = new Set<string>();
   const bySeed = new Map<string, string[]>();
-  for (const c of cands) { const s = nearestSeed(c, seeds).id; bySeed.set(s, [...(bySeed.get(s) ?? []), c.id]); }
+  for (const c of cands) { const s = feelSeed(c, seeds).id; bySeed.set(s, [...(bySeed.get(s) ?? []), c.id]); }
   const ctx = vibeKey(context);
-  const keyOf = (seed: string) => "ear3|" + seed + "|" + ctx;
+  const keyOf = (seed: string) => "ear4|" + seed + "|" + ctx;
   const jobs: { seed: string; ids: string[] }[] = [];
   await Promise.all([...bySeed.entries()].map(async ([seed, ids]) => {
     const { data } = await supabase.from("vibe_select_cache").select("spotify_track_id, score")
@@ -260,23 +264,21 @@ async function listenCandidates(userId: string, cands: TrackProfile[], seeds: Tr
     for (let i = 0; i < todo.length; i += LISTEN_BATCH) jobs.push({ seed, ids: todo.slice(i, i + LISTEN_BATCH) });
   }));
   const total = jobs.reduce((a, j) => a + j.ids.length, 0);
-  let done = 0, next = 0;
+  let done = 0;
   onProgress?.(0, total);
-  const worker = async () => {
-    while (next < jobs.length) {
-      const j = jobs[next++];
-      const seed = seeds.find((x) => x.id === j.seed)!;
-      const call = () => supabase.functions.invoke("vibe-listen", { body: { seed: earSeed(seed), ids: j.ids, context: ctx } });
-      let { data, error } = await call();
-      if (error || data?.error) ({ data, error } = await call()); // one retry for a busy moment
-      if (error || data?.error) throw new Error(data?.error ?? error?.message ?? "The listening step failed.");
-      for (const id of data.unheard ?? []) unheard.add(id);
-      const rows = (data.results ?? []).map((r: any) => { scores.set(r.id, r.score); return { user_id: userId, vibe_key: keyOf(j.seed), spotify_track_id: r.id, score: r.score }; });
-      if (rows.length) await supabase.from("vibe_select_cache").upsert(rows, { onConflict: "user_id,vibe_key,spotify_track_id" });
-      done += j.ids.length; onProgress?.(done, total);
-    }
-  };
-  await Promise.all(Array.from({ length: LISTEN_PARALLEL }, worker));
+  if (scores.size) onBatch?.(scores);
+  await Promise.all(jobs.map(async (j) => {
+    const seed = seeds.find((x) => x.id === j.seed)!;
+    const call = () => supabase.functions.invoke("vibe-listen", { body: { seed: earSeed(seed), ids: j.ids, context: ctx } });
+    let { data, error } = await call();
+    if (error || data?.error) ({ data, error } = await call()); // one retry for a busy moment
+    if (error || data?.error) { for (const id of j.ids) unheard.add(id); return; } // falls back to the text review
+    for (const id of data.unheard ?? []) unheard.add(id);
+    const rows = (data.results ?? []).map((r: any) => { scores.set(r.id, r.score); return { user_id: userId, vibe_key: keyOf(j.seed), spotify_track_id: r.id, score: r.score }; });
+    if (rows.length) supabase.from("vibe_select_cache").upsert(rows, { onConflict: "user_id,vibe_key,spotify_track_id" }).then(() => {});
+    done += j.ids.length; onProgress?.(done, total);
+    onBatch?.(scores);
+  }));
   return { scores, unheard };
 }
 
