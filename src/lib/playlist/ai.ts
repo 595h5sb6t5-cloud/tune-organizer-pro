@@ -27,6 +27,8 @@ export interface AiTrackInfo {
   scene?: string | null;
   feeling?: string | null; feeling_2?: string | null; melodic_focus?: number | null; arc?: string | null; confidence?: number | null;
   manual_sound?: ManualSound | null;
+  moments?: { m: string; s: number }[] | null;
+  moment_story?: string | null;
 }
 
 export interface ManualSound {
@@ -81,6 +83,10 @@ function sanitize(raw: any): AiTrackInfo | null {
     arc: typeof raw.arc === "string" ? raw.arc : null,
     confidence: typeof raw.confidence === "number" ? raw.confidence : null,
     manual_sound: raw.manual_sound && typeof raw.manual_sound === "object" ? raw.manual_sound : null,
+    moments: Array.isArray(raw.moments)
+      ? raw.moments.filter((m: any) => m && typeof m.m === "string").map((m: any) => ({ m: String(m.m), s: Math.max(0, Math.min(1, Number(m.s) || 0)) })).slice(0, 3)
+      : null,
+    moment_story: typeof raw.moment_story === "string" ? raw.moment_story : null,
   };
 }
 
