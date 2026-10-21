@@ -10,12 +10,14 @@
 //    (warm up → peak → cool down) and no artist twice in a row.
 
 import { type Mood, type TrackProfile } from "./features";
+import { MOMENT_NAMES, MOMENT_DESC, MOMENT_CURVE } from "./moments";
 
 export interface PlaylistDraft {
   key: string;
   name: string;
   description: string;
   lang: string;
+  moment?: string | null; // the life moment this playlist soundtracks
   cohesion: number; // 0–1, average compatibility inside the playlist
   tracks: TrackProfile[];
 }
