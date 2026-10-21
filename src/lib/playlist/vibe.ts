@@ -384,7 +384,7 @@ async function listenCandidates(userId: string, cands: TrackProfile[], seeds: Tr
   let done = 0;
   onProgress?.(0, total);
   if (scores.size) onBatch?.(scores);
-  const runAll = Promise.all(jobs.map(async (j) => {
+  const runJob = async (j: { seed: string; ids: string[] }) => {
     // Past the time budget: don't start new listens — the songs are omitted, never rejected.
     if (deadline && performance.now() > deadline) { for (const id of j.ids) unheard.add(id); return; }
     const seed = seeds.find((x) => x.id === j.seed);
