@@ -474,6 +474,7 @@ export async function buildVibePlaylist(
   seeds: TrackProfile[] = [],
   capArtist?: string,
   onPartial?: (tracks: TrackProfile[]) => void,
+  opts: { presetSpec?: VibeSpec; corrections?: SpecCorrection[] } = {},
 ): Promise<VibeResult & { timings: VibeTimings }> {
   const t0 = performance.now();
   const timings: VibeTimings = { seed: 0, recipe: 0, filter: 0, select: 0, listen: 0, order: 0, name: 0, first: 0, total: 0 };
@@ -494,40 +495,45 @@ export async function buildVibePlaylist(
     profiles = profiles.map((p) => fresh.find((x) => x.id === p.id) ?? p);
   }
   lap("seed");
-  const seedBody = seeds.map((t) => ({
-    name: t.name, artists: t.artists, year: t.year, genres: t.genres.slice(0, 6), lang: t.lang,
-    energy: t.energy, valence: t.valence, danceability: t.danceability, tempo: t.tempo, mood: t.mood,
-    style: t.style ?? null, scene: t.scene ?? null, instruments: t.instruments ?? [], feeling: t.feeling ?? null, feeling_2: t.feeling2 ?? null, arc: t.arc ?? null, melodic_focus: t.melodicFocus ?? null,
-  }));
   const removedP = removedForSeeds(userId, seeds);
   // Recipe (and name) cached per vibe text + seed profile. With seeds it only names the playlist and runs
   // in parallel with listening; with seeds and no keywords it isn't asked for at all.
-  const readRecipe = async (): Promise<VibeSpec> => {
-    const specKey = "s1|" + vibeKey(vibe) + "|" + seeds.map((x) => `${x.id}~${x.feeling ?? ""}~${x.feeling2 ?? ""}~${x.arc ?? ""}~${x.scene ?? ""}`).join(",");
-    const { data: cached } = await supabase.from("vibe_spec_cache").select("spec").eq("user_id", userId).eq("spec_key", specKey).maybeSingle();
-    let raw = cached?.spec as unknown as VibeSpec | undefined;
-    if (!raw) {
-      const { data, error } = await supabase.functions.invoke("vibe-spec", { body: { vibe, seeds: seedBody } });
-      if (error || data?.error) throw new Error(data?.error ?? error?.message ?? "Couldn't read the vibe.");
-      raw = data as VibeSpec;
-      supabase.from("vibe_spec_cache").upsert({ user_id: userId, spec_key: specKey, spec: raw as any }, { onConflict: "user_id,spec_key" }).then(() => {});
-    }
-    return normalizeSpec({ ...raw }, vibe, seeds.length > 0);
-  };
+  const readRecipe = () => readVibeSpec(userId, vibe, seeds, opts.corrections ?? []);
 
   if (!seeds.length) {
-    const spec = await readRecipe();
+    const spec = opts.presetSpec ?? await readRecipe();
     lap("recipe");
+    if (spec.clarify) return finish({ spec, lang: "en", tracks: [], candidates: 0, approved: 0, clarify: spec.clarify });
     onStep("Finding songs that feel the same");
     fitPool = [];
     const { lang, candidates } = filterCandidates(profiles, spec, langChoice, []);
     lap("filter");
     if (!candidates.length) return finish({ spec, lang, tracks: [], candidates: 0, approved: 0 });
-    const scores = await scoreCandidates(userId, vibe, candidates, [], (d, t) => onStep("Finding songs that feel the same", d, t));
-    const approved = candidates.filter((c) => (scores.get(c.id) ?? 0) >= MIN_SCORE).length;
-    lap("select");
+    // The ear judges against the full interpretation; songs without a clip keep the text review.
+    const ctx = specContext(spec, vibe);
+    const top = candidates.slice(0, LISTEN_TOP);
+    const withClip = top.filter((t) => t.audioSource !== "none");
+    const noClip = top.filter((t) => t.audioSource === "none");
+    onStep("Listening to the songs");
+    const live = (ear: Map<string, number>) => {
+      const ok = withClip.filter((t) => (ear.get(t.id) ?? 0) >= MIN_SCORE).sort((a, b) => ear.get(b.id)! - ear.get(a.id)!);
+      if (!ok.length) return;
+      if (!timings.first) timings.first = Math.round(performance.now() - t0);
+      onPartial?.(ok.slice(0, MAX_TRACKS));
+    };
+    const listenP = withClip.length
+      ? listenCandidates(userId, withClip, [], ctx, (d, t) => onStep("Listening to the songs", d, t), live, ctx)
+      : Promise.resolve({ scores: new Map<string, number>(), unheard: new Set<string>() });
+    const textP = noClip.length ? scoreCandidates(userId, ctx, noClip, []) : Promise.resolve(new Map<string, number>());
+    const [{ scores: ear, unheard }, text] = await Promise.all([listenP, textP]);
+    const late = top.filter((t) => !ear.has(t.id) && !text.has(t.id) && unheard.has(t.id));
+    const text2 = late.length ? await scoreCandidates(userId, ctx, late, []) : new Map<string, number>();
+    const scores = new Map([...text, ...text2, ...ear]);
+    const pool = top.filter((t) => (scores.get(t.id) ?? 0) >= FILL_SCORE);
+    const approved = top.filter((t) => (scores.get(t.id) ?? 0) >= MIN_SCORE).length;
+    lap("listen");
     onStep("Putting them in order");
-    const sel = selectVibeTracks(candidates, scores, []);
+    const sel = selectVibeTracks(pool, scores, []);
     lap("order");
     return finish({ spec, lang, tracks: sel.tracks, candidates: candidates.length, approved, eights: sel.eights, sevens: sel.sevens });
   }
