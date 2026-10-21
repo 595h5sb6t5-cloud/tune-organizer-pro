@@ -11,7 +11,7 @@ import { buildProfiles, type TrackProfile } from "@/lib/playlist/features";
 import { enrichWithAI } from "@/lib/playlist/ai";
 import { sequence } from "@/lib/playlist/organize";
 import { buildVibePlaylist, readVibeSpec, type VibeSpec, type SpecCorrection } from "@/lib/playlist/vibe";
-import { MOMENT_LABEL, MOMENT_DESC } from "@/lib/playlist/moments";
+import { MOMENT_LABEL as LIFE_MOMENT_LABEL, MOMENT_DESC } from "@/lib/playlist/moments";
 import { recordRemoval } from "@/lib/playlist/feedback";
 import EditSoundDialog from "@/components/app/EditSoundDialog";
 import { loadLikedTracks, loadArtistGenres } from "@/components/app/OrganizeLibraryPanel";
@@ -248,7 +248,7 @@ export default function VibePlaylistPanel() {
     );
     return [
       // The human moment comes first — it's what the user asked for.
-      ...(spec.moments ?? []).map((m) => chipX(`moment-${m}`, MOMENT_LABEL[m] ?? m)),
+      ...(spec.moments ?? []).map((m) => chipX(`moment-${m}`, LIFE_MOMENT_LABEL[m] ?? m)),
       spec.vocals && spec.vocals !== "any" ? chipSelect("vocals", spec.vocals, VOCAL_LABEL) : null,
       spec.listening && spec.listening !== "any" ? chipSelect("listening", spec.listening, LISTEN_LABEL) : null,
       spec.moment && spec.moment !== "any" ? chipSelect("moment", spec.moment, MOMENT_LABEL) : null,
