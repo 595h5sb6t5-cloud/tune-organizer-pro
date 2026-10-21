@@ -415,13 +415,16 @@ function percentile(values: number[], p: number) {
   return sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))];
 }
 
-/** Warm up → peak around 65% → cool down a little at the end. */
-function energyTarget(position: number, lo: number, hi: number) {
-  const curve = position <= 0.65 ? position / 0.65 : 1 - ((position - 0.65) / 0.35) * 0.45;
-  return lo + (hi - lo) * curve;
+/** Energy arc over the playlist: "peak" warms up → peaks at 65% → cools a little;
+ *  "rise" builds all the way up; "fall" starts strong and winds down. */
+function energyTarget(position: number, lo: number, hi: number, curve: "rise" | "fall" | "peak" = "peak") {
+  const c = curve === "rise" ? position
+    : curve === "fall" ? 1 - position * 0.7
+    : position <= 0.65 ? position / 0.65 : 1 - ((position - 0.65) / 0.35) * 0.45;
+  return lo + (hi - lo) * c;
 }
 
-export function sequence(tracks: TrackProfile[], startId?: string): TrackProfile[] {
+export function sequence(tracks: TrackProfile[], startId?: string, curve?: "rise" | "fall" | "peak"): TrackProfile[] {
   if (tracks.length <= 2) {
     const first = tracks.find((t) => t.id === startId);
     return first ? [first, ...tracks.filter((t) => t !== first)] : tracks;
