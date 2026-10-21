@@ -2,7 +2,7 @@
 // Never fills with songs that failed a filter.
 import { supabase } from "@/integrations/supabase/client";
 import type { Lang, Mood, TrackProfile } from "./features";
-import { compatibility, sequence, isDance, sameOrNeighborStyle, MOOD_NEIGHBORS, melodicKin, feelingScore, soundMatch } from "./organize";
+import { compatibility, sequence, isDance, sameOrNeighborStyle, MOOD_NEIGHBORS, melodicKin, feelingScore, feelingNeighbors, soundMatch } from "./organize";
 import { ensureSeedFeeling, ensureSeedAudio } from "./ai";
 
 export interface VibeSpec {
@@ -117,6 +117,8 @@ function passesHardRules(t: TrackProfile, s: VibeSpec, seeds: TrackProfile[]): b
   if (t.energy === null) return false;
   if (t.energy < s.energy_min - E_TOL || t.energy > s.energy_max + E_TOL) return false;
   if (t.families.some((f) => s.excluded_families.includes(f))) return false;
+  if (s.vocals === "none" && t.instruments.length && hasVoice(t)) return false;
+  if (s.instruments_excluded?.length && t.instruments.some((i) => s.instruments_excluded!.includes(i))) return false;
   const seedStyles = seeds.map((x) => x.style).filter(Boolean);
   if (seedStyles.length && !seedStyles.some((st) => sameOrNeighborStyle(st, t.style))) {
     // Melodic seed: nearby styles may join when they feel the same and energy is within 0.25.
@@ -128,6 +130,7 @@ function passesHardRules(t: TrackProfile, s: VibeSpec, seeds: TrackProfile[]): b
 
 function passesSoft(t: TrackProfile, s: VibeSpec, active: Set<Soft>): boolean {
   if (active.has("mood") && t.mood && s.moods_excluded.includes(t.mood)) return false;
+  if (active.has("feel") && !feelAllowed(t, s)) return false;
   if (active.has("era") && !inEra(t, s)) return false;
   if (active.has("tempo") && !inTempo(t, s)) return false;
   return true;
