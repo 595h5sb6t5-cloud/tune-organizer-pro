@@ -213,8 +213,7 @@ async function scoreCandidates(userId: string, vibe: string, cands: TrackProfile
 }
 
 const LISTEN_TOP = 40;
-const LISTEN_BATCH = 4;
-const LISTEN_PARALLEL = 10; // all 10 batches at once
+const LISTEN_BATCH = 8; // 5 requests for 40 songs, all at once
 
 const near = (x: number | null | undefined, y: number | null | undefined, tol = 0.35) =>
   x == null || y == null ? null : Math.max(0, 1 - Math.abs(x - y) / tol);
@@ -231,9 +230,12 @@ export function soundSimilarity(a: TrackProfile, b: TrackProfile): number {
   return w ? known.reduce((x, [v, k]) => x + v * k, 0) / w : 0;
 }
 
-/** Most similar seed for a candidate (the ear compares against that one). */
+/** Most similar seed for a candidate in stored sound. */
 export const nearestSeed = (t: TrackProfile, seeds: TrackProfile[]) =>
   seeds.reduce((best, x) => (soundSimilarity(t, x) > soundSimilarity(t, best) ? x : best), seeds[0]);
+/** The seed the candidate is judged against: the one whose feeling matches it (strong, then neighbor), else nearest in sound. */
+export const feelSeed = (t: TrackProfile, seeds: TrackProfile[]) =>
+  seeds.find((x) => strongFeelPair(t, x)) ?? seeds.find((x) => (feelingScore(t, x) ?? 0) >= 0.5) ?? nearestSeed(t, seeds);
 
 const r2n = (x: number | null | undefined) => (x == null ? null : Math.round(x * 100) / 100);
 const earSeed = (t: TrackProfile) => ({
@@ -242,15 +244,16 @@ const earSeed = (t: TrackProfile) => ({
   scale: r2n(t.scale), groove: t.groove, energy: r2n(t.energy), style: t.style ?? null, feeling: t.feeling, feeling_2: t.feeling2 ?? null, arc: t.arc,
 });
 
-/** Step 3: Gemini hears each candidate against its nearest seed's STORED analysis (the seed is not re-heard).
- *  Batches of 4, all in parallel. Each (seed, context, candidate) score is cached. */
-async function listenCandidates(userId: string, cands: TrackProfile[], seeds: TrackProfile[], context: string, onProgress?: (d: number, t: number) => void) {
+/** Step 3: Gemini hears each candidate (15 s from the middle of the clip) against its feeling-matched seed's STORED analysis.
+ *  Batches of 8, every request at once. Each (seed, context, candidate) score is cached. `onBatch` fires as each batch lands. */
+async function listenCandidates(userId: string, cands: TrackProfile[], seeds: TrackProfile[], context: string,
+  onProgress?: (d: number, t: number) => void, onBatch?: (scores: Map<string, number>) => void) {
   const scores = new Map<string, number>();
   const unheard = new Set<string>();
   const bySeed = new Map<string, string[]>();
-  for (const c of cands) { const s = nearestSeed(c, seeds).id; bySeed.set(s, [...(bySeed.get(s) ?? []), c.id]); }
+  for (const c of cands) { const s = feelSeed(c, seeds).id; bySeed.set(s, [...(bySeed.get(s) ?? []), c.id]); }
   const ctx = vibeKey(context);
-  const keyOf = (seed: string) => "ear3|" + seed + "|" + ctx;
+  const keyOf = (seed: string) => "ear4|" + seed + "|" + ctx;
   const jobs: { seed: string; ids: string[] }[] = [];
   await Promise.all([...bySeed.entries()].map(async ([seed, ids]) => {
     const { data } = await supabase.from("vibe_select_cache").select("spotify_track_id, score")
@@ -260,23 +263,21 @@ async function listenCandidates(userId: string, cands: TrackProfile[], seeds: Tr
     for (let i = 0; i < todo.length; i += LISTEN_BATCH) jobs.push({ seed, ids: todo.slice(i, i + LISTEN_BATCH) });
   }));
   const total = jobs.reduce((a, j) => a + j.ids.length, 0);
-  let done = 0, next = 0;
+  let done = 0;
   onProgress?.(0, total);
-  const worker = async () => {
-    while (next < jobs.length) {
-      const j = jobs[next++];
-      const seed = seeds.find((x) => x.id === j.seed)!;
-      const call = () => supabase.functions.invoke("vibe-listen", { body: { seed: earSeed(seed), ids: j.ids, context: ctx } });
-      let { data, error } = await call();
-      if (error || data?.error) ({ data, error } = await call()); // one retry for a busy moment
-      if (error || data?.error) throw new Error(data?.error ?? error?.message ?? "The listening step failed.");
-      for (const id of data.unheard ?? []) unheard.add(id);
-      const rows = (data.results ?? []).map((r: any) => { scores.set(r.id, r.score); return { user_id: userId, vibe_key: keyOf(j.seed), spotify_track_id: r.id, score: r.score }; });
-      if (rows.length) await supabase.from("vibe_select_cache").upsert(rows, { onConflict: "user_id,vibe_key,spotify_track_id" });
-      done += j.ids.length; onProgress?.(done, total);
-    }
-  };
-  await Promise.all(Array.from({ length: LISTEN_PARALLEL }, worker));
+  if (scores.size) onBatch?.(scores);
+  await Promise.all(jobs.map(async (j) => {
+    const seed = seeds.find((x) => x.id === j.seed)!;
+    const call = () => supabase.functions.invoke("vibe-listen", { body: { seed: earSeed(seed), ids: j.ids, context: ctx } });
+    let { data, error } = await call();
+    if (error || data?.error) ({ data, error } = await call()); // one retry for a busy moment
+    if (error || data?.error) { for (const id of j.ids) unheard.add(id); return; } // falls back to the text review
+    for (const id of data.unheard ?? []) unheard.add(id);
+    const rows = (data.results ?? []).map((r: any) => { scores.set(r.id, r.score); return { user_id: userId, vibe_key: keyOf(j.seed), spotify_track_id: r.id, score: r.score }; });
+    if (rows.length) supabase.from("vibe_select_cache").upsert(rows, { onConflict: "user_id,vibe_key,spotify_track_id" }).then(() => {});
+    done += j.ids.length; onProgress?.(done, total);
+    onBatch?.(scores);
+  }));
   return { scores, unheard };
 }
 
@@ -300,7 +301,7 @@ const seedFitOf = (t: TrackProfile, seeds: TrackProfile[]) => fitPool.length
   : seeds.reduce((a, x) => a + compatibility(t, x), 0) / seeds.length;
 
 /** Step 4: pick 8+ (and 7s up to 20 when short), check coherence, cap, sequence. */
-export function selectVibeTracks(cands: TrackProfile[], scores: Map<string, number>, seeds: TrackProfile[] = [], capArtist?: string) {
+export function selectVibeTracks(cands: TrackProfile[], scores: Map<string, number>, seeds: TrackProfile[] = [], capArtist?: string, heard: Set<string> = new Set()) {
   const room = MAX_TRACKS - seeds.length;
   // Artist as seed: the artist's own songs (seeds included) stay at most 20% of the playlist.
   if (capArtist) {
@@ -311,8 +312,8 @@ export function selectVibeTracks(cands: TrackProfile[], scores: Map<string, numb
     cands = [...others, ...cands.filter(own).sort((a, b) => (scores.get(b.id) ?? 0) - (scores.get(a.id) ?? 0)).slice(0, extra)];
   }
   const sc = (t: TrackProfile) => scores.get(t.id) ?? 0;
-  // Coherence: with seeds, against the seed only; otherwise against the group.
-  const coheres = (t: TrackProfile) => !seeds.length || seedFitOf(t, seeds) >= MIN_SEED_COHESION;
+  // Coherence: songs the ear already approved skip it; for text-only songs, against the seed (or the group without seeds).
+  const coheres = (t: TrackProfile) => !seeds.length || heard.has(t.id) || seedFitOf(t, seeds) >= MIN_SEED_COHESION;
   const fit = (t: TrackProfile) => (seeds.length ? seedFitOf(t, seeds) : 0);
   const top = cands.filter((t) => sc(t) >= MIN_SCORE && coheres(t))
     .sort((a, b) => sc(b) - sc(a) || fit(b) - fit(a));
@@ -353,7 +354,27 @@ async function removedForSeeds(userId: string, seeds: TrackProfile[]): Promise<S
   return new Set((data ?? []).map((r) => r.spotify_track_id));
 }
 
-export type VibeTimings = Record<"seed" | "recipe" | "filter" | "select" | "listen" | "order" | "name" | "total", number>;
+export type VibeTimings = Record<"seed" | "recipe" | "filter" | "select" | "listen" | "order" | "name" | "first" | "total", number>;
+
+const cap = (s: string) => s.replace(/(^|[\s-])\w/g, (m) => m.toUpperCase());
+/** Local name when there are no keywords (no recipe is asked for). */
+export const seedName = (seeds: TrackProfile[]) => {
+  const s = seeds[0];
+  const feel = s?.feeling ? cap(s.feeling.replace(/-/g, " ")) : "";
+  const style = s?.style ? cap(s.style.replace(/-/g, " ")) : "Sound";
+  return `${feel} ${style}`.trim();
+};
+
+/** Seeds only: the listening net needs no recipe — energy around the seeds, nothing else. */
+function seedSpec(seeds: TrackProfile[], wide: boolean): VibeSpec {
+  const es = seeds.map((x) => x.energy).filter((e): e is number => e !== null);
+  const pad = wide ? 0.35 : 0.15;
+  return {
+    energy_min: es.length ? Math.max(0, Math.min(...es) - pad) : 0, energy_max: es.length ? Math.min(1, Math.max(...es) + pad) : 1,
+    valence_min: 0, valence_max: 1, tempo_min: 0, tempo_max: 400, moods_allowed: [], moods_excluded: [],
+    preferred_families: [], excluded_families: [], language: null, era_min: null, era_max: null, name: seedName(seeds),
+  };
+}
 
 export async function buildVibePlaylist(
   userId: string,
@@ -363,15 +384,15 @@ export async function buildVibePlaylist(
   onStep: (label: string, done?: number, total?: number) => void,
   seeds: TrackProfile[] = [],
   capArtist?: string,
+  onPartial?: (tracks: TrackProfile[]) => void,
 ): Promise<VibeResult & { timings: VibeTimings }> {
   const t0 = performance.now();
-  const timings: VibeTimings = { seed: 0, recipe: 0, filter: 0, select: 0, listen: 0, order: 0, name: 0, total: 0 };
+  const timings: VibeTimings = { seed: 0, recipe: 0, filter: 0, select: 0, listen: 0, order: 0, name: 0, first: 0, total: 0 };
   let mark = t0;
   const lap = (k: keyof VibeTimings) => { const now = performance.now(); timings[k] = Math.round(now - mark); mark = now; };
   const finish = async <T extends VibeResult>(r: T) => {
     timings.total = Math.round(performance.now() - t0);
     console.info(`[vibe] timings (ms) ${JSON.stringify(timings)}`);
-    // Query builders only run when awaited/then'd.
     supabase.from("vibe_timings").insert({ user_id: userId, vibe, steps: timings as any, total_ms: timings.total, tracks: r.tracks.length }).then(() => {});
     return { ...r, timings };
   };
@@ -390,70 +411,85 @@ export async function buildVibePlaylist(
     style: t.style ?? null, scene: t.scene ?? null, instruments: t.instruments ?? [], feeling: t.feeling ?? null, feeling_2: t.feeling2 ?? null, arc: t.arc ?? null, melodic_focus: t.melodicFocus ?? null,
   }));
   const removedP = removedForSeeds(userId, seeds);
-  // Recipe (and name) cached per vibe text + seed profile.
-  const specKey = "s1|" + vibeKey(vibe) + "|" + seeds.map((x) => `${x.id}~${x.feeling ?? ""}~${x.feeling2 ?? ""}~${x.arc ?? ""}~${x.scene ?? ""}`).join(",");
-  const { data: cached } = await supabase.from("vibe_spec_cache").select("spec").eq("user_id", userId).eq("spec_key", specKey).maybeSingle();
-  let raw = cached?.spec as unknown as VibeSpec | undefined;
-  if (!raw) {
-    const { data, error } = await supabase.functions.invoke("vibe-spec", { body: { vibe, seeds: seedBody } });
-    if (error || data?.error) throw new Error(data?.error ?? error?.message ?? "Couldn't read the vibe.");
-    raw = data as VibeSpec;
-    supabase.from("vibe_spec_cache").upsert({ user_id: userId, spec_key: specKey, spec: raw as any }, { onConflict: "user_id,spec_key" }).then(() => {});
-  }
-  const spec = normalizeSpec({ ...raw }, vibe, seeds.length > 0);
-  // Artist as seed: the artist's world spans its songs' energies (wider than one song's ±0.15).
-  if (capArtist && seeds.length) {
-    const es = seeds.map((x) => x.energy).filter((e): e is number => e !== null);
-    if (es.length) { spec.energy_min = Math.max(0, Math.min(...es) - 0.35); spec.energy_max = Math.min(1, Math.max(...es) + 0.35); }
-  }
-  lap("recipe");
+  // Recipe (and name) cached per vibe text + seed profile. With seeds it only names the playlist and runs
+  // in parallel with listening; with seeds and no keywords it isn't asked for at all.
+  const readRecipe = async (): Promise<VibeSpec> => {
+    const specKey = "s1|" + vibeKey(vibe) + "|" + seeds.map((x) => `${x.id}~${x.feeling ?? ""}~${x.feeling2 ?? ""}~${x.arc ?? ""}~${x.scene ?? ""}`).join(",");
+    const { data: cached } = await supabase.from("vibe_spec_cache").select("spec").eq("user_id", userId).eq("spec_key", specKey).maybeSingle();
+    let raw = cached?.spec as unknown as VibeSpec | undefined;
+    if (!raw) {
+      const { data, error } = await supabase.functions.invoke("vibe-spec", { body: { vibe, seeds: seedBody } });
+      if (error || data?.error) throw new Error(data?.error ?? error?.message ?? "Couldn't read the vibe.");
+      raw = data as VibeSpec;
+      supabase.from("vibe_spec_cache").upsert({ user_id: userId, spec_key: specKey, spec: raw as any }, { onConflict: "user_id,spec_key" }).then(() => {});
+    }
+    return normalizeSpec({ ...raw }, vibe, seeds.length > 0);
+  };
 
+  if (!seeds.length) {
+    const spec = await readRecipe();
+    lap("recipe");
+    onStep("Finding songs that feel the same");
+    fitPool = [];
+    const { lang, candidates } = filterCandidates(profiles, spec, langChoice, []);
+    lap("filter");
+    if (!candidates.length) return finish({ spec, lang, tracks: [], candidates: 0, approved: 0 });
+    const scores = await scoreCandidates(userId, vibe, candidates, [], (d, t) => onStep("Finding songs that feel the same", d, t));
+    const approved = candidates.filter((c) => (scores.get(c.id) ?? 0) >= MIN_SCORE).length;
+    lap("select");
+    onStep("Putting them in order");
+    const sel = selectVibeTracks(candidates, scores, []);
+    lap("order");
+    return finish({ spec, lang, tracks: sel.tracks, candidates: candidates.length, approved, eights: sel.eights, sevens: sel.sevens });
+  }
+
+  // With seeds — "wide net, strict ear".
+  const local = seedSpec(seeds, !!capArtist);
+  const recipeP = vibe.trim()
+    ? readRecipe().then((s) => { timings.recipe = Math.round(performance.now() - t0); return s; }).catch(() => local)
+    : Promise.resolve(local);
   onStep("Finding songs that feel the same");
   const removed = await removedP;
-  // Artist as seed: a song fits the artist's world if it fits any of the artist's songs (the 3 seeds lead).
   fitPool = capArtist ? [...seeds, ...profiles.filter((t) => !seeds.some((x) => x.id === t.id) && t.artists.some((a) => a.toLowerCase() === capArtist.toLowerCase()))] : [];
   const soundRank = (t: TrackProfile) => Math.max(...seeds.map((x) => soundSimilarity(t, x)));
-  const { lang, candidates: raw0 } = filterCandidates(profiles.filter((t) => !removed.has(t.id)), spec, langChoice, seeds, fitPool, seeds.length ? soundRank : undefined);
-  const candidates = seeds.length ? raw0.filter((t) => feelsLikeSeed(t, seeds)) : raw0;
+  const { lang, candidates: raw0 } = filterCandidates(profiles.filter((t) => !removed.has(t.id)), local, langChoice, seeds, fitPool, soundRank);
+  const candidates = raw0.filter((t) => feelsLikeSeed(t, seeds));
   lap("filter");
-  if (!candidates.length) return finish({ spec, lang, tracks: seeds.length ? sequence(seeds, seeds[0].id) : [], candidates: 0, approved: 0 });
-
-  // With seeds — "wide net, strict ear": the 40 heard are the closest in STORED sound (no feeling penalty,
-  // only songs sharing no feeling or neighbor are skipped). Gemini's ear decides; the text review is only for songs without a clip.
-  let scores = new Map<string, number>();
-  let pool = candidates;
-  let approved = 0;
-  if (seeds.length) {
-    lap("select");
-    const top = candidates.slice(0, LISTEN_TOP);
-    const withClip = top.filter((t) => t.audioSource !== "none");
-    onStep("Listening to the songs");
-    const listenP = listenCandidates(userId, withClip, seeds, vibe, (d, t) => onStep("Listening to the songs", d, t));
-    const noClip = top.filter((t) => t.audioSource === "none");
-    const textP = noClip.length ? scoreCandidates(userId, vibe, noClip, seeds) : Promise.resolve(new Map<string, number>());
-    const [{ scores: ear, unheard }, text] = await Promise.all([listenP, textP]);
-    const late = top.filter((t) => !ear.has(t.id) && !text.has(t.id) && unheard.has(t.id));
-    const text2 = late.length ? await scoreCandidates(userId, vibe, late, seeds) : new Map<string, number>();
-    scores = new Map([...text, ...text2, ...ear]);
-    pool = top.filter((t) => {
-      const sc = scores.get(t.id) ?? 0;
-      const strong = seeds.some((x) => !t.feeling || !x.feeling || strongFeelPair(t, x));
-      const neighbor = seeds.some((x) => (feelingScore(t, x) ?? 0) >= 0.5);
-      return earAdmits(sc, strong, neighbor);
-    });
-    approved = pool.length;
-  } else {
-    scores = await scoreCandidates(userId, vibe, candidates, seeds, (d, t) => onStep("Finding songs that feel the same", d, t));
-    approved = candidates.filter((c) => (scores.get(c.id) ?? 0) >= MIN_SCORE).length;
-    lap("select");
+  if (!candidates.length) {
+    const spec = await recipeP;
+    return finish({ spec, lang, tracks: sequence(seeds, seeds[0].id), candidates: 0, approved: 0 });
   }
+
+  // Admission: judged against the seed whose feeling matches the song.
+  const admits = (t: TrackProfile, sc: number) => {
+    const s = feelSeed(t, seeds);
+    const strong = !t.feeling || !s.feeling || strongFeelPair(t, s);
+    const neighbor = (feelingScore(t, s) ?? 0) >= 0.5;
+    return earAdmits(sc, strong, neighbor);
+  };
+  const top = candidates.slice(0, LISTEN_TOP);
+  const withClip = top.filter((t) => t.audioSource !== "none");
+  const noClip = top.filter((t) => t.audioSource === "none");
+  onStep("Listening to the songs");
+  const live = (ear: Map<string, number>) => {
+    const ok = withClip.filter((t) => ear.has(t.id) && admits(t, ear.get(t.id)!)).sort((a, b) => ear.get(b.id)! - ear.get(a.id)!);
+    if (!ok.length) return;
+    if (!timings.first) timings.first = Math.round(performance.now() - t0);
+    onPartial?.([...seeds, ...ok.slice(0, MAX_TRACKS - seeds.length)]);
+  };
+  const listenP = listenCandidates(userId, withClip, seeds, vibe, (d, t) => onStep("Listening to the songs", d, t), live);
+  const textP = noClip.length ? scoreCandidates(userId, vibe, noClip, seeds) : Promise.resolve(new Map<string, number>());
+  const [{ scores: ear, unheard }, text] = await Promise.all([listenP, textP]);
+  const late = top.filter((t) => !ear.has(t.id) && !text.has(t.id) && unheard.has(t.id));
+  const text2 = late.length ? await scoreCandidates(userId, vibe, late, seeds) : new Map<string, number>();
+  const scores = new Map([...text, ...text2, ...ear]);
+  const pool = top.filter((t) => admits(t, scores.get(t.id) ?? 0));
   lap("listen");
 
   onStep("Putting them in order");
-  const sel = selectVibeTracks(pool, scores, seeds, capArtist);
-  const tracks = sel.tracks;
+  const sel = selectVibeTracks(pool, scores, seeds, capArtist, new Set(ear.keys()));
   lap("order");
-  // The name comes with the recipe (vibe-spec); no separate naming call.
+  const spec = await recipeP;
   lap("name");
-  return finish({ spec, lang, tracks, candidates: candidates.length, approved, eights: sel.eights, sevens: sel.sevens });
+  return finish({ spec: { ...spec, name: spec.name || local.name }, lang, tracks: sel.tracks, candidates: candidates.length, approved: pool.length, eights: sel.eights, sevens: sel.sevens });
 }

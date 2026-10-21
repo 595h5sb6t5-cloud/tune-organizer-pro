@@ -34,11 +34,18 @@ export async function findPreview(isrc: string | null, name: string, artist: str
   return null;
 }
 
-export async function fetchAudioB64(url: string): Promise<string | null> {
+/** `middle`: keep only that fraction from the centre of the clip (0.5 of a 30 s preview ≈ 15 s), cut on an MP3 frame start. */
+export async function fetchAudioB64(url: string, middle?: number): Promise<string | null> {
   try {
     const r = await fetch(url);
     if (!r.ok) return null;
-    const buf = new Uint8Array(await r.arrayBuffer());
+    let buf = new Uint8Array(await r.arrayBuffer());
+    if (middle && middle < 1 && buf.length > 20_000) {
+      let s = Math.floor(buf.length * (1 - middle) / 2);
+      const end = s + Math.floor(buf.length * middle);
+      while (s < end - 4 && !(buf[s] === 0xff && (buf[s + 1] & 0xe0) === 0xe0 && (buf[s + 2] & 0xf0) !== 0xf0)) s++;
+      buf = buf.subarray(s, end);
+    }
     let bin = "";
     for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
     return btoa(bin);
