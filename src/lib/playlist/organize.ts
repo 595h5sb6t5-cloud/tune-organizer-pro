@@ -565,10 +565,21 @@ export function organizeLibrary(all: TrackProfile[], options: OrganizeOptions = 
       leftovers.push(...tracks);
       continue;
     }
-    const { groups: g, leftovers: l } = clusterBucket(tracks, minSize, maxSize, threshold);
+    // Moments first: split the language bucket by each song's main life moment,
+    // then cluster by sound inside each moment pool.
+    const pools = new Map<string, TrackProfile[]>();
+    for (const t of tracks) {
+      const m = t.moments?.[0];
+      const mk = m && m.s >= 0.5 ? m.m : "_";
+      pools.set(mk, [...(pools.get(mk) ?? []), t]);
+    }
     const lang = key.replace("lang:", "");
-    g.forEach((tracksInGroup) => groups.push({ lang, tracks: tracksInGroup }));
-    leftovers.push(...l);
+    for (const pool of pools.values()) {
+      if (pool.length < minSize) { leftovers.push(...pool); continue; }
+      const { groups: g, leftovers: l } = clusterBucket(pool, minSize, maxSize, threshold);
+      g.forEach((tracksInGroup) => groups.push({ lang, tracks: tracksInGroup }));
+      leftovers.push(...l);
+    }
   }
 
   // Second chance: place leftovers in the playlist they fit best, only if they truly fit.
