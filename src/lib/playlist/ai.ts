@@ -169,7 +169,7 @@ async function loadAudio(ids: string[]): Promise<Map<string, any>> {
   const map = new Map<string, any>();
   for (let i = 0; i < ids.length; i += 300) {
     const { data } = await supabase.from("track_audio_analysis")
-      .select("spotify_track_id, source, instruments, melodic_focus, percussive_drive, texture, warmth, scale, groove, confidence, production_era, vocal_style, lyric_theme")
+      .select("spotify_track_id, source, instruments, melodic_focus, percussive_drive, texture, warmth, scale, groove, confidence, production_era, drum_sound, mix_character, vocal_space, vocal_style, lyric_theme")
       .in("spotify_track_id", ids.slice(i, i + 300));
     for (const r of data ?? []) map.set(r.spotify_track_id, r);
   }
@@ -190,6 +190,9 @@ export function applyAudio(p: TrackProfile, a: any): TrackProfile {
     groove: heard ? a.groove ?? p.groove : p.groove ?? a.groove,
     melodicFocus: heard ? a.melodic_focus ?? p.melodicFocus : p.melodicFocus ?? a.melodic_focus,
     productionEra: a.production_era ?? p.productionEra ?? null,
+    drumSound: a.drum_sound ?? p.drumSound ?? null,
+    mixCharacter: a.mix_character ?? p.mixCharacter ?? null,
+    vocalSpace: a.vocal_space ?? p.vocalSpace ?? null,
     vocalStyle: a.vocal_style ?? p.vocalStyle ?? null,
     lyricTheme: a.lyric_theme ?? p.lyricTheme ?? null,
     // "Sin audio": lower confidence.

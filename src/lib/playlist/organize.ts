@@ -300,6 +300,9 @@ export function compatibility(a: TrackProfile, b: TrackProfile): number {
   if (a.year && b.year && Math.abs(a.year - b.year) > 25) score *= 0.6;
   if (style === 0) score *= 0.3; // different sound worlds
   if (eraClash(a, b)) score *= 0.4; // 60s analog production vs. 80s glossy, etc. (heard)
+  // Production detail (heard): drums AND mix from different worlds clash, even in the same era.
+  if (a.drumSound && b.drumSound && a.mixCharacter && b.mixCharacter &&
+      a.drumSound !== b.drumSound && a.mixCharacter !== b.mixCharacter) score *= 0.6;
   if (feelClash(a, b)) score *= 0.3; // listener would feel something else
   if (scene === 0) score *= 0.4; // different, non-neighbor scenes
   if (soundClash(a, b)) score *= 0.5; // different instrument palette / groove
