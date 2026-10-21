@@ -3261,6 +3261,25 @@ export type Database = {
       }
       enrich_resume_arm: { Args: { _on: boolean }; Returns: undefined }
       hydrate_track_analysis: { Args: { _user_id: string }; Returns: number }
+      moment_queue_next: {
+        Args: { _limit?: number }
+        Returns: {
+          arc: string
+          artist_name: string
+          energy: number
+          feeling: string
+          feeling_2: string
+          instruments: string[]
+          melodic_focus: number
+          scene: string
+          spotify_track_id: string
+          style: string
+          tags: Json
+          track_name: string
+          year: number
+          youtube_summary: string
+        }[]
+      }
       reconcile_liked_songs: {
         Args: {
           _full_reconcile?: boolean
