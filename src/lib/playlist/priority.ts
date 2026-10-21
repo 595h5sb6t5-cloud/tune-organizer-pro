@@ -1,7 +1,7 @@
 import { supabase } from "@/integrations/supabase/client";
 
 /** Expiring per-run leases also recover when a tab closes before finally executes. */
-export async function acquireVibePriority(userId: string) {
+export async function acquireVibePriority(userId: string, deadline = performance.now() + 19_500) {
   const runId = crypto.randomUUID();
   const renew = async () => {
     const { error } = await supabase.from("vibe_priority_leases").upsert({
@@ -10,6 +10,10 @@ export async function acquireVibePriority(userId: string) {
     if (error) throw new Error("No se pudo dar prioridad al vibe. Intenta otra vez.");
   };
   await renew();
+  if (performance.now() >= deadline) {
+    await supabase.from("vibe_priority_leases").delete().eq("user_id", userId).eq("run_id", runId);
+    return undefined;
+  }
   const timer = setInterval(() => { void renew().catch(() => {}); }, 10_000);
   return async () => {
     clearInterval(timer);

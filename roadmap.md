@@ -1,6 +1,8 @@
 # Roadmap — Mensaje Maestro Tempo
 
 ## Orden vinculante actualizado
+- Verificado: 22 pruebas pasan; pausa real de audio/momentos devuelve foreground-priority con sesión autenticada; compilación limpia. No se ejecutó confirmación ni Rebuild.
+- Pendiente de datos al 21 oct 02:08 UTC: 912/1,677 canciones con momentos; 1,536 pendientes de producción detallada. No declarar objetivos de velocidad/costo ni resultados musicales hasta las corridas reales.
 - [ ] Completar producción oída (drum_sound, mix_character, vocal_space), compatibilidad ×0.6 si batería y mezcla distintas; sin reglas por artista.
 - [ ] Prioridad del vibe: pausar/reanudar análisis, reintento una vez, mejores 8 con audio guardado primero, background con un mundo sonoro.
 - [ ] Esperar tagging de momentos y audio pendiente; después confirmación de vibes; solo después Rebuild con 3 vueltas y reporte real.

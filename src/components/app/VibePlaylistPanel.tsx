@@ -182,7 +182,7 @@ export default function VibePlaylistPanel() {
     let release: (() => Promise<void>) | undefined;
     setError(null); setTracks(null); setSavedUrl(null); setClarify(null);
     try {
-      release = await withinBudget(acquireVibePriority(user.id), deadline, undefined);
+      release = await withinBudget(acquireVibePriority(user.id, deadline), deadline, undefined);
       if (!release) throw new Error("No se pudo dar prioridad al vibe a tiempo.");
       const p = await withinBudget(getProfiles(), deadline, null);
       if (!p) throw new Error("El vibe no alcanzó a leer la biblioteca en 20 segundos. Intenta otra vez.");
