@@ -3,6 +3,8 @@ import { compatibility, productionClash } from "./organize";
 import type { TrackProfile } from "./features";
 import { audioFirst, sameBackgroundWorld } from "./vibe";
 import { withinBudget } from "./priority";
+import { readyForPlaylist } from "./prebuild";
+import { pickAnchors } from "./earcheck";
 
 const track = (extra: Partial<TrackProfile> = {}): TrackProfile => ({
   id: "a", uri: "spotify:track:a", name: "Recording", artists: ["Artist"], artistIds: ["artist-a"],
@@ -25,13 +27,22 @@ describe("vibe priority and sonic world", () => {
   });
   it("background rejects different production despite sharing a chill mood", () => {
     expect(sameBackgroundWorld(track(), track({ mixCharacter: "lo-fi-raw" }))).toBe(false);
-    expect(sameBackgroundWorld(track(), track({ vocalStyle: "raspy-rock" })) &&
-      sameBackgroundWorld(track({ vocalStyle: "soft-intimate" }), track({ vocalStyle: "raspy-rock" }))).toBe(false);
+    expect(sameBackgroundWorld(track({ vocalStyle: "soft-intimate" }), track({ vocalStyle: "raspy-rock" }))).toBe(false);
     expect(sameBackgroundWorld(track(), track())).toBe(true);
   });
   it("a hanging operation returns its fallback at the deadline", async () => {
     const result = await withinBudget(new Promise<string>(() => {}), performance.now() + 20, "omitted");
     expect(result).toBe("omitted");
+  });
+  it("missing stored audio stays Analyzing rather than participating in grouping", () => {
+    const complete = track({ audioSource: "deezer", vocalSpace: "close-intimate", moments: [{ m: "late-night-drive", s: 0.8 }] });
+    expect(readyForPlaylist(complete)).toBe(true);
+    expect(readyForPlaylist({ ...complete, audioSource: null })).toBe(false);
+    expect(readyForPlaylist({ ...complete, drumSound: null })).toBe(false);
+  });
+  it("chooses exactly three distinct recordings even when descriptions coincide", () => {
+    expect(pickAnchors(Array.from({ length: 8 }, (_, i) => track({ id: `${i}` }))).map((t) => t.id))
+      .toHaveLength(3);
   });
 });
 
