@@ -71,6 +71,18 @@ function distance(t: TrackProfile, s: VibeSpec): number {
   if (s.preferred_families.length) d += t.families.some((f) => s.preferred_families.includes(f)) ? -0.25 : 0.15;
   if (t.year && s.era_min && t.year < s.era_min) d += 0.4;
   if (t.year && s.era_max && t.year > s.era_max) d += 0.4;
+  const rangeD = (v: number | null | undefined, lo: number | null | undefined, hi: number | null | undefined, w: number) => {
+    if (v == null || (lo == null && hi == null)) return 0;
+    const a = lo ?? 0, b = hi ?? 1;
+    if (a <= 0 && b >= 1) return 0;
+    return v < a ? (a - v) * w : v > b ? (v - b) * w : 0;
+  };
+  d += rangeD(t.warmth, s.warmth_min, s.warmth_max, 1.5);
+  d += rangeD(t.texture, s.texture_min, s.texture_max, 1.5);
+  d += rangeD(t.percussiveDrive, s.percussive_drive_min, s.percussive_drive_max, 1.5);
+  d += rangeD(t.melodicFocus, s.melodic_focus_min, s.melodic_focus_max, 1.5);
+  if (s.instruments_preferred?.length && t.instruments.length)
+    d += t.instruments.some((i) => s.instruments_preferred!.includes(i)) ? -0.2 : 0.1;
   return d;
 }
 
