@@ -280,6 +280,9 @@ export default function OrganizeLibraryPanel({ onSaved }: { onSaved: () => void 
                     <ChevronDown className={`w-4 h-4 transition-transform ${isOpen ? "rotate-180" : ""}`} />
                   </Button>
                 </div>
+                {p.description && (
+                  <p className="px-4 pb-3 -mt-1 text-sm text-muted-foreground">{p.description}</p>
+                )}
 
                 {isOpen && (
                   <ol className="border-t border-border/50 divide-y divide-border/40">
@@ -310,6 +313,22 @@ export default function OrganizeLibraryPanel({ onSaved }: { onSaved: () => void 
               </article>
             );
           })}
+        </section>
+      )}
+
+      {analyzing.length > 0 && (
+        <section className="space-y-2">
+          <h2 className="font-heading text-xl">Analyzing… ({analyzing.length})</h2>
+          <p className="text-sm text-muted-foreground">
+            These songs are still being analyzed in the background. They'll join your playlists automatically
+            on the next rebuild — they're not rejected.
+          </p>
+          <ul className="text-sm text-muted-foreground columns-1 sm:columns-2 gap-6">
+            {analyzing.slice(0, 40).map((t) => (
+              <li key={t.id} className="truncate py-0.5">{t.name} · {t.artists[0]}</li>
+            ))}
+            {analyzing.length > 40 && <li className="py-0.5">…and {analyzing.length - 40} more</li>}
+          </ul>
         </section>
       )}
 
