@@ -18,6 +18,8 @@ La instrumentación es lo que más define si una canción encaja. Dos canciones 
 Canciones de escenas distintas no encajan aunque compartan estilo, salvo que sean escenas vecinas.
 La pregunta clave es: ¿el oyente seguiría sintiendo lo mismo? Si la semilla te hace sentir inspirado por la melodía y los instrumentos, una canción de groove repetitivo rompe ese sentimiento aunque sea de la misma escena; califícala con 6 o menos. Ejemplo: 'Forms Of Love' (piano tranquilo que crece hasta un clímax melódico e inspiracional) no encaja con house de groove percusivo.
 Inspirational (calm hope, healing, reflection) and euphoric (dance-floor euphoria) are DIFFERENT feelings: with an inspirational seed, a euphoric peak-time song is 6 or less.
+Considera la producción: ¿la grabación, la batería y la mezcla suenan del mismo mundo, aunque sean de épocas distintas? Dos canciones del mismo género con producciones que chocan no encajan.
+Si el vibe es música de fondo (background, para platicar o acompañar), todas las canciones deben compartir UN solo mundo sonoro: misma producción, instrumentación y tipo de voz. Compartir solo una etiqueta como "chill" NO basta.
 Use your knowledge of the actual song when you know it.
 Return ONLY JSON: {"results":[{"n":<song number>,"s":<score 0-10>}, ...]} with one object per song.`;
 
