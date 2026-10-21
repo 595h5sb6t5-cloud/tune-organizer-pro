@@ -381,6 +381,10 @@ async function listenCandidates(userId: string, cands: TrackProfile[], seeds: Tr
     const todo = ids.filter((id) => !scores.has(id));
     for (let i = 0; i < todo.length; i += LISTEN_BATCH) jobs.push({ seed, ids: todo.slice(i, i + LISTEN_BATCH) });
   }));
+  // The first job must be the best-ranked candidates (cands arrive already ranked):
+  // sort jobs by the best rank position they contain, so job[0] holds the top 8.
+  const rankPos = new Map(cands.map((c, i) => [c.id, i]));
+  jobs.sort((a, b) => Math.min(...a.ids.map((id) => rankPos.get(id) ?? 1e9)) - Math.min(...b.ids.map((id) => rankPos.get(id) ?? 1e9)));
   const total = jobs.reduce((a, j) => a + j.ids.length, 0);
   let done = 0;
   onProgress?.(0, total);
