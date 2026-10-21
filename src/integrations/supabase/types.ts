@@ -2697,12 +2697,10 @@ export type Database = {
         Row: {
           analyzed_at: string
           confidence: number | null
-          drum_sound: string | null
           groove: string | null
           instruments: string[] | null
           lyric_theme: string | null
           melodic_focus: number | null
-          mix_character: string | null
           model: string | null
           percussive_drive: number | null
           piano: boolean | null
@@ -2712,19 +2710,16 @@ export type Database = {
           source: string
           spotify_track_id: string
           texture: number | null
-          vocal_space: string | null
           vocal_style: string | null
           warmth: number | null
         }
         Insert: {
           analyzed_at?: string
           confidence?: number | null
-          drum_sound?: string | null
           groove?: string | null
           instruments?: string[] | null
           lyric_theme?: string | null
           melodic_focus?: number | null
-          mix_character?: string | null
           model?: string | null
           percussive_drive?: number | null
           piano?: boolean | null
@@ -2734,19 +2729,16 @@ export type Database = {
           source: string
           spotify_track_id: string
           texture?: number | null
-          vocal_space?: string | null
           vocal_style?: string | null
           warmth?: number | null
         }
         Update: {
           analyzed_at?: string
           confidence?: number | null
-          drum_sound?: string | null
           groove?: string | null
           instruments?: string[] | null
           lyric_theme?: string | null
           melodic_focus?: number | null
-          mix_character?: string | null
           model?: string | null
           percussive_drive?: number | null
           piano?: boolean | null
@@ -2756,7 +2748,6 @@ export type Database = {
           source?: string
           spotify_track_id?: string
           texture?: number | null
-          vocal_space?: string | null
           vocal_style?: string | null
           warmth?: number | null
         }

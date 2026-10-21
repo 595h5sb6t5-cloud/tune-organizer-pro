@@ -86,9 +86,6 @@ const SOUND_KEYS = `{"instruments":[up to 6 lowercase instruments you hear, e.g.
 "scale":0-1 (0 intimate, 1 epic),
 "groove":"straight"|"swung"|"broken"|"half-time",
 "production_era": how the PRODUCTION sounds (not the release year): "50s-60s-analog"|"70s-warm-analog"|"80s-glossy"|"90s"|"2000s"|"modern",
-"drum_sound": how the DRUMS sound: "live-room-acoustic"|"gated-reverb-80s"|"drum-machine"|"programmed-modern"|"dry-close"|"brushes-soft"|"none",
-"mix_character": the character of the MIX: "warm-analog"|"bright-polished"|"lo-fi-raw"|"wide-spacious"|"dense-compressed",
-"vocal_space": the space around the VOICE: "close-intimate"|"natural-room"|"big-reverb"|"none",
 "vocal_style":"none"|"soft-intimate"|"crooner"|"soulful"|"powerful-belter"|"raspy-rock"|"rap"|"choir-group",
 "lyric_theme": from any lyrics you hear: "love"|"heartbreak"|"hope"|"party"|"life-reflection"|"other"}`;
 
@@ -102,9 +99,6 @@ const GROOVES = ["straight", "swung", "broken", "half-time"];
 export const PRODUCTION_ERAS = ["50s-60s-analog", "70s-warm-analog", "80s-glossy", "90s", "2000s", "modern"];
 export const VOCAL_STYLES = ["none", "soft-intimate", "crooner", "soulful", "powerful-belter", "raspy-rock", "rap", "choir-group"];
 export const LYRIC_THEMES = ["love", "heartbreak", "hope", "party", "life-reflection", "other"];
-export const DRUM_SOUNDS = ["live-room-acoustic", "gated-reverb-80s", "drum-machine", "programmed-modern", "dry-close", "brushes-soft", "none"];
-export const MIX_CHARACTERS = ["warm-analog", "bright-polished", "lo-fi-raw", "wide-spacious", "dense-compressed"];
-export const VOCAL_SPACES = ["close-intimate", "natural-room", "big-reverb", "none"];
 export function cleanSound(r: any) {
   return {
     instruments: Array.isArray(r?.instruments) ? r.instruments.map((x: unknown) => String(x).toLowerCase().slice(0, 30)).slice(0, 6) : null,
@@ -113,9 +107,6 @@ export function cleanSound(r: any) {
     texture: c01(r?.texture), warmth: c01(r?.warmth), scale: c01(r?.scale),
     groove: GROOVES.includes(r?.groove) ? r.groove : null,
     production_era: PRODUCTION_ERAS.includes(r?.production_era) ? r.production_era : null,
-    drum_sound: DRUM_SOUNDS.includes(r?.drum_sound) ? r.drum_sound : null,
-    mix_character: MIX_CHARACTERS.includes(r?.mix_character) ? r.mix_character : null,
-    vocal_space: VOCAL_SPACES.includes(r?.vocal_space) ? r.vocal_space : null,
     vocal_style: VOCAL_STYLES.includes(r?.vocal_style) ? r.vocal_style : null,
     lyric_theme: LYRIC_THEMES.includes(r?.lyric_theme) ? r.lyric_theme : null,
   };

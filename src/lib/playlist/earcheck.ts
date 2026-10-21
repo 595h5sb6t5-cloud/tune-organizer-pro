@@ -36,7 +36,6 @@ const earSeed = (t: TrackProfile) => ({
   name: t.name, artists: t.artists, instruments: t.instruments, piano: null,
   melodic_focus: r2n(t.melodicFocus), percussive_drive: r2n(t.percussiveDrive), texture: r2n(t.texture), warmth: r2n(t.warmth),
   scale: r2n(t.scale), groove: t.groove, energy: r2n(t.energy), style: t.style ?? null, feeling: t.feeling, feeling_2: t.feeling2 ?? null, arc: t.arc,
-  drum_sound: t.drumSound ?? null, mix_character: t.mixCharacter ?? null, vocal_space: t.vocalSpace ?? null,
   moments: t.moments?.map((m) => m.m), moment_story: t.momentStory ?? undefined,
 });
 
