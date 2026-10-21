@@ -213,8 +213,7 @@ async function scoreCandidates(userId: string, vibe: string, cands: TrackProfile
 }
 
 const LISTEN_TOP = 40;
-const LISTEN_BATCH = 4;
-const LISTEN_PARALLEL = 10; // all 10 batches at once
+const LISTEN_BATCH = 8; // 5 requests for 40 songs, all at once
 
 const near = (x: number | null | undefined, y: number | null | undefined, tol = 0.35) =>
   x == null || y == null ? null : Math.max(0, 1 - Math.abs(x - y) / tol);
