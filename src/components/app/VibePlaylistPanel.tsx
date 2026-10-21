@@ -11,6 +11,7 @@ import { buildProfiles, type TrackProfile } from "@/lib/playlist/features";
 import { enrichWithAI } from "@/lib/playlist/ai";
 import { sequence } from "@/lib/playlist/organize";
 import { buildVibePlaylist, readVibeSpec, type VibeSpec, type SpecCorrection } from "@/lib/playlist/vibe";
+import { acquireVibePriority, withinBudget } from "@/lib/playlist/priority";
 import { MOMENT_LABEL as LIFE_MOMENT_LABEL, MOMENT_DESC } from "@/lib/playlist/moments";
 import { recordRemoval } from "@/lib/playlist/feedback";
 import EditSoundDialog from "@/components/app/EditSoundDialog";
@@ -176,9 +177,15 @@ export default function VibePlaylistPanel() {
   async function create(opts: { spec?: VibeSpec; text?: string; answered?: boolean } = {}) {
     if (!user || !canCreate) return;
     const run = ++runRef.current;
+    const startedAt = performance.now();
+    const deadline = startedAt + 19_500;
+    let release: (() => Promise<void>) | undefined;
     setError(null); setTracks(null); setSavedUrl(null); setClarify(null);
     try {
-      const p = await getProfiles();
+      release = await withinBudget(acquireVibePriority(user.id, deadline), deadline, undefined);
+      if (!release) throw new Error("No se pudo dar prioridad al vibe a tiempo.");
+      const p = await withinBudget(getProfiles(), deadline, null);
+      if (!p) throw new Error("El vibe no alcanzó a leer la biblioteca en 20 segundos. Intenta otra vez.");
       if (runRef.current !== run) return;
       const seedProfiles = seeds.map((s) => p.find((x) => x.id === s.track.id)).filter((x): x is TrackProfile => !!x);
       const words = opts.text ?? (seeds.length ? keywords : vibe.trim());
@@ -186,8 +193,9 @@ export default function VibePlaylistPanel() {
       let corrections: SpecCorrection[] = [];
       if (words && !preset) {
         setStep({ label: "Reading the vibe" });
-        corrections = await loadCorrections(user.id);
-        const spec = await readVibeSpec(user.id, words, seedProfiles, corrections);
+        corrections = await withinBudget(loadCorrections(user.id), deadline, []);
+        const spec = await withinBudget(readVibeSpec(user.id, words, seedProfiles, corrections), deadline, null);
+        if (!spec) throw new Error("No se pudo interpretar el vibe en 20 segundos. Intenta otra vez.");
         if (runRef.current !== run) return;
         // Ambiguous description without a seed: ask ONE quick question instead of guessing.
         // Once the user answered (opts.answered), never ask again — build with the answer.
@@ -199,7 +207,7 @@ export default function VibePlaylistPanel() {
         (label, done, total) => { if (runRef.current === run) setStep({ label, done, total }); },
         seedProfiles, artistSeed?.name,
         (live) => { if (runRef.current === run) setTracks(live); },
-        { presetSpec: preset, corrections });
+        { presetSpec: preset, corrections, startedAt });
       if (runRef.current !== run) return;
       setName(res.spec.name);
       setTracks(res.tracks);
@@ -208,6 +216,7 @@ export default function VibePlaylistPanel() {
       if (runRef.current === run) setError(e instanceof Error ? e.message : "Something went wrong.");
     } finally {
       if (runRef.current === run) setStep(null);
+      if (release) void release();
     }
   }
 

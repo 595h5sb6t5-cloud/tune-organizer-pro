@@ -10,6 +10,10 @@ import { earCheckPlaylists } from "./earcheck";
 import { loadLikedTracks, loadArtistGenres } from "@/components/app/OrganizeLibraryPanel";
 import type { TrackProfile } from "./features";
 
+export const readyForPlaylist = (p: TrackProfile) => !!p.style &&
+  (p.audioSource === "deezer" || p.audioSource === "itunes") &&
+  !!p.drumSound && !!p.mixCharacter && !!p.vocalSpace && !!p.moments?.length;
+
 /** First set once the priority songs are analyzed; then rebuild on ≥5% change or when analysis finishes. */
 export const FIRST_BUILD_SONGS = 200;
 export const REBUILD_SHARE = 0.05;
@@ -72,8 +76,9 @@ export async function buildAndSave(userId: string, signal: number, onProgress?: 
   const all = await enrichWithAI(buildProfiles(tracks, genres));
   // Songs whose analysis hasn't finished yet are not "Not placed" — they're "Analyzing…"
   // and the background enrichment keeps working on them.
-  const analyzing = all.filter((p) => !p.style);
-  const profiles = all.filter((p) => !!p.style);
+  const analyzing = all.filter((p) => !readyForPlaylist(p));
+  const profiles = all.filter(readyForPlaylist);
+  if (analyzing.length) void supabase.functions.invoke("audio-analyze", { body: { queue_ids: analyzing.map((p) => p.id) } }).catch(() => {});
   const curated = await curateLibrary(organizeLibrary(profiles), (t) => askCurator(t), () => {});
   // The ear: Gemini hears every playlist against its anchors; only 8+ stays.
   onProgress?.("Listening to the playlists", 0, 0);
@@ -106,6 +111,8 @@ export async function buildAndSave(userId: string, signal: number, onProgress?: 
 
 /** Checks whether a rebuild is due and runs it. Safe to call often: a DB lease keeps it single-flight. */
 export async function maybePrebuild(userId: string, force = false): Promise<boolean> {
+  // Verification hold: only an explicit rebuild may run while the master report is pending.
+  if (!force) return false;
   const [counts, current] = await Promise.all([analysisCounts(userId), loadPrebuilt(userId)]);
   const due = force || needsRebuild({
     total: counts.total, analyzed: counts.signal, builtCount: current?.analyzed_count ?? 0,

@@ -155,6 +155,13 @@
       "when": 1792545993533,
       "tag": "0021_moment_queue_rpc",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1792548120529,
+      "tag": "0022_heard_production_and_vibe_priority",
+      "breakpoints": true
     }
   ]
 }

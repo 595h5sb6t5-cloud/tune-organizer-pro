@@ -1,5 +1,12 @@
 # Roadmap — Mensaje Maestro Tempo
 
+## Orden vinculante actualizado
+- Verificado: 22 pruebas pasan; pausa real de audio/momentos devuelve foreground-priority con sesión autenticada; compilación limpia. No se ejecutó confirmación ni Rebuild.
+- Pendiente de datos al 21 oct 02:08 UTC: 912/1,677 canciones con momentos; 1,536 pendientes de producción detallada. No declarar objetivos de velocidad/costo ni resultados musicales hasta las corridas reales.
+- [ ] Completar producción oída (drum_sound, mix_character, vocal_space), compatibilidad ×0.6 si batería y mezcla distintas; sin reglas por artista.
+- [ ] Prioridad del vibe: pausar/reanudar análisis, reintento una vez, mejores 8 con audio guardado primero, background con un mundo sonoro.
+- [ ] Esperar tagging de momentos y audio pendiente; después confirmación de vibes; solo después Rebuild con 3 vueltas y reporte real.
+
 ## Parte 1 — URGENTE: Not Placed (1,293 / 77%)
 - [ ] Revisar logs del último Rebuild: fallos/timeouts/límites de Gemini; error NUNCA = rechazo (queda en su lugar o "Analyzing…", reintento con menos concurrencia). Detener Rebuild si corre.
 - [ ] Canciones sin análisis de audio → "Analyzing…" (no Not placed); reanudar análisis de fondo.
@@ -32,7 +39,7 @@
 
 ## Pruebas (iterar hasta pasar, luego reportar)
 - [ ] Rebuild: playlists con nombre+momento+descripción; Not placed ≤20%; Analyzing…; errores de escucha; créditos y tiempo.
-- [ ] Beatles ≠ Phil Collins "All of My Life"; "Can You Feel the Love Tonight" ≠ "My Destiny"; Forms Of Love: fuera Dune/calvera/Working for It/Waves & Wavs/L.I.F.E, entra Tell Me Are We.
+- [ ] Reportar ubicación y vecinas de "All of My Life" (Beatles permitidos si el oído acepta); ubicación de "Can You Feel the Love Tonight" y "My Destiny". Forms Of Love: solo Dune/calvera y correcciones X son exclusiones decididas; reportar lista completa y razones del oído sin forzar otras canciones.
 - [ ] 4 vibes: "late night drive", "chill platica buena", "carne asada con la familia", "full instrumental sunset" — embudo, entendido, canciones, tiempo.
 
 ## Después (bloqueado hasta reportar lo anterior)

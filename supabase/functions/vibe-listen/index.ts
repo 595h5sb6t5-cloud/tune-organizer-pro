@@ -15,13 +15,16 @@ const PROMPT = `You are a DJ checking if songs belong in the same playlist as th
 Read the SEED's sound description (heard earlier), then listen to each numbered SONG clip (15 s from the middle of the song). For each song rate 0–10 how much it SOUNDS like the same sonic world as the seed:
 instrument palette (piano, synths, organic percussion, vocals…), melody-led vs groove/percussion-led, texture (organic vs synthetic), warmth and drive.
 10 = could be the next track in the same set; 8 = clearly the same world; 7 = close with one small difference; 6 or less = a listener would notice it doesn't belong.
-Judge ONLY what you hear. Return ONLY JSON: {"results":[{"n":<song number>,"s":<score>}]}`;
+Considera la producción: ¿la grabación, la batería y la mezcla suenan del mismo mundo, aunque sean de épocas distintas? Dos canciones del mismo género con producciones que chocan no encajan.
+Judge ONLY what you hear. Return ONLY JSON: {"results":[{"n":<song number>,"s":<score>,"why":"one short Spanish sentence explaining the heard fit or clash"}]}`;
 
 const PROMPT_DESC = `You are a DJ checking if songs fit a described vibe.
 Read the VIBE description, then listen to each numbered SONG clip (15 s from the middle of the song). For each song rate 0–10 how well what you HEAR fits the vibe:
 voices (or lack of them), instrument palette, melody-led vs groove/percussion-led, texture (organic vs synthetic), warmth, energy and drive, and the moment it evokes.
 10 = perfect for that moment; 8 = clearly fits; 7 = fits with one small difference; 6 or less = a listener in that moment would skip it.
-Judge ONLY what you hear. Return ONLY JSON: {"results":[{"n":<song number>,"s":<score>}]}`;
+Considera la producción: ¿la grabación, la batería y la mezcla suenan del mismo mundo, aunque sean de épocas distintas? Dos canciones del mismo género con producciones que chocan no encajan.
+For background listening, all accepted songs must share one sonic world: production, instrumentation and vocal type. A chill label alone is not enough.
+Judge ONLY what you hear. Return ONLY JSON: {"results":[{"n":<song number>,"s":<score>,"why":"one short Spanish sentence explaining the heard fit or clash"}]}`;
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -36,7 +39,7 @@ Deno.serve(async (req) => {
     const ids = str(body?.ids, 8);
     const seed = body?.seed && typeof body.seed === "object" ? body.seed : null;
     const description = typeof body?.description === "string" ? body.description.trim().slice(0, 400) : "";
-    const context = typeof body?.context === "string" ? body.context.trim().slice(0, 120) : "";
+    const context = typeof body?.context === "string" ? body.context.trim().slice(0, 1200) : "";
     if ((!seed && !description) || !ids.length) return json({ error: "Send a seed profile or a description, and 1–8 songs." }, 400);
 
     const { data: rows } = await admin.from("liked_songs").select("spotify_track_id, isrc, track_name, artist_name")
@@ -58,7 +61,8 @@ Deno.serve(async (req) => {
     const seedText = seed
       ? `SEED: "${f(seed.name)}" by ${f(seed.artists)} | instruments: ${f(seed.instruments)} | piano: ${f(seed.piano)} | melodic_focus: ${f(seed.melodic_focus)} | percussive_drive: ${f(seed.percussive_drive)} | texture: ${f(seed.texture)} | warmth: ${f(seed.warmth)} | scale: ${f(seed.scale)} | groove: ${f(seed.groove)} | energy: ${f(seed.energy)} | style: ${f(seed.style)} | feeling: ${f(seed.feeling)}${seed.feeling_2 ? ` (also ${f(seed.feeling_2)})` : ""} | arc: ${f(seed.arc)}`
       : `VIBE: ${description}`;
-    const ctxText = context ? `\nAdemás de sonar del mismo mundo que la semilla, ¿encaja con este contexto: ${context}? A song that sounds right but does not fit this context scores 7 or less.` : "";
+    const production = seed ? `\nSTORED PRODUCTION: era=${f(seed.production_era)}; drums=${f(seed.drum_sound)}; mix=${f(seed.mix_character)}; voice space=${f(seed.vocal_space)}; voice type=${f(seed.vocal_style)}; moments=${f(seed.moments)}; moment story=${f(seed.moment_story)}` : "";
+    const ctxText = production + (context ? `\nAdemás de sonar del mismo mundo que la semilla, ¿encaja con este contexto: ${context}? A song that sounds right but does not fit this context scores 7 or less.` : "");
     const content: any[] = [{ type: "text", text: (seed ? PROMPT : PROMPT_DESC) + ctxText }, { type: "text", text: seedText }];
     songs.forEach((s, i) => {
       content.push({ type: "text", text: `SONG ${i + 1}: ${s.label}` });
@@ -66,17 +70,18 @@ Deno.serve(async (req) => {
     });
     const t1 = Date.now();
     let parsed: any;
-    try { try { parsed = await gemini(content); } catch (e) { if (!(e instanceof GatewayRetry)) throw e; await new Promise((r) => setTimeout(r, 1500)); parsed = await gemini(content); } }
+    // Client owns the single bounded retry; do not multiply provider requests here.
+    try { parsed = await gemini(content); }
     catch (e) {
       if (e instanceof GatewayStop) return json({ error: e.message }, e.status);
-      if (e instanceof GatewayRetry) return json({ error: "The listening step is busy. Try again in a moment." }, 429);
+      if (e instanceof GatewayRetry) return json({ error: "The listening step is busy. Try again in a moment.", retry_after_ms: e.waitMs }, 429);
       throw e;
     }
     console.log(`[vibe-listen] clips ${t1 - t0}ms gemini ${Date.now() - t1}ms songs ${songs.length}`);
     const results = (Array.isArray(parsed?.results) ? parsed.results : [])
-      .map((r: any) => ({ id: songs[Number(r?.n) - 1]?.id, score: Number(r?.s ?? r?.score) }))
+      .map((r: any) => ({ id: songs[Number(r?.n) - 1]?.id, score: Number(r?.s ?? r?.score), why: typeof r?.why === "string" ? r.why.slice(0, 240) : null }))
       .filter((r: any) => r.id && Number.isFinite(r.score))
-      .map((r: any) => ({ id: r.id, score: Math.max(0, Math.min(10, r.score)) }));
+      .map((r: any) => ({ id: r.id, score: Math.max(0, Math.min(10, r.score)), why: r.why }));
     return json({ results, unheard });
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : "Unknown error" }, 500);

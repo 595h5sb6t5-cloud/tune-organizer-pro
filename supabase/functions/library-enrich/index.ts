@@ -4,6 +4,7 @@
 // Spotify asks to wait > 30s (or QUOTA_EXCEEDED) it pauses and a cron sweep
 // resumes it after paused_until.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { vibeHasPriority } from "../_shared/analysis-priority.ts";
 
 import { SOUND_PROMPT, sanitizeSound } from "../_shared/sound.ts";
 import { classifyScenes, DANCE_STYLES } from "../_shared/scene.ts";
@@ -162,6 +163,7 @@ const utcDay = () => new Date().toISOString().slice(0, 10);
 const nextUtcMidnight = () => { const d = new Date(); d.setUTCHours(24, 0, 0, 0); return d.getTime(); };
 
 async function runHop(admin: any, userId: string, started: number, skipSpotify = false, forceIds: Set<string> = new Set()) {
+  if (await vibeHasPriority(admin)) return;
   // Songs any user already analyzed are copied from the shared table, never re-analyzed.
   const { data: hydrated } = await admin.rpc("hydrate_track_analysis", { _user_id: userId });
   if (hydrated) console.log(`[library-enrich] reused shared analysis for ${hydrated} songs`);
@@ -185,6 +187,7 @@ async function runHop(admin: any, userId: string, started: number, skipSpotify =
     for (let i = 0; i < trackQueue.length; i += AI_BATCH) batches.push(trackQueue.slice(i, i + AI_BATCH));
     const worker = async () => {
       while (batches.length && Date.now() - started < HOP_BUDGET_MS) {
+        if (await vibeHasPriority(admin)) return;
         const batch = batches.shift()!;
         let rows: any[];
         try { rows = await classifyBatch(admin, apiKey, userId, batch, genreMap); } catch (e) { batches.length = 0; throw e; }
@@ -210,6 +213,7 @@ async function runHop(admin: any, userId: string, started: number, skipSpotify =
     scenesLeft = jobs.reduce((a, j) => a + j.songs.length, 0);
     const worker = async () => {
       while (jobs.length && Date.now() - started < HOP_BUDGET_MS) {
+        if (await vibeHasPriority(admin)) return;
         const job = jobs.shift()!;
         const songs = job.songs.map((t) => ({
           id: t.spotify_track_id,
@@ -268,6 +272,7 @@ async function runHop(admin: any, userId: string, started: number, skipSpotify =
     };
     const worker = async () => {
       while (artistQueue.length && !pause && Date.now() - started < HOP_BUDGET_MS) {
+        if (await vibeHasPriority(admin)) return;
         if (used >= DAILY_GENRE_CAP) { pause = new Pause(nextUtcMidnight(), "daily_cap", 0, null); return; }
         if (++sinceCheck >= 10) {
           sinceCheck = 0;

@@ -6,6 +6,7 @@
 // - Self-chains before hitting the CPU wall so long libraries finish reliably.
 // - Idempotent: if a job is already running for the user, returns it.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { vibeHasPriority } from "../_shared/analysis-priority.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -120,6 +121,10 @@ async function runLoop(
   }).eq("id", jobId);
 
   while (true) {
+    if (await vibeHasPriority(adm)) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      continue;
+    }
     const elapsedThisRun = Date.now() - runStart;
     if (elapsedThisRun > MAX_RUN_MS) {
       // Self-chain to a fresh invocation, then exit this one.

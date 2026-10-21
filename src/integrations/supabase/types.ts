@@ -512,6 +512,27 @@ export type Database = {
         }
         Relationships: []
       }
+      background_control: {
+        Row: {
+          id: number
+          paused_until: string | null
+          reason: string | null
+          updated_at: string
+        }
+        Insert: {
+          id?: number
+          paused_until?: string | null
+          reason?: string | null
+          updated_at?: string
+        }
+        Update: {
+          id?: number
+          paused_until?: string | null
+          reason?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       cluster_candidate_tracks: {
         Row: {
           artist_context_fit: number | null
@@ -2676,10 +2697,12 @@ export type Database = {
         Row: {
           analyzed_at: string
           confidence: number | null
+          drum_sound: string | null
           groove: string | null
           instruments: string[] | null
           lyric_theme: string | null
           melodic_focus: number | null
+          mix_character: string | null
           model: string | null
           percussive_drive: number | null
           piano: boolean | null
@@ -2689,16 +2712,19 @@ export type Database = {
           source: string
           spotify_track_id: string
           texture: number | null
+          vocal_space: string | null
           vocal_style: string | null
           warmth: number | null
         }
         Insert: {
           analyzed_at?: string
           confidence?: number | null
+          drum_sound?: string | null
           groove?: string | null
           instruments?: string[] | null
           lyric_theme?: string | null
           melodic_focus?: number | null
+          mix_character?: string | null
           model?: string | null
           percussive_drive?: number | null
           piano?: boolean | null
@@ -2708,16 +2734,19 @@ export type Database = {
           source: string
           spotify_track_id: string
           texture?: number | null
+          vocal_space?: string | null
           vocal_style?: string | null
           warmth?: number | null
         }
         Update: {
           analyzed_at?: string
           confidence?: number | null
+          drum_sound?: string | null
           groove?: string | null
           instruments?: string[] | null
           lyric_theme?: string | null
           melodic_focus?: number | null
+          mix_character?: string | null
           model?: string | null
           percussive_drive?: number | null
           piano?: boolean | null
@@ -2727,6 +2756,7 @@ export type Database = {
           source?: string
           spotify_track_id?: string
           texture?: number | null
+          vocal_space?: string | null
           vocal_style?: string | null
           warmth?: number | null
         }
@@ -3134,6 +3164,24 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      vibe_priority_leases: {
+        Row: {
+          expires_at: string
+          run_id: string
+          user_id: string
+        }
+        Insert: {
+          expires_at?: string
+          run_id: string
+          user_id: string
+        }
+        Update: {
+          expires_at?: string
+          run_id?: string
+          user_id?: string
+        }
+        Relationships: []
       }
       vibe_select_cache: {
         Row: {

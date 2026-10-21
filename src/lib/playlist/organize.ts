@@ -250,6 +250,10 @@ export const eraClash = (a: TrackProfile, b: TrackProfile) => {
   return x >= 0 && y >= 0 && Math.abs(x - y) >= 2;
 };
 
+export const productionClash = (a: TrackProfile, b: TrackProfile) =>
+  !!a.drumSound && !!b.drumSound && a.drumSound !== b.drumSound &&
+  !!a.mixCharacter && !!b.mixCharacter && a.mixCharacter !== b.mixCharacter;
+
 export function compatibility(a: TrackProfile, b: TrackProfile): number {
   if (!languagesCompatible(a, b)) return 0;
   if (warmColdClash(a, b)) return 0;
@@ -300,11 +304,11 @@ export function compatibility(a: TrackProfile, b: TrackProfile): number {
   if (a.year && b.year && Math.abs(a.year - b.year) > 25) score *= 0.6;
   if (style === 0) score *= 0.3; // different sound worlds
   if (eraClash(a, b)) score *= 0.4; // 60s analog production vs. 80s glossy, etc. (heard)
+  if (productionClash(a, b)) score *= 0.6;
   if (feelClash(a, b)) score *= 0.3; // listener would feel something else
   if (scene === 0) score *= 0.4; // different, non-neighbor scenes
   if (soundClash(a, b)) score *= 0.5; // different instrument palette / groove
   if (drumClash(a, b)) score *= 0.3; // drum-driven vs. barely any drums (heard)
-  if (a.artistIds.some((id) => b.artistIds.includes(id))) score = Math.min(1, score + 0.08);
   return score;
 }
 

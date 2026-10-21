@@ -12,7 +12,7 @@ import { MOMENT_DESC } from "./moments";
 
 const MIN_EAR = 8;
 const BATCH = 8;
-const CONCURRENCY = 6; // simultaneous vibe-listen requests
+const CONCURRENCY = 3; // bounded ear load while background analysis finishes
 const MIN_SIZE = 8;
 
 /** The 3 songs most compatible with the rest of the playlist, well separated. */
@@ -28,6 +28,13 @@ export function pickAnchors(tracks: TrackProfile[]): TrackProfile[] {
     if (anchors.some((a) => a.id === s.t.id)) continue;
     if (anchors.every((a) => compatibility(s.t, a) < 0.9)) anchors.push(s.t);
   }
+  // Identical descriptions still require three distinct recordings: choose the most separated remaining songs.
+  while (anchors.length < Math.min(3, tracks.length)) {
+    const next = scored.filter(({ t }) => !anchors.some((a) => a.id === t.id))
+      .sort((a, b) => Math.max(...anchors.map((x) => compatibility(a.t, x))) - Math.max(...anchors.map((x) => compatibility(b.t, x))))[0]?.t;
+    if (!next) break;
+    anchors.push(next);
+  }
   return anchors;
 }
 
@@ -37,6 +44,8 @@ const earSeed = (t: TrackProfile) => ({
   melodic_focus: r2n(t.melodicFocus), percussive_drive: r2n(t.percussiveDrive), texture: r2n(t.texture), warmth: r2n(t.warmth),
   scale: r2n(t.scale), groove: t.groove, energy: r2n(t.energy), style: t.style ?? null, feeling: t.feeling, feeling_2: t.feeling2 ?? null, arc: t.arc,
   moments: t.moments?.map((m) => m.m), moment_story: t.momentStory ?? undefined,
+  production_era: t.productionEra, drum_sound: t.drumSound, mix_character: t.mixCharacter,
+  vocal_space: t.vocalSpace, vocal_style: t.vocalStyle,
 });
 
 /** Stable content hash: the cache key changes exactly when the playlist's songs change. */
@@ -61,12 +70,8 @@ async function runJobs(userId: string, jobs: ListenJob[], scores: Map<string, nu
       const call = () => supabase.functions.invoke("vibe-listen", { body: { seed: earSeed(j.seed), ids: j.ids } });
       let { data, error } = await call();
       if (error || data?.error) {
-        const msg = `${error?.message ?? ""} ${data?.error ?? ""}`;
-        const retryable = /429|5\d\d|rate|timeout|busy/i.test(msg);
-        if (retryable) {
-          await sleep(1500 + Math.random() * 1500); // bounded backoff, never immediate
-          ({ data, error } = await call());
-        }
+        await sleep(Math.max(1500, Number(data?.retry_after_ms) || 0));
+        ({ data, error } = await call());
       }
       if (error || data?.error) { for (const id of j.ids) unheard.add(id); continue; }
       for (const id of data.unheard ?? []) unheard.add(id);
@@ -110,7 +115,7 @@ export async function earCheckPlaylists(
     // Each song is judged against its closest anchor.
     const near = (t: TrackProfile) => anchors.reduce((best, a) =>
       compatibility(t, a) > compatibility(t, best) ? a : best, anchors[0]);
-    const key = (a: TrackProfile) => `pl1|${a.id}|${contentHash(p.tracks.map((t) => t.id))}`;
+    const key = (a: TrackProfile) => `pl2-production|${a.id}|${contentHash(p.tracks.map((t) => `${t.id}:${t.drumSound}:${t.mixCharacter}:${t.vocalSpace}`))}`;
     return { p, anchors, rest, near, key };
   });
 
@@ -130,7 +135,8 @@ export async function earCheckPlaylists(
       byAnchor.set(k, [...(byAnchor.get(k) ?? []), t.id]);
     }
     for (const [k, ids] of byAnchor) {
-      const seed = x.anchors.find((a) => k.startsWith(`pl1|${a.id}|`))!;
+      const seed = x.anchors.find((a) => k.startsWith(`pl2-production|${a.id}|`));
+      if (!seed) continue;
       for (let i = 0; i < ids.length; i += BATCH) jobs.push({ key: k, seed, ids: ids.slice(i, i + BATCH) });
     }
   }
@@ -176,7 +182,8 @@ export async function earCheckPlaylists(
       .slice(0, 2);
     let placed = false;
     for (const { p } of options) {
-      const plan = plans.find((x) => x.p.key === p.key)!;
+      const plan = plans.find((x) => x.p.key === p.key);
+      if (!plan) continue;
       const a = plan.near(t);
       const k = plan.key(a);
       const s = scores.get(`${k}|${t.id}`);
