@@ -37,6 +37,8 @@ const earSeed = (t: TrackProfile) => ({
   melodic_focus: r2n(t.melodicFocus), percussive_drive: r2n(t.percussiveDrive), texture: r2n(t.texture), warmth: r2n(t.warmth),
   scale: r2n(t.scale), groove: t.groove, energy: r2n(t.energy), style: t.style ?? null, feeling: t.feeling, feeling_2: t.feeling2 ?? null, arc: t.arc,
   moments: t.moments?.map((m) => m.m), moment_story: t.momentStory ?? undefined,
+  production_era: t.productionEra, drum_sound: t.drumSound, mix_character: t.mixCharacter,
+  vocal_space: t.vocalSpace, vocal_style: t.vocalStyle,
 });
 
 /** Stable content hash: the cache key changes exactly when the playlist's songs change. */
@@ -110,7 +112,7 @@ export async function earCheckPlaylists(
     // Each song is judged against its closest anchor.
     const near = (t: TrackProfile) => anchors.reduce((best, a) =>
       compatibility(t, a) > compatibility(t, best) ? a : best, anchors[0]);
-    const key = (a: TrackProfile) => `pl1|${a.id}|${contentHash(p.tracks.map((t) => t.id))}`;
+    const key = (a: TrackProfile) => `pl2-production|${a.id}|${contentHash(p.tracks.map((t) => `${t.id}:${t.drumSound}:${t.mixCharacter}:${t.vocalSpace}`))}`;
     return { p, anchors, rest, near, key };
   });
 
@@ -130,7 +132,8 @@ export async function earCheckPlaylists(
       byAnchor.set(k, [...(byAnchor.get(k) ?? []), t.id]);
     }
     for (const [k, ids] of byAnchor) {
-      const seed = x.anchors.find((a) => k.startsWith(`pl1|${a.id}|`))!;
+      const seed = x.anchors.find((a) => k.startsWith(`pl2-production|${a.id}|`));
+      if (!seed) continue;
       for (let i = 0; i < ids.length; i += BATCH) jobs.push({ key: k, seed, ids: ids.slice(i, i + BATCH) });
     }
   }
@@ -176,7 +179,8 @@ export async function earCheckPlaylists(
       .slice(0, 2);
     let placed = false;
     for (const { p } of options) {
-      const plan = plans.find((x) => x.p.key === p.key)!;
+      const plan = plans.find((x) => x.p.key === p.key);
+      if (!plan) continue;
       const a = plan.near(t);
       const k = plan.key(a);
       const s = scores.get(`${k}|${t.id}`);

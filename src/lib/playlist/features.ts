@@ -61,6 +61,9 @@ export interface TrackProfile {
   percussiveDrive?: number | null; // 0 barely any drums → 1 drums push everything (heard from preview)
   audioSource?: "deezer" | "itunes" | "none" | null; // where the heard sound came from ("none" = no preview)
   productionEra?: string | null; // how the production SOUNDS: 50s-60s-analog | 70s-warm-analog | 80s-glossy | 90s | 2000s | modern
+  drumSound?: string | null;
+  mixCharacter?: string | null;
+  vocalSpace?: string | null;
   vocalStyle?: string | null; // none | soft-intimate | crooner | soulful | powerful-belter | raspy-rock | rap | choir-group
   lyricTheme?: string | null; // love | heartbreak | hope | party | life-reflection | other (low weight)
   soundEdited?: boolean; // user corrected the sound by hand

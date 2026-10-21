@@ -4,6 +4,7 @@
 // NOTE: Revisar términos de Deezer antes de lanzar al público.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { AUDIO_MODEL, findPreview, fetchAudioB64, gemini, audioPrompt, textPrompt, cleanSound, GatewayRetry, GatewayStop } from "../_shared/audio.ts";
+import { vibeHasPriority } from "../_shared/analysis-priority.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -20,52 +21,35 @@ const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: 
 
 interface Row { spotify_track_id: string; isrc: string | null; track_name: string; artist_name: string }
 
-const DOUBLE_MODEL = AUDIO_MODEL + "|x2";
-
-/** Seeds: two listens. An instrument counts only if both heard it; numbers are averaged. */
-function mergeTwo(a: ReturnType<typeof cleanSound>, b: ReturnType<typeof cleanSound>) {
-  const avg = (x: number | null, y: number | null) => x === null ? y : y === null ? x : Math.round(((x + y) / 2) * 100) / 100;
-  const both = a.instruments && b.instruments ? a.instruments.filter((i) => b.instruments!.includes(i)) : a.instruments ?? b.instruments;
-  return {
-    instruments: both, piano: a.piano === null ? b.piano : b.piano === null ? a.piano : a.piano && b.piano,
-    melodic_focus: avg(a.melodic_focus, b.melodic_focus), percussive_drive: avg(a.percussive_drive, b.percussive_drive),
-    texture: avg(a.texture, b.texture), warmth: avg(a.warmth, b.warmth), scale: avg(a.scale, b.scale),
-    groove: a.groove === b.groove ? a.groove : a.groove ?? b.groove,
-    production_era: a.production_era === b.production_era ? a.production_era : a.production_era ?? b.production_era,
-    vocal_style: a.vocal_style === b.vocal_style ? a.vocal_style : a.vocal_style ?? b.vocal_style,
-    lyric_theme: a.lyric_theme === b.lyric_theme ? a.lyric_theme : a.lyric_theme ?? b.lyric_theme,
-  };
-}
-
-async function analyzeOne(admin: any, t: Row, twice = false) {
+async function analyzeOne(admin: any, t: Row) {
   const ref = await findPreview(t.isrc, t.track_name, t.artist_name);
   const b64 = ref ? await fetchAudioB64(ref.url) : null;
   const ask = () => b64
     ? gemini([{ type: "text", text: audioPrompt(t.track_name, t.artist_name) }, { type: "input_audio", input_audio: { data: b64, format: "mp3" } }])
     : gemini([{ type: "text", text: textPrompt(t.track_name, t.artist_name) }]);
-  let s;
-  if (twice && b64) {
-    const [r1, r2] = await Promise.all([ask(), ask()]);
-    s = mergeTwo(cleanSound(r1), cleanSound(r2));
-  } else s = cleanSound(await ask());
-  await admin.from("track_audio_analysis").upsert({
-    spotify_track_id: t.spotify_track_id, source: b64 ? ref!.source : "none", ...s,
-    confidence: b64 ? 0.85 : 0.4, model: twice && b64 ? DOUBLE_MODEL : AUDIO_MODEL, analyzed_at: new Date().toISOString(),
+  const s = cleanSound(await ask());
+  const source = b64 && ref ? ref.source : "none";
+  const { error } = await admin.from("track_audio_analysis").upsert({
+    spotify_track_id: t.spotify_track_id, source, ...s,
+    confidence: b64 ? 0.85 : 0.4, model: AUDIO_MODEL, analyzed_at: new Date().toISOString(),
   }, { onConflict: "spotify_track_id" });
-  return b64 ? ref!.source : "none";
+  if (error) throw new Error(error.message);
+  return source;
 }
 
-async function runList(admin: any, list: Row[], deadline: number, twice = false) {
+async function runList(admin: any, list: Row[], deadline: number) {
   let i = 0, done = 0;
   let stop: GatewayStop | null = null;
   const worker = async () => {
     while (!stop && i < list.length && Date.now() < deadline) {
+      if (await vibeHasPriority(admin)) return;
       const t = list[i++];
-      for (let attempt = 0; attempt < 3; attempt++) {
-        try { await analyzeOne(admin, t, twice); done++; break; }
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try { await analyzeOne(admin, t); done++; break; }
         catch (e) {
           if (e instanceof GatewayStop) { stop = e; return; }
-          if (e instanceof GatewayRetry && attempt < 2) { await sleep(e.waitMs + Math.random() * 2000); continue; }
+          if (e instanceof GatewayRetry && attempt === 0) { await sleep(e.waitMs); if (await vibeHasPriority(admin)) return; continue; }
+          if (!(e instanceof GatewayStop) && attempt === 0) continue;
           console.error("[audio-analyze]", t.spotify_track_id, e instanceof Error ? e.message : e);
           break;
         }
@@ -89,6 +73,7 @@ function kick(depth: number) {
 }
 
 async function hop(admin: any, depth: number) {
+  if (await vibeHasPriority(admin)) return { status: "foreground-priority" };
   const now = Date.now();
   const { data: st } = await admin.from("audio_analysis_state").select("*").eq("id", 1).single();
   if (st?.paused_until && new Date(st.paused_until).getTime() > now) return { status: "paused", reason: st.last_error };
@@ -125,16 +110,22 @@ Deno.serve(async (req) => {
       const { data: { user } } = await admin.auth.getUser(bearer);
       if (!user) return json({ error: "Unauthorized" }, 401);
     }
-    // Seeds: listen twice (once per song, skipped when already double-heard).
+    // Queue requests are acknowledged immediately; the shared missing-analysis query is the queue.
+    if (Array.isArray(body.queue_ids)) {
+      kick(MAX_DEPTH);
+      return json({ status: "queued" });
+    }
+    // Seed requests use the same single analysis queue; completed recordings are never re-heard.
     if (Array.isArray(body.seed_ids)) {
       const ids = body.seed_ids.filter((x: unknown) => typeof x === "string").slice(0, 3);
-      const { data: done } = await admin.from("track_audio_analysis").select("spotify_track_id").in("spotify_track_id", ids).eq("model", DOUBLE_MODEL);
+      const { data: done } = await admin.from("track_audio_analysis").select("spotify_track_id").in("spotify_track_id", ids)
+        .not("drum_sound", "is", null).not("mix_character", "is", null).not("vocal_space", "is", null);
       const skip = new Set((done ?? []).map((r: any) => r.spotify_track_id));
       const need = ids.filter((id: string) => !skip.has(id));
       if (!need.length) return json({ done: 0 });
       const { data: rows } = await admin.from("liked_songs").select("spotify_track_id, isrc, track_name, artist_name").in("spotify_track_id", need);
       const uniq = [...new Map((rows ?? []).map((r: any) => [r.spotify_track_id, r])).values()] as Row[];
-      const r = await runList(admin, uniq, Date.now() + 40_000, true);
+      const r = await runList(admin, uniq, Date.now() + 40_000);
       if (r.stop) return json({ error: r.stop.message }, r.stop.status);
       return json({ done: r.done });
     }

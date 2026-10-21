@@ -106,6 +106,8 @@ export async function buildAndSave(userId: string, signal: number, onProgress?: 
 
 /** Checks whether a rebuild is due and runs it. Safe to call often: a DB lease keeps it single-flight. */
 export async function maybePrebuild(userId: string, force = false): Promise<boolean> {
+  // Verification hold: only an explicit rebuild may run while the master report is pending.
+  if (!force) return false;
   const [counts, current] = await Promise.all([analysisCounts(userId), loadPrebuilt(userId)]);
   const due = force || needsRebuild({
     total: counts.total, analyzed: counts.signal, builtCount: current?.analyzed_count ?? 0,

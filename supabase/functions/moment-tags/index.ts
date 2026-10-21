@@ -4,6 +4,7 @@
 // Chains itself in bounded hops until every liked song is tagged.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { MOMENTS } from "../_shared/moments.ts";
+import { vibeHasPriority } from "../_shared/analysis-priority.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -76,6 +77,7 @@ function kick(depth: number) {
 }
 
 async function hop(admin: any, depth: number) {
+  if (await vibeHasPriority(admin)) return { status: "foreground-priority" };
   const now = Date.now();
   const { data: st } = await admin.from("moment_tags_state").select("*").eq("id", 1).single();
   if (st?.paused_until && new Date(st.paused_until).getTime() > now) return { status: "paused", reason: st.last_error };
@@ -102,20 +104,22 @@ async function hop(admin: any, depth: number) {
   const started = Date.now();
   const worker = async () => {
     while (!paused && batches.length && Date.now() - started < HOP_MS) {
-      const batch = batches.shift()!;
+      if (await vibeHasPriority(admin)) return;
+      const batch = batches.shift();
+      if (!batch) return;
       try {
-        const r = await tagBatch(apiKey, batch);
+        let r = await tagBatch(apiKey, batch).catch(() => ({ status: 500, rows: [] as any[] }));
+        if (r.status !== 200 && !(await vibeHasPriority(admin))) r = await tagBatch(apiKey, batch);
         if (r.status === 429) { paused = true; batches.unshift(batch); return; }
+        if (r.status !== 200) throw new Error(`AI request failed (${r.status})`);
         for (const row of r.rows) {
-          await admin.from("track_analysis_global").update({
+          const { error } = await admin.from("track_analysis_global").update({
             moments: row.moments, moment_story: row.story, moments_checked: true, updated_at: new Date().toISOString(),
           }).eq("spotify_track_id", row.id);
+          if (error) throw new Error(error.message);
         }
-        // Songs the model skipped: still mark checked so the queue never loops on them.
-        const gotIds = new Set(r.rows.map((x: any) => x.id));
-        const missed = batch.map((x) => x.spotify_track_id).filter((id) => !gotIds.has(id));
-        if (missed.length) await admin.from("track_analysis_global").update({ moments_checked: true }).in("spotify_track_id", missed);
-        done += batch.length;
+        // Missing model output remains pending; it is not a completed analysis.
+        done += r.rows.length;
         await sleep(250);
       } catch (e) {
         console.error("[moment-tags]", e instanceof Error ? e.message : e);

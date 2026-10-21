@@ -4,6 +4,7 @@
 // Bounded hops, single-flight lease, self-chains only while work remains.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { INSTRUMENTS, FEELINGS, ARCS, DANCE_STYLES, sanitizeSound } from "../_shared/sound.ts";
+import { vibeHasPriority } from "../_shared/analysis-priority.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -69,6 +70,7 @@ async function summarizeComments(name: string, comments: string[]) {
 }
 
 async function runHop(admin: any, userId: string, started: number, priority: string[]) {
+  if (await vibeHasPriority(admin)) return { status: "foreground-priority" };
   // Evidence any user already gathered is copied from the shared table first.
   await admin.rpc("hydrate_track_analysis", { _user_id: userId });
   const left = () => HOP_BUDGET_MS - (Date.now() - started);
@@ -147,6 +149,7 @@ async function runHop(admin: any, userId: string, started: number, priority: str
     const q = [...lfQueue];
     const worker = async () => {
       while (q.length && !rated && left() >= 25_000) {
+        if (await vibeHasPriority(admin)) return;
         const id = q.shift()!;
         const t = byId.get(id)!;
         const artist = ((t.artists ?? []) as any[])[0]?.name ?? String(t.artist_name).split(",")[0];
@@ -176,6 +179,7 @@ async function runHop(admin: any, userId: string, started: number, priority: str
   let stop = false;
   const reWorker = async () => {
     while (groups.length && !stop && left() > 10_000) {
+      if (await vibeHasPriority(admin)) return;
       const ids = groups.shift()!;
         const lines = ids.map((id, n) => {
           const t = byId.get(id)!; const e = ev.get(id); const c = cls.get(id);
