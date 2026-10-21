@@ -232,6 +232,7 @@ const seedBodyOf = (seeds: TrackProfile[]) => seeds.map((t) => ({
   name: t.name, artists: t.artists, year: t.year, genres: t.genres.slice(0, 6), lang: t.lang,
   energy: t.energy, valence: t.valence, danceability: t.danceability, tempo: t.tempo, mood: t.mood,
   style: t.style ?? null, scene: t.scene ?? null, instruments: t.instruments ?? [], feeling: t.feeling ?? null, feeling_2: t.feeling2 ?? null, arc: t.arc ?? null, melodic_focus: t.melodicFocus ?? null,
+  moments: t.moments ?? null, moment_story: t.momentStory ?? null,
 }));
 
 /** Reads the vibe into a recipe: cache first, then vibe-spec (with the user's past corrections). An exact-phrase correction wins. */
@@ -326,6 +327,7 @@ const earSeed = (t: TrackProfile) => ({
   name: t.name, artists: t.artists, instruments: t.instruments, piano: (t as any).piano ?? null,
   melodic_focus: r2n(t.melodicFocus), percussive_drive: r2n(t.percussiveDrive), texture: r2n(t.texture), warmth: r2n(t.warmth),
   scale: r2n(t.scale), groove: t.groove, energy: r2n(t.energy), style: t.style ?? null, feeling: t.feeling, feeling_2: t.feeling2 ?? null, arc: t.arc,
+  moments: t.moments?.map((m) => m.m), moment_story: t.momentStory ?? undefined,
 });
 
 /** Human-readable interpretation of the recipe, sent to the ear so it judges with the full picture. */
@@ -338,6 +340,7 @@ export function specContext(s: VibeSpec, vibe: string): string {
   else if (s.vocals === "lead") parts.push("lead vocals up front");
   if (s.listening === "background") parts.push("background music: steady energy, no drops or sudden changes, nothing that distracts from conversation");
   else if (s.listening === "focused") parts.push("for attentive listening");
+  if (s.moments?.length) parts.push(`moments: ${s.moments.map((m) => MOMENT_LABEL[m] ?? m).join(", ")}`);
   if (s.moment && s.moment !== "any") parts.push(`moment: ${s.moment}`);
   if (s.feelings_allowed?.length) parts.push(`feelings: ${s.feelings_allowed.join(", ")}`);
   if (s.instruments_preferred?.length) parts.push(`instruments: ${s.instruments_preferred.join(", ")}`);
