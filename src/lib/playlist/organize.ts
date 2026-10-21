@@ -637,16 +637,21 @@ export function organizeLibrary(all: TrackProfile[], options: OrganizeOptions = 
   leftovers = stillLeft;
 
   const used = new Set<string>();
+  const usedWords = new Set<string>();
   const playlists: PlaylistDraft[] = groups
     .sort((a, b) => b.tracks.length - a.tracks.length)
     .map((g, i) => {
-      const ordered = sequence(g.tracks);
-      const name = nameFor(ordered, g.lang, used);
+      const moment = dominantMoment(g.tracks);
+      const curve = moment ? MOMENT_CURVE[moment] : undefined;
+      const ordered = sequence(g.tracks, undefined, curve);
+      const name = nameFor(ordered, g.lang, used, usedWords);
       return {
         key: `${g.lang}-${i}`,
         name,
-        description: `Organized by Tempo from your Liked Songs · ${ordered.length} songs`,
+        description: (moment && MOMENT_DESC[moment]) ||
+          `Organized by Tempo from your Liked Songs · ${ordered.length} songs`,
         lang: g.lang,
+        moment,
         cohesion: cohesionOf(ordered),
         tracks: ordered,
       };
