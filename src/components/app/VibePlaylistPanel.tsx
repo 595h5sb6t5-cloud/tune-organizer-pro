@@ -394,7 +394,7 @@ export default function VibePlaylistPanel() {
             <option value="auto">Auto</option>
             {langs.map((l) => <option key={l} value={l}>{LANG_LABEL[l]}</option>)}
           </select>
-          <Button variant="hero" onClick={create} disabled={!!step || !canCreate}>
+          <Button variant="hero" onClick={() => create()} disabled={!!step || !canCreate}>
             {step ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
             Create playlist
           </Button>
