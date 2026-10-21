@@ -329,8 +329,9 @@ async function listenCandidates(userId: string, cands: TrackProfile[], seeds: Tr
   onProgress?.(0, total);
   if (scores.size) onBatch?.(scores);
   await Promise.all(jobs.map(async (j) => {
-    const seed = seeds.find((x) => x.id === j.seed)!;
-    const call = () => supabase.functions.invoke("vibe-listen", { body: { seed: earSeed(seed), ids: j.ids, context: ctx } });
+    const seed = seeds.find((x) => x.id === j.seed);
+    const body = seed ? { seed: earSeed(seed), ids: j.ids, context: ctx } : { description: description ?? context, ids: j.ids };
+    const call = () => supabase.functions.invoke("vibe-listen", { body });
     let { data, error } = await call();
     if (error || data?.error) ({ data, error } = await call()); // one retry for a busy moment
     if (error || data?.error) { for (const id of j.ids) unheard.add(id); return; } // falls back to the text review
