@@ -1,26 +1,34 @@
 // The ear for AI Playlists: after the engine groups the library, Gemini hears every
 // playlist's songs (15 s mid-clips, batches of 8, a few requests at a time) against the
-// playlist's two most representative songs ("anchors"). Only songs the ear scores 8+
-// stay; the rest move to a playlist where the ear accepts them, or to "Not placed".
+// playlist's three most representative, well-separated songs ("anchors"). Each song is
+// judged against its closest anchor; only songs the ear scores 8+ stay; the rest move to
+// a playlist where the ear accepts them, or to "Not placed".
+// An error, timeout or rate limit is NEVER a rejection: unheard songs keep their place.
 // Scores are cached per (anchor, playlist contents), so unchanged playlists are never re-heard.
 import { supabase } from "@/integrations/supabase/client";
 import type { TrackProfile } from "./features";
 import { averageFit, compatibility, sequence, type PlaylistDraft } from "./organize";
+import { MOMENT_DESC } from "./moments";
 
 const MIN_EAR = 8;
 const BATCH = 8;
 const CONCURRENCY = 6; // simultaneous vibe-listen requests
 const MIN_SIZE = 8;
 
-/** The 2 songs most compatible with the rest of the playlist. */
+/** The 3 songs most compatible with the rest of the playlist, well separated. */
 export function pickAnchors(tracks: TrackProfile[]): TrackProfile[] {
   const scored = tracks.map((t) => ({ t, fit: averageFit(t, tracks.filter((x) => x.id !== t.id)) }));
   scored.sort((a, b) => b.fit - a.fit);
   const first = scored[0]?.t;
   if (!first) return [];
-  // Second anchor: strong fit but not a twin of the first (covers the playlist's range).
-  const second = scored.find((s) => s.t.id !== first.id && compatibility(s.t, first) < 0.9)?.t ?? scored[1]?.t;
-  return [first, ...(second ? [second] : [])];
+  const anchors = [first];
+  // Next anchors: strong fit but not twins of an existing anchor (cover the playlist's range).
+  for (const s of scored) {
+    if (anchors.length >= 3) break;
+    if (anchors.some((a) => a.id === s.t.id)) continue;
+    if (anchors.every((a) => compatibility(s.t, a) < 0.9)) anchors.push(s.t);
+  }
+  return anchors;
 }
 
 const r2n = (x: number | null | undefined) => (x == null ? null : Math.round(x * 100) / 100);
@@ -28,6 +36,7 @@ const earSeed = (t: TrackProfile) => ({
   name: t.name, artists: t.artists, instruments: t.instruments, piano: null,
   melodic_focus: r2n(t.melodicFocus), percussive_drive: r2n(t.percussiveDrive), texture: r2n(t.texture), warmth: r2n(t.warmth),
   scale: r2n(t.scale), groove: t.groove, energy: r2n(t.energy), style: t.style ?? null, feeling: t.feeling, feeling_2: t.feeling2 ?? null, arc: t.arc,
+  moments: t.moments?.map((m) => m.m), moment_story: t.momentStory ?? undefined,
 });
 
 /** Stable content hash: the cache key changes exactly when the playlist's songs change. */
@@ -39,7 +48,11 @@ function contentHash(ids: string[]): string {
 
 interface ListenJob { key: string; seed: TrackProfile; ids: string[] }
 
-/** Runs jobs through vibe-listen with a small concurrency pool; fills `scores` and `unheard`. */
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Runs jobs through vibe-listen with a small concurrency pool; fills `scores` and `unheard`.
+ *  A failed call marks its songs unheard — never rejected. Only a busy moment (429/5xx)
+ *  gets one delayed retry with backoff; terminal errors are not retried. */
 async function runJobs(userId: string, jobs: ListenJob[], scores: Map<string, number>, unheard: Set<string>) {
   let next = 0;
   const worker = async () => {
@@ -47,7 +60,14 @@ async function runJobs(userId: string, jobs: ListenJob[], scores: Map<string, nu
       const j = jobs[next++];
       const call = () => supabase.functions.invoke("vibe-listen", { body: { seed: earSeed(j.seed), ids: j.ids } });
       let { data, error } = await call();
-      if (error || data?.error) ({ data, error } = await call()); // one retry for a busy moment
+      if (error || data?.error) {
+        const msg = `${error?.message ?? ""} ${data?.error ?? ""}`;
+        const retryable = /429|5\d\d|rate|timeout|busy/i.test(msg);
+        if (retryable) {
+          await sleep(1500 + Math.random() * 1500); // bounded backoff, never immediate
+          ({ data, error } = await call());
+        }
+      }
       if (error || data?.error) { for (const id of j.ids) unheard.add(id); continue; }
       for (const id of data.unheard ?? []) unheard.add(id);
       const rows = (data.results ?? []).map((r: any) => {
@@ -87,9 +107,9 @@ export async function earCheckPlaylists(
     const anchors = pickAnchors(p.tracks);
     const anchorIds = new Set(anchors.map((a) => a.id));
     const rest = p.tracks.filter((t) => !anchorIds.has(t.id));
-    // Each song is judged against its closer anchor.
-    const near = (t: TrackProfile) => anchors.length < 2 ? anchors[0]
-      : compatibility(t, anchors[0]) >= compatibility(t, anchors[1]) ? anchors[0] : anchors[1];
+    // Each song is judged against its closest anchor.
+    const near = (t: TrackProfile) => anchors.reduce((best, a) =>
+      compatibility(t, a) > compatibility(t, best) ? a : best, anchors[0]);
     const key = (a: TrackProfile) => `pl1|${a.id}|${contentHash(p.tracks.map((t) => t.id))}`;
     return { p, anchors, rest, near, key };
   });
@@ -176,8 +196,15 @@ export async function earCheckPlaylists(
     await runJobs(userId, rehomeJobs, scores, unheard);
     for (const [jobId, target] of rehomeTarget) {
       const s = scores.get(jobId);
-      if (s !== undefined && s >= MIN_EAR && !unheard.has(target.t.id)) target.playlist.tracks.push(target.t);
-      else stillOut.push(target.t);
+      if (s !== undefined && s >= MIN_EAR && !unheard.has(target.t.id)) {
+        target.playlist.tracks.push(target.t);
+      } else if (unheard.has(target.t.id)) {
+        // The rehome listen failed — that is not a rejection. The song keeps its
+        // original playlist instead of dropping to "Not placed".
+        const home = kept.find((p) => plans.find((x) => x.p.key === p.key)?.rest.some((r) => r.id === target.t.id))
+          ?? kept.find((p) => p.key === plans.find((x) => x.rest.some((r) => r.id === target.t.id))?.p.key);
+        (home ?? target.playlist).tracks.push(target.t);
+      } else stillOut.push(target.t);
     }
     for (const id of before) unheard.delete(id); // rehome listens resolved
   }
