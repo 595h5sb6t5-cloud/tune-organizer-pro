@@ -513,6 +513,7 @@ export async function buildVibePlaylist(
   opts: { presetSpec?: VibeSpec; corrections?: SpecCorrection[] } = {},
 ): Promise<VibeResult & { timings: VibeTimings }> {
   const t0 = performance.now();
+  const deadline = t0 + 20_000; // a vibe never takes more than 20 seconds
   const timings: VibeTimings = { seed: 0, recipe: 0, filter: 0, select: 0, listen: 0, order: 0, name: 0, first: 0, total: 0 };
   let mark = t0;
   const lap = (k: keyof VibeTimings) => { const now = performance.now(); timings[k] = Math.round(now - mark); mark = now; };
@@ -560,12 +561,12 @@ export async function buildVibePlaylist(
       onPartial?.(ok.slice(0, MAX_TRACKS));
     };
     const listenP = withClip.length
-      ? listenCandidates(userId, withClip, [], ctx, (d, t) => onStep("Listening to the songs", d, t), live, ctx)
+      ? listenCandidates(userId, withClip, [], ctx, (d, t) => onStep("Listening to the songs", d, t), live, ctx, deadline)
       : Promise.resolve({ scores: new Map<string, number>(), unheard: new Set<string>() });
     const textP = noClip.length ? scoreCandidates(userId, ctx, noClip, []) : Promise.resolve(new Map<string, number>());
     const [{ scores: ear, unheard }, text] = await Promise.all([listenP, textP]);
     const late = top.filter((t) => !ear.has(t.id) && !text.has(t.id) && unheard.has(t.id));
-    const text2 = late.length ? await scoreCandidates(userId, ctx, late, []) : new Map<string, number>();
+    const text2 = late.length && performance.now() < deadline ? await scoreCandidates(userId, ctx, late, []) : new Map<string, number>();
     const scores = new Map([...text, ...text2, ...ear]);
     // Strict ear: only 8 or more gets in (no 7-fill without a seed).
     const pool = top.filter((t) => (scores.get(t.id) ?? 0) >= MIN_SCORE);
@@ -614,11 +615,11 @@ export async function buildVibePlaylist(
     if (!timings.first) timings.first = Math.round(performance.now() - t0);
     onPartial?.([...seeds, ...ok.slice(0, MAX_TRACKS - seeds.length)]);
   };
-  const listenP = listenCandidates(userId, withClip, seeds, vibe, (d, t) => onStep("Listening to the songs", d, t), live);
+  const listenP = listenCandidates(userId, withClip, seeds, vibe, (d, t) => onStep("Listening to the songs", d, t), live, undefined, deadline);
   const textP = noClip.length ? scoreCandidates(userId, vibe, noClip, seeds) : Promise.resolve(new Map<string, number>());
   const [{ scores: ear, unheard }, text] = await Promise.all([listenP, textP]);
   const late = top.filter((t) => !ear.has(t.id) && !text.has(t.id) && unheard.has(t.id));
-  const text2 = late.length ? await scoreCandidates(userId, vibe, late, seeds) : new Map<string, number>();
+  const text2 = late.length && performance.now() < deadline ? await scoreCandidates(userId, vibe, late, seeds) : new Map<string, number>();
   const scores = new Map([...text, ...text2, ...ear]);
   const pool = top.filter((t) => admits(t, scores.get(t.id) ?? 0));
   lap("listen");
