@@ -12,7 +12,7 @@ const corsHeaders = {
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
 const PROMPT = `You are a DJ checking if songs belong in the same playlist as the SEED.
-Read the SEED's sound description (heard earlier), then listen to each numbered SONG clip. For each song rate 0–10 how much it SOUNDS like the same sonic world as the seed:
+Read the SEED's sound description (heard earlier), then listen to each numbered SONG clip (15 s from the middle of the song). For each song rate 0–10 how much it SOUNDS like the same sonic world as the seed:
 instrument palette (piano, synths, organic percussion, vocals…), melody-led vs groove/percussion-led, texture (organic vs synthetic), warmth and drive.
 10 = could be the next track in the same set; 8 = clearly the same world; 7 = close with one small difference; 6 or less = a listener would notice it doesn't belong.
 Judge ONLY what you hear. Return ONLY JSON: {"results":[{"n":<song number>,"s":<score>}]}`;
@@ -39,7 +39,7 @@ Deno.serve(async (req) => {
       const r: any = byId.get(id);
       if (!r) return null;
       const ref = await findPreview(r.isrc, r.track_name, r.artist_name);
-      const b64 = ref ? await fetchAudioB64(ref.url) : null;
+      const b64 = ref ? await fetchAudioB64(ref.url, 0.5) : null;
       return b64 ? { id, b64, label: `"${r.track_name}" by ${r.artist_name}` } : null;
     };
     const t0 = Date.now();
