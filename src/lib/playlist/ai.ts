@@ -138,7 +138,7 @@ async function loadDeepAnalysis(userId: string): Promise<Map<string, Partial3>> 
 async function loadStoredClassifications(userId: string): Promise<Map<string, AiTrackInfo>> {
   const rows = await fetchAll<any>((a, b) =>
     supabase.from("track_ai_classification")
-      .select("spotify_track_id, lang, energy, valence, danceability, tempo, mood, original_year, year_checked, family, style, instruments, texture, warmth, scale, groove, scene, feeling, feeling_2, melodic_focus, arc, confidence, manual_sound")
+      .select("spotify_track_id, lang, energy, valence, danceability, tempo, mood, original_year, year_checked, family, style, instruments, texture, warmth, scale, groove, scene, feeling, feeling_2, melodic_focus, arc, confidence, manual_sound, moments, moment_story")
       .eq("user_id", userId).range(a, b));
   const map = new Map<string, AiTrackInfo>();
   for (const r of rows) {
@@ -222,6 +222,7 @@ export async function enrichWithAI(
       ...out, instruments: ai.instruments ?? [], texture: ai.texture ?? null,
       warmth: ai.warmth ?? null, scale: ai.scale ?? null, groove: ai.groove ?? null, scene: ai.scene ?? null,
       feeling: ai.feeling ?? null, feeling2: ai.feeling_2 ?? null, melodicFocus: ai.melodic_focus ?? null, arc: ai.arc ?? null, confidence: ai.confidence ?? null,
+      moments: ai.moments ?? undefined, momentStory: ai.moment_story ?? null,
     };
     // Heard sound replaces text sound; feeling/arc stay with listeners.
     out = applyAudio(out, audio.get(p.id));
