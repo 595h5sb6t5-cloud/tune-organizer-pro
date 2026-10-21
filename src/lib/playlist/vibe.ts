@@ -283,16 +283,39 @@ const earSeed = (t: TrackProfile) => ({
   scale: r2n(t.scale), groove: t.groove, energy: r2n(t.energy), style: t.style ?? null, feeling: t.feeling, feeling_2: t.feeling2 ?? null, arc: t.arc,
 });
 
+/** Human-readable interpretation of the recipe, sent to the ear so it judges with the full picture. */
+export function specContext(s: VibeSpec, vibe: string): string {
+  const parts: string[] = [];
+  if (vibe.trim()) parts.push(`"${vibe.trim()}"`);
+  if (s.vocals === "none") parts.push("no vocals, purely instrumental");
+  else if (s.vocals === "sparse") parts.push("very few vocals");
+  else if (s.vocals === "soft") parts.push("soft, non-protagonist vocals");
+  else if (s.vocals === "lead") parts.push("lead vocals up front");
+  if (s.listening === "background") parts.push("background music: steady energy, no drops or sudden changes, nothing that distracts from conversation");
+  else if (s.listening === "focused") parts.push("for attentive listening");
+  if (s.moment && s.moment !== "any") parts.push(`moment: ${s.moment}`);
+  if (s.feelings_allowed?.length) parts.push(`feelings: ${s.feelings_allowed.join(", ")}`);
+  if (s.instruments_preferred?.length) parts.push(`instruments: ${s.instruments_preferred.join(", ")}`);
+  if (s.instruments_excluded?.length) parts.push(`without: ${s.instruments_excluded.join(", ")}`);
+  const eMid = (s.energy_min + s.energy_max) / 2;
+  parts.push(eMid < 0.35 ? "low energy" : eMid < 0.65 ? "mid energy" : "high energy");
+  const wMid = ((s.warmth_min ?? 0) + (s.warmth_max ?? 1)) / 2;
+  if ((s.warmth_min ?? 0) > 0 || (s.warmth_max ?? 1) < 1) parts.push(wMid >= 0.5 ? "warm" : "cold/dark");
+  return parts.join(", ").slice(0, 400);
+}
+
 /** Step 3: Gemini hears each candidate (15 s from the middle of the clip) against its feeling-matched seed's STORED analysis.
- *  Batches of 8, every request at once. Each (seed, context, candidate) score is cached. `onBatch` fires as each batch lands. */
+ *  Batches of 8, every request at once. Each (seed, context, candidate) score is cached. `onBatch` fires as each batch lands.
+ *  Without seeds, `description` mode: each song is judged against the vibe description itself. */
 async function listenCandidates(userId: string, cands: TrackProfile[], seeds: TrackProfile[], context: string,
-  onProgress?: (d: number, t: number) => void, onBatch?: (scores: Map<string, number>) => void) {
+  onProgress?: (d: number, t: number) => void, onBatch?: (scores: Map<string, number>) => void, description?: string) {
   const scores = new Map<string, number>();
   const unheard = new Set<string>();
   const bySeed = new Map<string, string[]>();
-  for (const c of cands) { const s = feelSeed(c, seeds).id; bySeed.set(s, [...(bySeed.get(s) ?? []), c.id]); }
+  if (seeds.length) for (const c of cands) { const s = feelSeed(c, seeds).id; bySeed.set(s, [...(bySeed.get(s) ?? []), c.id]); }
+  else bySeed.set("", cands.map((c) => c.id));
   const ctx = vibeKey(context);
-  const keyOf = (seed: string) => "ear4|" + seed + "|" + ctx;
+  const keyOf = (seed: string) => seeds.length ? "ear4|" + seed + "|" + ctx : "desc1|" + ctx;
   const jobs: { seed: string; ids: string[] }[] = [];
   await Promise.all([...bySeed.entries()].map(async ([seed, ids]) => {
     const { data } = await supabase.from("vibe_select_cache").select("spotify_track_id, score")
