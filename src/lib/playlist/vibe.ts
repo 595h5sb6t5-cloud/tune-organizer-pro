@@ -623,7 +623,13 @@ export async function buildVibePlaylist(
   };
   const listenP = listenCandidates(userId, withClip, seeds, vibe, (d, t) => onStep("Listening to the songs", d, t), live, undefined, deadline);
   const textP = noClip.length ? scoreCandidates(userId, vibe, noClip, seeds) : Promise.resolve(new Map<string, number>());
-  const [{ scores: ear, unheard }, text] = await Promise.all([listenP, textP]);
+  // Hard budget: text scoring that outlives the deadline is abandoned — its songs are
+  // omitted (never rejected), and the ear's verdicts still land.
+  const text = await Promise.race([
+    textP,
+    new Promise<Map<string, number>>((r) => setTimeout(() => r(new Map()), Math.max(0, deadline - performance.now()))),
+  ]);
+  const { scores: ear, unheard } = await listenP; // self-bounded by the same deadline
   const late = top.filter((t) => !ear.has(t.id) && !text.has(t.id) && unheard.has(t.id));
   const text2 = late.length && performance.now() < deadline ? await scoreCandidates(userId, vibe, late, seeds) : new Map<string, number>();
   const scores = new Map([...text, ...text2, ...ear]);
