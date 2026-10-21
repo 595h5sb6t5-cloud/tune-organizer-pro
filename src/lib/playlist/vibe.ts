@@ -301,7 +301,7 @@ const seedFitOf = (t: TrackProfile, seeds: TrackProfile[]) => fitPool.length
   : seeds.reduce((a, x) => a + compatibility(t, x), 0) / seeds.length;
 
 /** Step 4: pick 8+ (and 7s up to 20 when short), check coherence, cap, sequence. */
-export function selectVibeTracks(cands: TrackProfile[], scores: Map<string, number>, seeds: TrackProfile[] = [], capArtist?: string) {
+export function selectVibeTracks(cands: TrackProfile[], scores: Map<string, number>, seeds: TrackProfile[] = [], capArtist?: string, heard: Set<string> = new Set()) {
   const room = MAX_TRACKS - seeds.length;
   // Artist as seed: the artist's own songs (seeds included) stay at most 20% of the playlist.
   if (capArtist) {
@@ -312,8 +312,8 @@ export function selectVibeTracks(cands: TrackProfile[], scores: Map<string, numb
     cands = [...others, ...cands.filter(own).sort((a, b) => (scores.get(b.id) ?? 0) - (scores.get(a.id) ?? 0)).slice(0, extra)];
   }
   const sc = (t: TrackProfile) => scores.get(t.id) ?? 0;
-  // Coherence: with seeds, against the seed only; otherwise against the group.
-  const coheres = (t: TrackProfile) => !seeds.length || seedFitOf(t, seeds) >= MIN_SEED_COHESION;
+  // Coherence: songs the ear already approved skip it; for text-only songs, against the seed (or the group without seeds).
+  const coheres = (t: TrackProfile) => !seeds.length || heard.has(t.id) || seedFitOf(t, seeds) >= MIN_SEED_COHESION;
   const fit = (t: TrackProfile) => (seeds.length ? seedFitOf(t, seeds) : 0);
   const top = cands.filter((t) => sc(t) >= MIN_SCORE && coheres(t))
     .sort((a, b) => sc(b) - sc(a) || fit(b) - fit(a));
