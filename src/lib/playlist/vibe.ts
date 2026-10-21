@@ -238,6 +238,7 @@ export async function readVibeSpec(userId: string, vibe: string, seeds: TrackPro
     supabase.from("vibe_spec_cache").upsert({ user_id: userId, spec_key: specKey, spec: raw as any }, { onConflict: "user_id,spec_key" }).then(() => {});
   }
   const normalized = normalizeSpec({ ...raw }, vibe, seeds.length > 0);
+  if (!isCleanName(normalized.name)) normalized.name = ""; // breaks naming rules → local naming
   const exact = corrections.find((c) => vibeKey(c.phrase) === vibeKey(vibe));
   return exact ? { ...normalized, ...exact.spec, name: normalized.name, clarify: null } : normalized;
 }
@@ -598,5 +599,5 @@ export async function buildVibePlaylist(
   lap("order");
   const spec = await recipeP;
   lap("name");
-  return finish({ spec: { ...spec, name: spec.name || local.name }, lang, tracks: sel.tracks, candidates: candidates.length, approved: pool.length, eights: sel.eights, sevens: sel.sevens });
+  return finish({ spec: { ...spec, name: spec.name || local.name }, lang, tracks: sel.tracks, candidates: candidates.length, approved: pool.length, eights: sel.eights, sevens: sel.sevens, funnel: { total: profiles.length, hard: 0, inLang: 0, listened: top.length } });
 }
