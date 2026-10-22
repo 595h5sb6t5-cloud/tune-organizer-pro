@@ -2,7 +2,8 @@
 // SOUNDS like the same world as the seed. The seed is NOT re-heard: its stored analysis is sent as text.
 // Audio is never stored. NOTE: Revisar términos de Deezer antes de lanzar al público.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
-import { findPreview, fetchAudioB64, gemini, GatewayStop, GatewayRetry } from "../_shared/audio.ts";
+import { findPreview, gemini, GatewayStop, GatewayRetry } from "../_shared/audio.ts";
+import { fetchListeningClip } from "../_shared/listening-clip.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -60,8 +61,8 @@ Deno.serve(async (req) => {
       const r: any = byId.get(id);
       if (!r) return null;
       const ref = await findPreview(r.isrc, r.track_name, r.artist_name);
-      const b64 = ref ? await fetchAudioB64(ref.url, 0.5) : null;
-      return b64 ? { id, b64, label: `"${r.track_name}" by ${r.artist_name}` } : null;
+      const audio = ref ? await fetchListeningClip(ref.url) : null;
+      return audio ? { id, audio, label: `"${r.track_name}" by ${r.artist_name}` } : null;
     };
     const t0 = Date.now();
     const songs = (await Promise.all(fetchIds.map(clip))).filter(Boolean) as any[];
@@ -75,12 +76,12 @@ Deno.serve(async (req) => {
       for (const id of ids) {
         const song = songs.find((s) => s.id === id);
         content.push({ type: "text", text: `GRUPO id=${id}${anchorIds.includes(id) ? " (también ANCLA)" : ""}: ${song.label}` });
-        content.push({ type: "input_audio", input_audio: { data: song.b64, format: "mp3" } });
+        content.push({ type: "input_audio", input_audio: song.audio });
       }
       for (const id of anchorIds.filter((id) => !ids.includes(id))) {
         const song = songs.find((s) => s.id === id);
         content.push({ type: "text", text: `ANCLA de referencia id=${id}: ${song.label}` });
-        content.push({ type: "input_audio", input_audio: { data: song.b64, format: "mp3" } });
+        content.push({ type: "input_audio", input_audio: song.audio });
       }
       const verdict = await gemini(content, typeof body.run_id === "string" ? body.run_id : undefined);
       if (!Array.isArray(verdict?.results) || !Array.isArray(verdict?.intruders)) return json({ error: "Incomplete playlist ear verdict", complete: false }, 502);
@@ -103,7 +104,7 @@ Deno.serve(async (req) => {
     const content: any[] = [{ type: "text", text: (seed ? PROMPT : PROMPT_DESC) + ctxText }, { type: "text", text: seedText }];
     songs.forEach((s, i) => {
       content.push({ type: "text", text: `SONG ${i + 1}: ${s.label}` });
-      content.push({ type: "input_audio", input_audio: { data: s.b64, format: "mp3" } });
+      content.push({ type: "input_audio", input_audio: s.audio });
     });
     const t1 = Date.now();
     let parsed: any;
@@ -121,6 +122,8 @@ Deno.serve(async (req) => {
       .map((r: any) => ({ id: r.id, score: Math.max(0, Math.min(10, r.score)), why: r.why }));
     return json({ results, unheard });
   } catch (e) {
+    if (e instanceof GatewayStop) return json({ error: e.message }, e.status);
+    if (e instanceof GatewayRetry) return json({ error: e.message, retry_after_ms: e.waitMs }, 429);
     return json({ error: e instanceof Error ? e.message : "Unknown error" }, 500);
   }
 });
