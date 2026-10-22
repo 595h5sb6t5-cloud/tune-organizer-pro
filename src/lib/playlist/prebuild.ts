@@ -9,6 +9,8 @@ import { askCurator } from "./curate";
 import { earCheckPlaylists } from "./earcheck";
 import { loadLikedTracks, loadArtistGenres } from "@/components/app/OrganizeLibraryPanel";
 import type { TrackProfile } from "./features";
+import { deduplicateSet, uniqueSongs } from "./identity";
+import { loadRemovalRules, respectsRemovals } from "./feedback";
 
 export const readyForPlaylist = (p: TrackProfile) => !!p.style &&
   (p.audioSource === "deezer" || p.audioSource === "itunes") &&
@@ -42,8 +44,7 @@ export async function loadPrebuilt(userId: string): Promise<PrebuiltSet | null> 
   const { data } = await supabase.from("prebuilt_playlists").select("*").eq("user_id", userId).maybeSingle();
   if (!data) return null;
   return {
-    playlists: (data.playlists as any) ?? [], unsorted: (data.unsorted as any) ?? [],
-    analyzing: (data.analyzing as any) ?? [],
+    ...deduplicateSet((data.playlists as unknown as PlaylistDraft[]) ?? [], (data.unsorted as unknown as TrackProfile[]) ?? [], (data.analyzing as unknown as TrackProfile[]) ?? []),
     built_at: data.built_at, seen_at: data.seen_at, analyzed_count: data.analyzed_count, status: data.status,
   };
 }
@@ -73,16 +74,24 @@ export async function buildAndSave(userId: string, signal: number, onProgress?: 
   const t0 = performance.now();
   const tracks = await loadLikedTracks(userId);
   const genres = await loadArtistGenres(tracks.flatMap((t) => t.artists.map((a) => a.id)), () => {});
-  const all = await enrichWithAI(buildProfiles(tracks, genres));
+  const all = uniqueSongs(await enrichWithAI(buildProfiles(tracks, genres)));
+  const corrections = await loadRemovalRules(userId);
   // Songs whose analysis hasn't finished yet are not "Not placed" — they're "Analyzing…"
   // and the background enrichment keeps working on them.
-  const analyzing = all.filter((p) => !readyForPlaylist(p));
+  let analyzing = all.filter((p) => !readyForPlaylist(p));
   const profiles = all.filter(readyForPlaylist);
   if (analyzing.length) void supabase.functions.invoke("audio-analyze", { body: { queue_ids: analyzing.map((p) => p.id) } }).catch(() => {});
   const curated = await curateLibrary(organizeLibrary(profiles), (t) => askCurator(t), () => {});
   // The ear: Gemini hears every playlist against its anchors; only 8+ stays.
   onProgress?.("Listening to the playlists", 0, 0);
-  const heard = await earCheckPlaylists(userId, curated.playlists, (d, t) => onProgress?.("Listening to the playlists", d, t));
+  const blocked: TrackProfile[] = [];
+  const respect = (drafts: PlaylistDraft[]) => drafts.map((p) => ({ ...p, tracks: p.tracks.filter((t) => {
+    if (respectsRemovals(t, p.tracks, corrections, all)) return true;
+    blocked.push(t); return false;
+  }) }));
+  const heard = await earCheckPlaylists(userId, respect(curated.playlists), (d, t) => onProgress?.("Listening to the playlists", d, t));
+  analyzing.push(...heard.pending);
+  const reports = [...heard.reports];
   let playlists = heard.playlists;
   let unsorted = [...curated.unsorted, ...heard.rejected];
   let listened = heard.listened;
@@ -91,14 +100,17 @@ export async function buildAndSave(userId: string, signal: number, onProgress?: 
     onProgress?.(`Regrouping Not placed (pass ${pass}/3)`);
     const retry = organizeLibrary(unsorted);
     if (!retry.playlists.length) break;
-    const retryHeard = await earCheckPlaylists(userId, retry.playlists, (d, t) => onProgress?.(`Listening (pass ${pass}/3)`, d, t));
+    const retryHeard = await earCheckPlaylists(userId, respect(retry.playlists), (d, t) => onProgress?.(`Listening (pass ${pass}/3)`, d, t));
+    analyzing.push(...retryHeard.pending); reports.push(...retryHeard.reports);
     listened += retryHeard.listened;
     playlists = [...playlists, ...retryHeard.playlists];
     unsorted = [...retry.unsorted, ...retryHeard.rejected];
     console.info(`[prebuild] pass ${pass}: +${retryHeard.playlists.length} playlists, ${unsorted.length} still not placed`);
   }
   playlists.forEach((p, i) => { p.key = `set-${i}`; });
-  const result = { playlists, unsorted };
+  const result = deduplicateSet(playlists, [...unsorted, ...blocked], analyzing);
+  analyzing = result.analyzing;
+  console.info(`[prebuild] quality ${JSON.stringify({ reports, intruders: reports.flatMap((r) => r.removed).filter((r) => r.kind === "intruder").length })}`);
   console.info(`[prebuild] ${result.playlists.length} playlists, ${result.unsorted.length} not placed, ${analyzing.length} analyzing, ear listened to ${listened} songs in ${Math.round(performance.now() - t0)}ms`);
   const row = {
     playlists: result.playlists as any, unsorted: result.unsorted as any, analyzing: analyzing as any, analyzed_count: signal,
