@@ -25,6 +25,7 @@ export type Mood =
 
 export interface TrackProfile {
   id: string;
+  isrc?: string | null;
   uri: string;
   name: string;
   artists: string[];
@@ -233,6 +234,7 @@ export function buildProfiles(
 
     return {
       id: t.id,
+      isrc: t.external_ids?.isrc ?? null,
       uri: t.uri,
       name: t.name,
       artists: t.artists.map((a) => a.name),
