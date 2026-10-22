@@ -1,4 +1,4 @@
-import { MPEGDecoder } from "https://esm.sh/mpg123-decoder@1.0.3";
+import MPEGDecoder from "https://esm.sh/mpg123-decoder@1.0.3/src/MPEGDecoder.js?target=es2022";
 import { middleWav } from "./pcm.ts";
 
 /** Decode the complete preview and encode exactly 15 seconds into a complete WAV. */
