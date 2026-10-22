@@ -1,6 +1,7 @@
 # Roadmap — Mensaje Maestro Tempo
 
 ## Orden vinculante actualizado
+- [ ] Antes de confirmación/Rebuild: prueba del intruso con clips de 15 s, grupos de 20 traslapados, dos vueltas; 8+ contra dos de tres anclas; transiciones sin saltos; feedback X de Twenty Tears; deduplicación global por canción/versión. Reportar total de intrusos y tres razones reales.
 - Verificado: 22 pruebas pasan; pausa real de audio/momentos devuelve foreground-priority con sesión autenticada; compilación limpia. No se ejecutó confirmación ni Rebuild.
 - Pendiente de datos al 21 oct 02:08 UTC: 912/1,677 canciones con momentos; 1,536 pendientes de producción detallada. No declarar objetivos de velocidad/costo ni resultados musicales hasta las corridas reales.
 - [ ] Completar producción oída (drum_sound, mix_character, vocal_space), compatibilidad ×0.6 si batería y mezcla distintas; sin reglas por artista.
@@ -11,7 +12,7 @@
 - [ ] Revisar logs del último Rebuild: fallos/timeouts/límites de Gemini; error NUNCA = rechazo (queda en su lugar o "Analyzing…", reintento con menos concurrencia). Detener Rebuild si corre.
 - [ ] Canciones sin análisis de audio → "Analyzing…" (no Not placed); reanudar análisis de fondo.
 - [ ] Re-agrupar Not placed entre sí hasta 3 vueltas (mismas reglas + oído).
-- [ ] Anclas: 3 por playlist (representativas y distintas); comparar con la más parecida; score ≥8.
+- [ ] Anclas: 3 por playlist (representativas y distintas); cada canción score ≥8 contra al menos 2 de 3.
 - [ ] Meta: Not placed ≤ 20% sin bajar el 8 del oído; si no, reportar cuántas sacaron 7 y qué grupos hay.
 
 ## Parte 2 — Capa humana: Momentos
