@@ -16,7 +16,14 @@ const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const CONCURRENCY = 5;
 const HOP_MS = 45_000;
 const MAX_DEPTH = 80;
+const ITEM_MS = 35_000;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+// Never let one slow preview/model call hold the request open past the platform idle limit.
+const withTimeout = <T,>(p: Promise<T>, ms: number) => Promise.race([p, new Promise<T>((_, rej) => setTimeout(() => rej(new Error("item timeout")), ms))]);
+function background(p: Promise<unknown>) {
+  // @ts-ignore EdgeRuntime
+  if (typeof EdgeRuntime !== "undefined" && EdgeRuntime.waitUntil) EdgeRuntime.waitUntil(p.catch((e) => console.error("[audio-analyze] bg", e)));
+}
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
 interface Row { spotify_track_id: string; isrc: string | null; track_name: string; artist_name: string }
@@ -45,10 +52,10 @@ async function runList(admin: any, list: Row[], deadline: number) {
       if (await vibeHasPriority(admin)) return;
       const t = list[i++];
       for (let attempt = 0; attempt < 2; attempt++) {
-        try { await analyzeOne(admin, t); done++; break; }
+        try { await withTimeout(analyzeOne(admin, t), Math.min(ITEM_MS, Math.max(5_000, deadline + 20_000 - Date.now()))); done++; break; }
         catch (e) {
           if (e instanceof GatewayStop) { stop = e; return; }
-          if (e instanceof GatewayRetry && attempt === 0) { await sleep(e.waitMs); if (await vibeHasPriority(admin)) return; continue; }
+          if (e instanceof GatewayRetry && attempt === 0) { await sleep(Math.min(e.waitMs, 10_000)); if (await vibeHasPriority(admin)) return; continue; }
           if (!(e instanceof GatewayStop) && attempt === 0) continue;
           console.error("[audio-analyze]", t.spotify_track_id, e instanceof Error ? e.message : e);
           break;
@@ -144,7 +151,9 @@ Deno.serve(async (req) => {
       return json({ ...st, remaining: left });
     }
     const depth = Math.max(0, Math.min(MAX_DEPTH, Number.isFinite(Number(body.depth)) ? Number(body.depth) : MAX_DEPTH));
-    return json(await hop(admin, depth));
+    // Background chain hops run after the response so callers never hit the idle timeout.
+    background(hop(admin, depth).then((r) => console.log("[audio-analyze] hop", JSON.stringify(r))));
+    return json({ status: "started" });
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : "Unknown error" }, 500);
   }
