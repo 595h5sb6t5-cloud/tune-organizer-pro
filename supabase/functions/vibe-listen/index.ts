@@ -2,7 +2,8 @@
 // SOUNDS like the same world as the seed. The seed is NOT re-heard: its stored analysis is sent as text.
 // Audio is never stored. NOTE: Revisar términos de Deezer antes de lanzar al público.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
-import { findPreview, fetchAudioB64, gemini, GatewayStop, GatewayRetry } from "../_shared/audio.ts";
+import { findPreview, gemini, GatewayStop, GatewayRetry } from "../_shared/audio.ts";
+import { fetchListeningClip } from "../_shared/listening-clip.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -26,6 +27,13 @@ Considera la producción: ¿la grabación, la batería y la mezcla suenan del mi
 For background listening, all accepted songs must share one sonic world: production, instrumentation and vocal type. A chill label alone is not enough.
 Judge ONLY what you hear. Return ONLY JSON: {"results":[{"n":<song number>,"s":<score>,"why":"one short Spanish sentence explaining the heard fit or clash"}]}`;
 
+const PLAYLIST_PROMPT = `Escucha TODOS los fragmentos de 15 segundos en el orden final de esta playlist, incluyendo el traslape con el grupo vecino. La playlist debe tener UN momento y UN mundo sonoro.
+¿Cuáles de estas canciones no pertenecen a esta playlist porque rompen el momento o el mundo sonoro?
+No juzgues por artista ni género; manda lo que escuchas. Considera la producción: ¿la grabación, la batería y la mezcla suenan del mismo mundo, aunque sean de épocas distintas? Dos canciones del mismo género con producciones que chocan no encajan.
+También compara CADA canción con CADA una de las tres ANCLAS cuyo audio recibes. Califica 0–10: 8 = claramente el mismo mundo y momento, 7 = una diferencia que puede causar skip. No cuentes comparar una canción consigo misma como una aprobación.
+No inventes intrusos si todo encaja. Devuelve TODAS las canciones del GRUPO en results, y únicamente intrusos reales en intruders. Razones cortas en español basadas en el oído.
+JSON: {"results":[{"id":"spotify id del GRUPO","anchor_scores":{"id de ancla":8},"why":"por qué encaja o choca"}],"intruders":[{"id":"spotify id del GRUPO","reason":"qué rompe el momento o mundo sonoro"}]}`;
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
@@ -36,26 +44,56 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     if (body?.warm) return json({ ok: true });
     const str = (a: unknown, n: number) => Array.isArray(a) ? a.filter((x) => typeof x === "string").slice(0, n) as string[] : [];
-    const ids = str(body?.ids, 8);
+    const playlistMode = body?.mode === "playlist";
+    const ids = [...new Set(str(body?.ids, playlistMode ? 20 : 8))];
+    const anchorIds = playlistMode ? [...new Set(str(body?.anchor_ids, 3))] : [];
     const seed = body?.seed && typeof body.seed === "object" ? body.seed : null;
     const description = typeof body?.description === "string" ? body.description.trim().slice(0, 400) : "";
     const context = typeof body?.context === "string" ? body.context.trim().slice(0, 1200) : "";
-    if ((!seed && !description) || !ids.length) return json({ error: "Send a seed profile or a description, and 1–8 songs." }, 400);
+    if (!ids.length || (playlistMode ? anchorIds.length !== 3 : (!seed && !description))) return json({ error: "Send songs and a seed/description, or three distinct playlist anchors." }, 400);
+
+    const fetchIds = [...new Set([...ids, ...anchorIds])];
 
     const { data: rows } = await admin.from("liked_songs").select("spotify_track_id, isrc, track_name, artist_name")
-      .eq("user_id", user.id).in("spotify_track_id", ids);
+      .eq("user_id", user.id).in("spotify_track_id", fetchIds);
     const byId = new Map((rows ?? []).map((r: any) => [r.spotify_track_id, r]));
     const clip = async (id: string) => {
       const r: any = byId.get(id);
       if (!r) return null;
       const ref = await findPreview(r.isrc, r.track_name, r.artist_name);
-      const b64 = ref ? await fetchAudioB64(ref.url, 0.5) : null;
-      return b64 ? { id, b64, label: `"${r.track_name}" by ${r.artist_name}` } : null;
+      const audio = ref ? await fetchListeningClip(ref.url) : null;
+      return audio ? { id, audio, label: `"${r.track_name}" by ${r.artist_name}` } : null;
     };
     const t0 = Date.now();
-    const songs = (await Promise.all(ids.map(clip))).filter(Boolean) as any[];
-    const unheard = ids.filter((id) => !songs.some((s) => s.id === id));
+    const songs = (await Promise.all(fetchIds.map(clip))).filter(Boolean) as any[];
+    const unheard = fetchIds.filter((id) => !songs.some((s) => s.id === id));
     if (!songs.length) return json({ results: [], unheard });
+
+    if (playlistMode) {
+      // Never judge an incomplete group or replace absent audio with a text verdict.
+      if (unheard.length) return json({ results: [], intruders: [], unheard, complete: false });
+      const content: any[] = [{ type: "text", text: `${PLAYLIST_PROMPT}\nMOMENTO: ${context}\nORDEN COMPLETO: ${str(body?.ordered_ids, 120).join(", ")}\nANCLAS: ${anchorIds.join(", ")}` }];
+      for (const id of ids) {
+        const song = songs.find((s) => s.id === id);
+        content.push({ type: "text", text: `GRUPO id=${id}${anchorIds.includes(id) ? " (también ANCLA)" : ""}: ${song.label}` });
+        content.push({ type: "input_audio", input_audio: song.audio });
+      }
+      for (const id of anchorIds.filter((id) => !ids.includes(id))) {
+        const song = songs.find((s) => s.id === id);
+        content.push({ type: "text", text: `ANCLA de referencia id=${id}: ${song.label}` });
+        content.push({ type: "input_audio", input_audio: song.audio });
+      }
+      const verdict = await gemini(content, typeof body.run_id === "string" ? body.run_id : undefined);
+      if (!Array.isArray(verdict?.results) || !Array.isArray(verdict?.intruders)) return json({ error: "Incomplete playlist ear verdict", complete: false }, 502);
+      const results = verdict.results.filter((r: any) => ids.includes(r?.id)).map((r: any) => ({
+        id: r.id, why: typeof r.why === "string" ? r.why.slice(0, 300) : null,
+        anchor_scores: Object.fromEntries(anchorIds.filter((id) => id !== r.id && typeof r.anchor_scores?.[id] === "number" && Number.isFinite(r.anchor_scores[id]))
+          .map((id) => [id, Math.max(0, Math.min(10, r.anchor_scores[id]))])),
+      }));
+      const intruders = verdict.intruders.filter((r: any) => ids.includes(r?.id) && typeof r.reason === "string").map((r: any) => ({ id: r.id, reason: r.reason.slice(0, 300) }));
+      console.log(`[playlist-ear] run=${body.run_id ?? ""} songs=${ids.length} intruders=${intruders.length} ms=${Date.now() - t0}`);
+      return json({ results, intruders, unheard: [], complete: results.length === ids.length });
+    }
 
     const f = (v: unknown) => (v === null || v === undefined || v === "" ? "?" : Array.isArray(v) ? v.slice(0, 8).map(String).join(", ") : String(v).slice(0, 80));
     const seedText = seed
@@ -66,7 +104,7 @@ Deno.serve(async (req) => {
     const content: any[] = [{ type: "text", text: (seed ? PROMPT : PROMPT_DESC) + ctxText }, { type: "text", text: seedText }];
     songs.forEach((s, i) => {
       content.push({ type: "text", text: `SONG ${i + 1}: ${s.label}` });
-      content.push({ type: "input_audio", input_audio: { data: s.b64, format: "mp3" } });
+      content.push({ type: "input_audio", input_audio: s.audio });
     });
     const t1 = Date.now();
     let parsed: any;
@@ -84,6 +122,8 @@ Deno.serve(async (req) => {
       .map((r: any) => ({ id: r.id, score: Math.max(0, Math.min(10, r.score)), why: r.why }));
     return json({ results, unheard });
   } catch (e) {
+    if (e instanceof GatewayStop) return json({ error: e.message }, e.status);
+    if (e instanceof GatewayRetry) return json({ error: e.message, retry_after_ms: e.waitMs }, 429);
     return json({ error: e instanceof Error ? e.message : "Unknown error" }, 500);
   }
 });

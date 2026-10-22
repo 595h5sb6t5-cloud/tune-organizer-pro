@@ -5,6 +5,9 @@ import type { Lang, Mood, TrackProfile } from "./features";
 import { compatibility, sequence, isDance, sameOrNeighborStyle, MOOD_NEIGHBORS, melodicKin, feelingScore, feelingNeighbors, soundMatch, FEELING_NAMES, isCleanName } from "./organize";
 import { MOMENT_LABEL } from "./moments";
 import { withinBudget } from "./priority";
+import { checkFinalPlaylist, type QualityReport } from "./quality";
+import { uniqueSongs, songIdentity } from "./identity";
+import { loadRemovalRules, respectsRemovals } from "./feedback";
 
 export interface VibeSpec {
   energy_min: number; energy_max: number;
@@ -42,6 +45,7 @@ export interface VibeResult {
   sevens?: number;
   clarify?: { question: string; options: string[] } | null;
   funnel?: { total: number; hard: number; inLang: number; listened: number };
+  quality?: QualityReport;
 }
 
 const E_TOL = 0.08;
@@ -554,15 +558,25 @@ export async function buildVibePlaylist(
   opts: { presetSpec?: VibeSpec; corrections?: SpecCorrection[]; startedAt?: number } = {},
 ): Promise<VibeResult & { timings: VibeTimings }> {
   const t0 = opts.startedAt ?? performance.now();
+  profiles = uniqueSongs(profiles); seeds = uniqueSongs(seeds);
   const deadline = t0 + 19_500; // a vibe never takes more than 20 seconds
+  const candidateDeadline = Math.min(deadline, t0 + 9_000); // reserve time for the final complete-playlist ear gate
   const timings: VibeTimings = { seed: 0, recipe: 0, filter: 0, select: 0, listen: 0, order: 0, name: 0, first: 0, total: 0 };
   let mark = t0;
   const lap = (k: keyof VibeTimings) => { const now = performance.now(); timings[k] = Math.round(now - mark); mark = now; };
   const finish = async <T extends VibeResult>(r: T) => {
+    if (r.tracks.length && !r.clarify) {
+      onStep("Checking the complete playlist");
+      const checked = await checkFinalPlaylist(r.tracks, specContext(r.spec, vibe), { deadline, startId: seeds[0]?.id });
+      r = { ...r, tracks: checked.tracks, quality: checked.report, reasons: { ...r.reasons, ...checked.report.reasons } };
+      if (checked.pending.length) void supabase.functions.invoke("audio-analyze", { body: { queue_ids: checked.pending.map((t) => t.id) } }).catch(() => {});
+      console.info(`[vibe] quality ${JSON.stringify(checked.report)}`);
+      if (checked.report.errors.length) throw new Error("No terminó la comprobación completa de oído; no se guardó ninguna playlist sin verificar.");
+    }
     timings.total = Math.round(performance.now() - t0);
     console.info(`[vibe] timings (ms) ${JSON.stringify(timings)}`);
     console.info(`[vibe] funnel ${JSON.stringify((r as VibeResult).funnel ?? null)} approved=${(r as VibeResult).approved} tracks=${r.tracks.length}`);
-    supabase.from("vibe_timings").insert({ user_id: userId, vibe, steps: timings as any, total_ms: timings.total, tracks: r.tracks.length }).then(() => {});
+    supabase.from("vibe_timings").insert({ user_id: userId, vibe, steps: { ...timings, quality: r.quality, funnel: r.funnel, spec: r.spec, songs: r.tracks.map((t) => ({ id: t.id, name: t.name, artists: t.artists, why: r.reasons?.[t.id] })) } as any, total_ms: timings.total, tracks: r.tracks.length }).then(() => {});
     return { ...r, timings };
   };
 
@@ -571,7 +585,7 @@ export async function buildVibePlaylist(
   const pendingSeeds = seeds.filter((t) => !hasSavedAudio(t));
   if (pendingSeeds.length) void supabase.functions.invoke("audio-analyze", { body: { queue_ids: pendingSeeds.map((t) => t.id) } }).catch(() => {});
   lap("seed");
-  const removedP = removedForSeeds(userId, seeds);
+  const removedP = loadRemovalRules(userId).then((rules) => new Set(profiles.filter((t) => !respectsRemovals(t, seeds, rules, profiles)).map((t) => t.id)));
   // Recipe (and name) cached per vibe text + seed profile. With seeds it only names the playlist and runs
   // in parallel with listening; with seeds and no keywords it isn't asked for at all.
   const readRecipe = () => readVibeSpec(userId, vibe, seeds, opts.corrections ?? []);
@@ -584,7 +598,9 @@ export async function buildVibePlaylist(
     if (spec.clarify) return finish({ spec, lang: "en", tracks: [], candidates: 0, approved: 0, clarify: spec.clarify });
     onStep("Finding songs that feel the same");
     fitPool = [];
-    const { lang, candidates, funnel } = filterCandidates(profiles, spec, langChoice, []);
+    const removed = await withinBudget(removedP, deadline, null);
+    if (!removed) throw new Error("No se pudieron leer tus correcciones a tiempo.");
+    const { lang, candidates, funnel } = filterCandidates(profiles.filter((t) => !removed.has(t.id)), spec, langChoice, []);
     lap("filter");
     if (!candidates.length) return finish({ spec, lang, tracks: [], candidates: 0, approved: 0, funnel: { ...funnel, listened: 0 } });
     // The ear judges against the full interpretation; songs without a clip keep the text review.
@@ -604,7 +620,7 @@ export async function buildVibePlaylist(
     };
     const listenP = top.length
       ? listenCandidates(userId, top, spec.listening === "background" && reference ? [reference] : [], ctx,
-        (d, t) => onStep("Listening to the songs", d, t), live, ctx, deadline)
+        (d, t) => onStep("Listening to the songs", d, t), live, ctx, candidateDeadline)
       : Promise.resolve({ scores: new Map<string, number>(), unheard: new Set<string>(), reasons: {} as Record<string, string> });
     const textP = Promise.resolve(new Map<string, number>());
     // Hard budget: text scoring that outlives the deadline is abandoned — its songs are
@@ -614,6 +630,10 @@ export async function buildVibePlaylist(
       new Promise<Map<string, number>>((r) => setTimeout(() => r(new Map()), Math.max(0, deadline - performance.now()))),
     ]);
     const { scores: ear, unheard, reasons } = await listenP; // self-bounded by the same deadline
+    if (!ear.size && unheard.size) {
+      void supabase.functions.invoke("audio-analyze", { body: { queue_ids: [...unheard] } }).catch(() => {});
+      throw new Error("La escucha no terminó a tiempo; las canciones siguen pendientes, no fueron rechazadas.");
+    }
     const late = top.filter((t) => !ear.has(t.id) && !text.has(t.id) && unheard.has(t.id));
     // Unheard songs are omitted and queued, never rescued by a text score after a failed listen.
     const text2 = new Map<string, number>();
@@ -642,7 +662,8 @@ export async function buildVibePlaylist(
   if (!removed) throw new Error("No se pudieron leer tus correcciones a tiempo; no se creó el vibe.");
   fitPool = [];
   const soundRank = (t: TrackProfile) => Math.max(...seeds.map((x) => soundSimilarity(t, x)));
-  const { lang, candidates: raw0 } = filterCandidates(profiles.filter((t) => !removed.has(t.id)), local, langChoice, seeds, fitPool, soundRank);
+  const seedKeys = new Set(seeds.map(songIdentity));
+  const { lang, candidates: raw0 } = filterCandidates(profiles.filter((t) => !removed.has(t.id) && !seedKeys.has(songIdentity(t))), local, langChoice, seeds, fitPool, soundRank);
   const candidates = raw0.filter((t) => feelsLikeSeed(t, seeds));
   lap("filter");
   if (!candidates.length) {
@@ -667,7 +688,7 @@ export async function buildVibePlaylist(
     if (!timings.first) timings.first = Math.round(performance.now() - t0);
     onPartial?.([...seeds, ...ok.slice(0, MAX_TRACKS - seeds.length)]);
   };
-  const listenP = listenCandidates(userId, top, seeds, specContext(opts.presetSpec ?? local, vibe), (d, t) => onStep("Listening to the songs", d, t), live, undefined, deadline);
+  const listenP = listenCandidates(userId, top, seeds, specContext(opts.presetSpec ?? local, vibe), (d, t) => onStep("Listening to the songs", d, t), live, undefined, candidateDeadline);
   const textP = Promise.resolve(new Map<string, number>());
   // Hard budget: text scoring that outlives the deadline is abandoned — its songs are
   // omitted (never rejected), and the ear's verdicts still land.
@@ -676,6 +697,10 @@ export async function buildVibePlaylist(
     new Promise<Map<string, number>>((r) => setTimeout(() => r(new Map()), Math.max(0, deadline - performance.now()))),
   ]);
   const { scores: ear, unheard, reasons } = await listenP; // self-bounded by the same deadline
+  if (!ear.size && unheard.size) {
+    void supabase.functions.invoke("audio-analyze", { body: { queue_ids: [...unheard] } }).catch(() => {});
+    throw new Error("La escucha no terminó a tiempo; las canciones siguen pendientes, no fueron rechazadas.");
+  }
   const late = top.filter((t) => !ear.has(t.id) && !text.has(t.id) && unheard.has(t.id));
   const text2 = new Map<string, number>();
   const scores = new Map([...text, ...text2, ...ear]);

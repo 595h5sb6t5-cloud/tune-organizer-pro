@@ -11,6 +11,7 @@
 
 import { type Mood, type TrackProfile } from "./features";
 import { MOMENT_NAMES, MOMENT_DESC, MOMENT_CURVE } from "./moments";
+import { uniqueSongs } from "./identity";
 
 export interface PlaylistDraft {
   key: string;
@@ -20,6 +21,7 @@ export interface PlaylistDraft {
   moment?: string | null; // the life moment this playlist soundtracks
   cohesion: number; // 0–1, average compatibility inside the playlist
   tracks: TrackProfile[];
+  quality?: import("./quality").QualityReport;
 }
 
 export interface OrganizeOptions {
@@ -428,11 +430,14 @@ function energyTarget(position: number, lo: number, hi: number, curve: "rise" | 
   return lo + (hi - lo) * c;
 }
 
+export function transitionClash(a: TrackProfile, b: TrackProfile): boolean {
+  const instrumentsClash = a.instruments.length > 0 && b.instruments.length > 0 && jaccard(a.instruments, b.instruments) === 0;
+  return instrumentsClash || productionClash(a, b) || drumClash(a, b) || feelClash(a, b) || soundClash(a, b);
+}
+
 export function sequence(tracks: TrackProfile[], startId?: string, curve?: "rise" | "fall" | "peak"): TrackProfile[] {
-  if (tracks.length <= 2) {
-    const first = tracks.find((t) => t.id === startId);
-    return first ? [first, ...tracks.filter((t) => t !== first)] : tracks;
-  }
+  tracks = uniqueSongs(tracks);
+  if (tracks.length <= 1) return tracks;
 
   const energies = tracks.map((t) => t.energy).filter((e): e is number => e !== null);
   const hasEnergy = energies.length >= tracks.length * 0.6;
@@ -471,18 +476,38 @@ export function sequence(tracks: TrackProfile[], startId?: string, curve?: "rise
     !!seed?.feeling && !!t.feeling && (t.feeling === seed.feeling || (!!seed.feeling2 && t.feeling === seed.feeling2));
 
   while (remaining.length) {
-    const restrict = seed && ordered.length < 3 && remaining.some(strongFeel);
+    const prev = ordered.at(-1);
+    const smooth = (t: TrackProfile) => !prev || !transitionClash(prev, t);
+    const restrict = seed && ordered.length < 3 && remaining.some((t) => smooth(t) && strongFeel(t));
     let bestIndex = -1;
     let bestCost = Infinity;
     remaining.forEach((t, i) => {
+      if (!smooth(t)) return;
       if (restrict && !strongFeel(t)) return;
       const c = stepCost(t);
-      if (c < bestCost) {
-        bestCost = c;
+      const finiteCost = Number.isFinite(c) ? c : 0;
+      if (finiteCost < bestCost) {
+        bestCost = finiteCost;
         bestIndex = i;
       }
     });
-    if (bestIndex < 0) bestIndex = remaining.findIndex((t) => !restrict || strongFeel(t));
+    if (bestIndex < 0) {
+      // Try every insertion point before declaring an unavoidable transition jump.
+      let inserted = false;
+      for (let i = 0; i < remaining.length && !inserted; i++) {
+        const candidate = remaining[i];
+        for (let at = startId ? 1 : 0; at < ordered.length; at++) {
+          const before = ordered[at - 1], after = ordered[at];
+          if ((!before || !transitionClash(before, candidate)) && !transitionClash(candidate, after)) {
+            ordered.splice(at, 0, remaining.splice(i, 1)[0]); inserted = true; break;
+          }
+        }
+      }
+      if (inserted) continue;
+      // No smooth insertion exists. Callers retain these omitted songs in Not placed.
+      remaining.shift();
+      continue;
+    }
     ordered.push(remaining.splice(bestIndex, 1)[0]);
   }
   return ordered;
@@ -581,6 +606,7 @@ function nameFor(tracks: TrackProfile[], _lang: string, used: Set<string>, usedW
 // ---------- Main entry ----------
 
 export function organizeLibrary(all: TrackProfile[], options: OrganizeOptions = {}): OrganizeResult {
+  all = uniqueSongs(all);
   const { minSize = 8, maxSize = 40, threshold = 0.55 } = options;
 
   const buckets = new Map<string, TrackProfile[]>();
@@ -651,6 +677,8 @@ export function organizeLibrary(all: TrackProfile[], options: OrganizeOptions = 
       const moment = dominantMoment(g.tracks);
       const curve = moment ? (MOMENT_CURVE[moment] === "rise" ? "rise" : "peak") : undefined;
       const ordered = sequence(g.tracks, undefined, curve);
+      const keptIds = new Set(ordered.map((t) => t.id));
+      leftovers.push(...g.tracks.filter((t) => !keptIds.has(t.id)));
       const name = nameFor(ordered, g.lang, used, usedWords);
       return {
         key: `${g.lang}-${i}`,
@@ -664,7 +692,11 @@ export function organizeLibrary(all: TrackProfile[], options: OrganizeOptions = 
       };
     });
 
-  return { playlists, unsorted: [...leftovers, ...notReady] };
+  const final = playlists.filter((p) => {
+    if (p.tracks.length >= minSize) return true;
+    leftovers.push(...p.tracks); return false;
+  });
+  return { playlists: final, unsorted: uniqueSongs([...leftovers, ...notReady]) };
 }
 // ---------- Final AI curator (skip test) ----------
 
@@ -727,6 +759,9 @@ export async function curateLibrary(
     const moment = p.moment ?? dominantMoment(p.tracks);
     const curve = moment ? (MOMENT_CURVE[moment] === "rise" ? "rise" : "peak") : undefined;
     const ordered = sequence(p.tracks, undefined, curve);
+    const keptIds = new Set(ordered.map((t) => t.id));
+    unsorted.push(...p.tracks.filter((t) => !keptIds.has(t.id)));
+    if (ordered.length < minSize) { unsorted.push(...ordered); continue; }
     let name = isCleanName(p.name) ? p.name : nameFor(ordered, p.lang, used, new Set());
     for (let i = 2; used.has(name); i++) name = `${p.name} ${i}`;
     used.add(name);

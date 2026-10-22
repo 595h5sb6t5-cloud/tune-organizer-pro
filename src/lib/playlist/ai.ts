@@ -167,12 +167,13 @@ function apply(p: TrackProfile, info: Partial3, fromAi: boolean): TrackProfile {
 /** Sound heard from public previews (shared per song). Replaces the text-based sound fields. */
 async function loadAudio(ids: string[]): Promise<Map<string, any>> {
   const map = new Map<string, any>();
-  for (let i = 0; i < ids.length; i += 300) {
+  await Promise.all(Array.from({ length: Math.ceil(ids.length / 300) }, async (_, batch) => {
+    const i = batch * 300;
     const { data } = await supabase.from("track_audio_analysis")
       .select("spotify_track_id, source, instruments, melodic_focus, percussive_drive, texture, warmth, scale, groove, confidence, production_era, vocal_style, lyric_theme, drum_sound, mix_character, vocal_space")
       .in("spotify_track_id", ids.slice(i, i + 300));
     for (const r of data ?? []) map.set(r.spotify_track_id, r);
-  }
+  }));
   return map;
 }
 

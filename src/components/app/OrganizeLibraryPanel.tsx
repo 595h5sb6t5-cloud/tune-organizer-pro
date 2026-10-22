@@ -68,10 +68,11 @@ export async function loadArtistGenres(
   // Genres are filled in the background (library-enrich); use what's stored now.
   const ids = [...new Set(artistIds)];
   const out: Record<string, string[]> = {};
-  for (let i = 0; i < ids.length; i += 300) {
+  await Promise.all(Array.from({ length: Math.ceil(ids.length / 300) }, async (_, batch) => {
+    const i = batch * 300;
     const { data } = await supabase.from("artist_genres").select("artist_id, genres").in("artist_id", ids.slice(i, i + 300));
     for (const r of data ?? []) out[r.artist_id] = r.genres ?? [];
-  }
+  }));
   return out;
 }
 
@@ -154,7 +155,12 @@ export default function OrganizeLibraryPanel({ onSaved }: { onSaved: () => void 
       all.map((p) => {
         if (p.key !== key) return p;
         const removed = p.tracks.find((t) => t.id === id);
-        if (removed) { setUnsorted((u) => [...u, removed]); void recordRemoval(id, { context: `ai-playlist: ${p.name}` }); }
+        if (removed) {
+          const rest = sequence(p.tracks.filter((t) => t.id !== id));
+          const kept = new Set(rest.map((t) => t.id));
+          setUnsorted((u) => [...u, ...p.tracks.filter((t) => !kept.has(t.id))]);
+          for (const anchor of p.tracks.filter((t) => t.id !== id).slice(0, 3)) void recordRemoval(id, { seedId: anchor.id, context: `ai-playlist: ${p.name}` });
+        }
         return { ...p, tracks: sequence(p.tracks.filter((t) => t.id !== id)) };
       }),
     );

@@ -60,7 +60,7 @@ async function tagBatch(apiKey: string, songs: SongRow[]) {
         .sort((a: any, b: any) => b.s - a.s)
         .slice(0, 3);
       return { id: r.id as string, moments, story: typeof r.story === "string" ? r.story.slice(0, 200) : null };
-    });
+    }).filter((r: any) => r.moments.length > 0 && r.story?.trim());
   return { status: 200, rows };
 }
 
@@ -95,7 +95,23 @@ async function hop(admin: any, depth: number) {
 
   // Songs someone liked that have analysis but no moments yet.
   const { data: list } = await admin.rpc("moment_queue_next", { _limit: 250 });
-  const songs = (list ?? []) as SongRow[];
+  let songs = (list ?? []) as SongRow[];
+  if (!songs.length) {
+    // Audio-complete songs without a text style still have enough stored evidence for moments.
+    const { data: missing } = await admin.from("track_analysis_global").select("*").eq("moments_checked", false).limit(250);
+    const ids = (missing ?? []).map((g: any) => g.spotify_track_id);
+    if (ids.length) {
+      const [{ data: liked }, { data: audio }] = await Promise.all([
+        admin.from("liked_songs").select("spotify_track_id,track_name,artist_name").eq("is_active", true).in("spotify_track_id", ids),
+        admin.from("track_audio_analysis").select("*").in("spotify_track_id", ids),
+      ]);
+      songs = (missing ?? []).flatMap((g: any) => {
+        const l = liked?.find((t: any) => t.spotify_track_id === g.spotify_track_id);
+        const a = audio?.find((t: any) => t.spotify_track_id === g.spotify_track_id);
+        return l && a ? [{ ...g, ...l, instruments: a.instruments ?? g.instruments, melodic_focus: a.melodic_focus ?? g.melodic_focus, year: g.original_year }] : [];
+      });
+    }
+  }
   let done = 0;
   let paused = false;
   let pauseReason = "ai_rate_limit";
