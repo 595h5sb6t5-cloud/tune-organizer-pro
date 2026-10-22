@@ -90,7 +90,7 @@ async function hop(admin: any, depth: number) {
   const apiKey = Deno.env.get("OPENAI_API_KEY");
   if (!apiKey) {
     await admin.from("moment_tags_state").update({ status: "error", lease_until: null, last_error: "OPENAI_API_KEY is not set." }).eq("id", 1);
-    return json({ error: "OPENAI_API_KEY is not set." }, 500);
+    return { status: "error", error: "OPENAI_API_KEY is not set." };
   }
 
   // Songs someone liked that have analysis but no moments yet.
@@ -171,7 +171,11 @@ Deno.serve(async (req) => {
       return json({ ...st, remaining: count });
     }
     const depth = Math.max(0, Math.min(MAX_DEPTH, Number.isFinite(Number(body.depth)) ? Number(body.depth) : MAX_DEPTH));
-    return json(await hop(admin, depth));
+    // Hops run after the response so callers never hit the platform idle timeout.
+    const p = hop(admin, depth).then((r) => console.log("[moment-tags] hop", JSON.stringify(r))).catch((e) => console.error("[moment-tags] bg", e));
+    // @ts-ignore EdgeRuntime
+    if (typeof EdgeRuntime !== "undefined" && EdgeRuntime.waitUntil) EdgeRuntime.waitUntil(p); else await p;
+    return json({ status: "started" });
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : "Unknown error" }, 500);
   }
