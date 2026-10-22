@@ -60,7 +60,7 @@ async function tagBatch(apiKey: string, songs: SongRow[]) {
         .sort((a: any, b: any) => b.s - a.s)
         .slice(0, 3);
       return { id: r.id as string, moments, story: typeof r.story === "string" ? r.story.slice(0, 200) : null };
-    });
+    }).filter((r: any) => r.moments.length > 0 && r.story?.trim());
   return { status: 200, rows };
 }
 

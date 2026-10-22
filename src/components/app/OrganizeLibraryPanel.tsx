@@ -154,7 +154,12 @@ export default function OrganizeLibraryPanel({ onSaved }: { onSaved: () => void 
       all.map((p) => {
         if (p.key !== key) return p;
         const removed = p.tracks.find((t) => t.id === id);
-        if (removed) { setUnsorted((u) => [...u, removed]); void recordRemoval(id, { context: `ai-playlist: ${p.name}` }); }
+        if (removed) {
+          const rest = sequence(p.tracks.filter((t) => t.id !== id));
+          const kept = new Set(rest.map((t) => t.id));
+          setUnsorted((u) => [...u, ...p.tracks.filter((t) => !kept.has(t.id))]);
+          for (const anchor of p.tracks.filter((t) => t.id !== id).slice(0, 3)) void recordRemoval(id, { seedId: anchor.id, context: `ai-playlist: ${p.name}` });
+        }
         return { ...p, tracks: sequence(p.tracks.filter((t) => t.id !== id)) };
       }),
     );

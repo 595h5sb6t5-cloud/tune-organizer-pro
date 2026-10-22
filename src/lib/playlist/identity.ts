@@ -4,6 +4,7 @@ const normalize = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, 
   .replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 const version = /\b(remaster(?:ed)?|remix|mix|version|edit|live|acoustic|instrumental|sped up|slowed|extended|radio|original)\b/i;
 export function songIdentity(t: TrackProfile): string {
+  if (!t.name || !t.artists?.length) return `id:${t.id}`;
   const title = t.name.replace(/\s*[([]([^\])]+)[)\]]/g, (whole, inner: string) => version.test(inner) ? "" : whole)
     .replace(/\s+-\s+(.+)$/, (whole, suffix: string) => version.test(suffix) ? "" : whole);
   return `${normalize(title)}|${normalize(t.artists[0] ?? "")}`;
