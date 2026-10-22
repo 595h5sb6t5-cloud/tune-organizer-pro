@@ -1,0 +1,1 @@
+MPEGDecoder.js and EmscriptenWasm.js are from mpg123-decoder 1.0.3 (https://github.com/eshaz/wasm-audio-decoders), MIT licensed wrapper around the LGPL mpg123 decoder. The main decoder import is narrowed to WASMAudioDecoderCommon to avoid initializing unsupported Web Workers in the Edge runtime. No decoding logic was changed.
