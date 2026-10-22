@@ -2,6 +2,9 @@
 
 ## Orden vinculante actualizado
 - [ ] Antes de confirmación/Rebuild: prueba del intruso con clips de 15 s, grupos de 20 traslapados, dos vueltas; 8+ contra dos de tres anclas; transiciones sin saltos; feedback X de Twenty Tears; deduplicación global por canción/versión. Reportar total de intrusos y tres razones reales.
+- Implementado y con pruebas: gate compartido Gemini, 2/3 anclas ≥8, traslape de 20, segunda vuelta, deduplicación y feedback contextual. Falta confirmación end-to-end exitosa; no ejecutar Rebuild mientras falle.
+- 22 oct 17:14 UTC: 1,677 registros activos; 0 pendientes de momentos, 0 de producción; 8 sin clip. Se repararon 53 falsos terminados y la última canción fuera de la cola. Audio MP3/M4A ahora se convierte en memoria a WAV válido de 15 s; prueba real de tres canciones recibió veredictos completos (0 intrusos), pero Twenty Tears sigue excluida por la corrección de la usuaria.
+- Bloqueo actual: confirmación de chill platica buena no cumple el tiempo; hubo escucha tardía sin resultados y luego lectura de biblioteca >20 s. No hay Rebuild ni informe musical final. No atribuir estas corridas fallidas a rechazo musical.
 - Verificado: 22 pruebas pasan; pausa real de audio/momentos devuelve foreground-priority con sesión autenticada; compilación limpia. No se ejecutó confirmación ni Rebuild.
 - Pendiente de datos al 21 oct 02:08 UTC: 912/1,677 canciones con momentos; 1,536 pendientes de producción detallada. No declarar objetivos de velocidad/costo ni resultados musicales hasta las corridas reales.
 - [ ] Completar producción oída (drum_sound, mix_character, vocal_space), compatibilidad ×0.6 si batería y mezcla distintas; sin reglas por artista.

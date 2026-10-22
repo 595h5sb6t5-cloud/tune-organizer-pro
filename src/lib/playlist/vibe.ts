@@ -630,6 +630,10 @@ export async function buildVibePlaylist(
       new Promise<Map<string, number>>((r) => setTimeout(() => r(new Map()), Math.max(0, deadline - performance.now()))),
     ]);
     const { scores: ear, unheard, reasons } = await listenP; // self-bounded by the same deadline
+    if (!ear.size && unheard.size) {
+      void supabase.functions.invoke("audio-analyze", { body: { queue_ids: [...unheard] } }).catch(() => {});
+      throw new Error("La escucha no terminó a tiempo; las canciones siguen pendientes, no fueron rechazadas.");
+    }
     const late = top.filter((t) => !ear.has(t.id) && !text.has(t.id) && unheard.has(t.id));
     // Unheard songs are omitted and queued, never rescued by a text score after a failed listen.
     const text2 = new Map<string, number>();
@@ -693,6 +697,10 @@ export async function buildVibePlaylist(
     new Promise<Map<string, number>>((r) => setTimeout(() => r(new Map()), Math.max(0, deadline - performance.now()))),
   ]);
   const { scores: ear, unheard, reasons } = await listenP; // self-bounded by the same deadline
+  if (!ear.size && unheard.size) {
+    void supabase.functions.invoke("audio-analyze", { body: { queue_ids: [...unheard] } }).catch(() => {});
+    throw new Error("La escucha no terminó a tiempo; las canciones siguen pendientes, no fueron rechazadas.");
+  }
   const late = top.filter((t) => !ear.has(t.id) && !text.has(t.id) && unheard.has(t.id));
   const text2 = new Map<string, number>();
   const scores = new Map([...text, ...text2, ...ear]);

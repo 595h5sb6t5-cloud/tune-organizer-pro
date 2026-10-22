@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { anchorVerdict, overlappingGroups, checkFinalPlaylist } from "./quality";
 import { songIdentity, uniqueSongs, deduplicateSet } from "./identity";
 import { sequence, transitionClash } from "./organize";
+import { respectsRemovals } from "./feedback";
 import type { TrackProfile } from "./features";
 import { supabase } from "@/integrations/supabase/client";
 vi.mock("@/integrations/supabase/client", () => ({ supabase: { functions: { invoke: vi.fn() } } }));
@@ -15,6 +16,15 @@ const track = (id: string, extra: Partial<TrackProfile> = {}): TrackProfile => (
 });
 beforeEach(() => vi.clearAllMocks());
 describe("final playlist rules", () => {
+  it("honors Twenty Tears' contextual removal without banning WhoMadeWho", () => {
+    const removed = track("twenty", { name: "Twenty Tears", artists: ["WhoMadeWho", "Rebolledo"] });
+    const oblivion = track("oblivion", { name: "Oblivion", artists: ["WhoMadeWho", "Mano Le Tough"] });
+    const other = track("other", { artists: ["WhoMadeWho"] });
+    const rules = [{ spotify_track_id: removed.id, seed_track_id: oblivion.id, context: "ai-playlist: Oblivion / What To Do" }];
+    expect(respectsRemovals(removed, [oblivion], rules, [removed, oblivion])).toBe(false);
+    expect(respectsRemovals(removed, [other], rules, [removed, oblivion, other])).toBe(true);
+    expect(respectsRemovals(other, [oblivion], rules, [removed, oblivion, other])).toBe(true);
+  });
   it("requires 8 against two anchors, not just the closest", () => {
     expect(anchorVerdict({ a: 10, b: 7, c: 7 }, ["a", "b", "c"], "song")).toBe("rejected");
     expect(anchorVerdict({ a: 8, b: 8, c: 6 }, ["a", "b", "c"], "song")).toBe("accepted");
