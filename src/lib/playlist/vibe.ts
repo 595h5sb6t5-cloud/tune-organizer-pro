@@ -570,7 +570,7 @@ export async function buildVibePlaylist(
       r = { ...r, tracks: checked.tracks, quality: checked.report, reasons: { ...r.reasons, ...checked.report.reasons } };
       if (checked.pending.length) void supabase.functions.invoke("audio-analyze", { body: { queue_ids: checked.pending.map((t) => t.id) } }).catch(() => {});
       console.info(`[vibe] quality ${JSON.stringify(checked.report)}`);
-      if (checked.report.errors.length && !r.tracks.length) throw new Error("No terminó la comprobación completa de oído; no se guardó ninguna playlist sin verificar.");
+      if (checked.report.errors.length) throw new Error("No terminó la comprobación completa de oído; no se guardó ninguna playlist sin verificar.");
     }
     timings.total = Math.round(performance.now() - t0);
     console.info(`[vibe] timings (ms) ${JSON.stringify(timings)}`);
@@ -597,7 +597,9 @@ export async function buildVibePlaylist(
     if (spec.clarify) return finish({ spec, lang: "en", tracks: [], candidates: 0, approved: 0, clarify: spec.clarify });
     onStep("Finding songs that feel the same");
     fitPool = [];
-    const { lang, candidates, funnel } = filterCandidates(profiles, spec, langChoice, []);
+    const removed = await withinBudget(removedP, deadline, null);
+    if (!removed) throw new Error("No se pudieron leer tus correcciones a tiempo.");
+    const { lang, candidates, funnel } = filterCandidates(profiles.filter((t) => !removed.has(t.id)), spec, langChoice, []);
     lap("filter");
     if (!candidates.length) return finish({ spec, lang, tracks: [], candidates: 0, approved: 0, funnel: { ...funnel, listened: 0 } });
     // The ear judges against the full interpretation; songs without a clip keep the text review.

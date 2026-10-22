@@ -484,8 +484,9 @@ export function sequence(tracks: TrackProfile[], startId?: string, curve?: "rise
       if (!smooth(t)) return;
       if (restrict && !strongFeel(t)) return;
       const c = stepCost(t);
-      if (c < bestCost) {
-        bestCost = c;
+      const finiteCost = Number.isFinite(c) ? c : 0;
+      if (finiteCost < bestCost) {
+        bestCost = finiteCost;
         bestIndex = i;
       }
     });

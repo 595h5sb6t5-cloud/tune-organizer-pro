@@ -213,7 +213,7 @@ export default function VibePlaylistPanel() {
       setTracks(res.tracks);
       if (res.clarify) setClarify(res.clarify);
     } catch (e) {
-      if (runRef.current === run) setError(e instanceof Error ? e.message : "Something went wrong.");
+      if (runRef.current === run) { setTracks(null); setError(e instanceof Error ? e.message : "Something went wrong."); }
     } finally {
       if (runRef.current === run) setStep(null);
       if (release) void release();
