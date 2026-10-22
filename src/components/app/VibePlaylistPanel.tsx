@@ -72,17 +72,21 @@ export default function VibePlaylistPanel() {
   const [understood, setUnderstood] = useState<{ phrase: string; spec: VibeSpec } | null>(null);
   const [clarify, setClarify] = useState<{ question: string; options: string[] } | null>(null);
   const runRef = useRef(0);
+  const profilesPromise = useRef<Promise<TrackProfile[]> | null>(null);
 
   useEffect(() => {
-    if (user) loadLikedTracks(user.id).then(setLiked).catch(() => setLiked([]));
     if (user) { // ready before the first click, without showing a loading state
       warmVibeFunctions();
-      loadLikedTracks(user.id).then(async (l) => {
-        if (!l.length) return;
+      const pending = loadLikedTracks(user.id).then(async (l) => {
+        setLiked(l);
+        if (!l.length) return [];
         const g = await loadArtistGenres(l.flatMap((t) => t.artists.map((a) => a.id)), () => {});
         const p = await enrichWithAI(buildProfiles(l, g));
         setProfiles((cur) => cur ?? p);
-      }).catch(() => null);
+        return p;
+      });
+      profilesPromise.current = pending;
+      void pending.catch(() => { profilesPromise.current = null; });
     }
   }, [user]);
 
@@ -141,8 +145,10 @@ export default function VibePlaylistPanel() {
 
   async function getProfiles(): Promise<TrackProfile[]> {
     if (profiles) return profiles;
+    if (profilesPromise.current) return profilesPromise.current;
+    if (!user) throw new Error("Inicia sesión para leer tu biblioteca.");
     setStep({ label: "Reading your Liked Songs" });
-    const liked = await loadLikedTracks(user!.id);
+    const liked = await loadLikedTracks(user.id);
     setLiked(liked);
     if (!liked.length) throw new Error("Your Liked Songs list is empty. Sync your library first.");
     const genres = await loadArtistGenres(liked.flatMap((t) => t.artists.map((a) => a.id)), (done, total) =>

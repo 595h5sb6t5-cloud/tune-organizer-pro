@@ -68,10 +68,11 @@ export async function loadArtistGenres(
   // Genres are filled in the background (library-enrich); use what's stored now.
   const ids = [...new Set(artistIds)];
   const out: Record<string, string[]> = {};
-  for (let i = 0; i < ids.length; i += 300) {
+  await Promise.all(Array.from({ length: Math.ceil(ids.length / 300) }, async (_, batch) => {
+    const i = batch * 300;
     const { data } = await supabase.from("artist_genres").select("artist_id, genres").in("artist_id", ids.slice(i, i + 300));
     for (const r of data ?? []) out[r.artist_id] = r.genres ?? [];
-  }
+  }));
   return out;
 }
 
