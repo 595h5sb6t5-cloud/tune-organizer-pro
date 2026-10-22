@@ -560,6 +560,7 @@ export async function buildVibePlaylist(
   const t0 = opts.startedAt ?? performance.now();
   profiles = uniqueSongs(profiles); seeds = uniqueSongs(seeds);
   const deadline = t0 + 19_500; // a vibe never takes more than 20 seconds
+  const candidateDeadline = Math.min(deadline, t0 + 9_000); // reserve time for the final complete-playlist ear gate
   const timings: VibeTimings = { seed: 0, recipe: 0, filter: 0, select: 0, listen: 0, order: 0, name: 0, first: 0, total: 0 };
   let mark = t0;
   const lap = (k: keyof VibeTimings) => { const now = performance.now(); timings[k] = Math.round(now - mark); mark = now; };
@@ -619,7 +620,7 @@ export async function buildVibePlaylist(
     };
     const listenP = top.length
       ? listenCandidates(userId, top, spec.listening === "background" && reference ? [reference] : [], ctx,
-        (d, t) => onStep("Listening to the songs", d, t), live, ctx, deadline)
+        (d, t) => onStep("Listening to the songs", d, t), live, ctx, candidateDeadline)
       : Promise.resolve({ scores: new Map<string, number>(), unheard: new Set<string>(), reasons: {} as Record<string, string> });
     const textP = Promise.resolve(new Map<string, number>());
     // Hard budget: text scoring that outlives the deadline is abandoned — its songs are
@@ -683,7 +684,7 @@ export async function buildVibePlaylist(
     if (!timings.first) timings.first = Math.round(performance.now() - t0);
     onPartial?.([...seeds, ...ok.slice(0, MAX_TRACKS - seeds.length)]);
   };
-  const listenP = listenCandidates(userId, top, seeds, specContext(opts.presetSpec ?? local, vibe), (d, t) => onStep("Listening to the songs", d, t), live, undefined, deadline);
+  const listenP = listenCandidates(userId, top, seeds, specContext(opts.presetSpec ?? local, vibe), (d, t) => onStep("Listening to the songs", d, t), live, undefined, candidateDeadline);
   const textP = Promise.resolve(new Map<string, number>());
   // Hard budget: text scoring that outlives the deadline is abandoned — its songs are
   // omitted (never rejected), and the ear's verdicts still land.

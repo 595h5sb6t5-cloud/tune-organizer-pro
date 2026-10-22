@@ -69,7 +69,12 @@ export async function checkFinalPlaylist(tracks: TrackProfile[], context: string
       } });
       const invoke = () => opts.deadline ? withinBudget(call(), opts.deadline, { data: null, error: new Error("Tiempo de escucha agotado") }) : call();
       let response = await invoke();
-      if ((response.error || response.data?.error) && (!opts.deadline || performance.now() < opts.deadline)) response = await invoke();
+      if ((response.error || response.data?.error) && (!opts.deadline || performance.now() < opts.deadline)) {
+        const wait = Math.min(2000, Math.max(250, Number(response.data?.retry_after_ms) || 250));
+        const pause = new Promise<void>((resolve) => setTimeout(resolve, wait));
+        if (opts.deadline) await withinBudget(pause, opts.deadline, undefined); else await pause;
+        if (!opts.deadline || performance.now() < opts.deadline) response = await invoke();
+      }
       return { group, ...response };
     }));
     const drop = new Map<string, { kind: "intruder" | "anchors"; reason: string }>();
