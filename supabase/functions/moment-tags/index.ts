@@ -18,7 +18,7 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const BATCH = 25;
 const CONCURRENCY = 5;
-const HOP_MS = 45_000;
+const HOP_MS = 35_000;
 const MAX_DEPTH = 80;
 
 const SYSTEM = `You are an expert music curator who has built thousands of playlists for real people. For EACH song, think about when, where and with whom someone would play THIS song and feel it is perfect for that moment. Base yourself on how it SOUNDS (the audio analysis) and on how listeners describe it — not on the genre name.
@@ -90,7 +90,7 @@ async function hop(admin: any, depth: number) {
   const apiKey = Deno.env.get("OPENAI_API_KEY");
   if (!apiKey) {
     await admin.from("moment_tags_state").update({ status: "error", lease_until: null, last_error: "OPENAI_API_KEY is not set." }).eq("id", 1);
-    return json({ error: "OPENAI_API_KEY is not set." }, 500);
+    return { status: "error", error: "OPENAI_API_KEY is not set." };
   }
 
   // Songs someone liked that have analysis but no moments yet.
@@ -131,15 +131,6 @@ async function hop(admin: any, depth: number) {
   };
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, batches.length) }, worker));
 
-  // Copy the new moments to every user who liked these songs.
-  const ids = songs.map((s) => s.spotify_track_id);
-  if (ids.length) {
-    const { data: users } = await admin.from("liked_songs").select("user_id").in("spotify_track_id", ids);
-    for (const uid of [...new Set((users ?? []).map((u: any) => u.user_id))]) {
-      await admin.rpc("hydrate_track_analysis", { _user_id: uid }).catch(() => null);
-    }
-  }
-
   const { count: left } = await admin.from("track_analysis_global").select("spotify_track_id", { count: "exact", head: true })
     .eq("moments_checked", false);
   const remaining = left ?? 0;
@@ -150,6 +141,15 @@ async function hop(admin: any, depth: number) {
   const finished = remaining === 0 || !songs.length;
   await admin.from("moment_tags_state").update({ status: finished ? "done" : "running", lease_until: null, last_error: null, done: (st?.done ?? 0) + done, updated_at: new Date().toISOString() }).eq("id", 1);
   if (!finished && depth > 0 && done > 0) kick(depth - 1);
+  // Copy (after state/kick so a runtime shutdown cannot stall the chain) the new moments to every user who liked these songs.
+  const ids = songs.map((s) => s.spotify_track_id);
+  if (ids.length) {
+    const { data: users } = await admin.from("liked_songs").select("user_id").in("spotify_track_id", ids);
+    for (const uid of [...new Set((users ?? []).map((u: any) => u.user_id))]) {
+      await admin.rpc("hydrate_track_analysis", { _user_id: uid }).catch(() => null);
+    }
+  }
+
   return { status: finished ? "done" : "running", done, remaining };
 }
 
@@ -171,7 +171,11 @@ Deno.serve(async (req) => {
       return json({ ...st, remaining: count });
     }
     const depth = Math.max(0, Math.min(MAX_DEPTH, Number.isFinite(Number(body.depth)) ? Number(body.depth) : MAX_DEPTH));
-    return json(await hop(admin, depth));
+    // Hops run after the response so callers never hit the platform idle timeout.
+    const p = hop(admin, depth).then((r) => console.log("[moment-tags] hop", JSON.stringify(r))).catch((e) => console.error("[moment-tags] bg", e));
+    // @ts-ignore EdgeRuntime
+    if (typeof EdgeRuntime !== "undefined" && EdgeRuntime.waitUntil) EdgeRuntime.waitUntil(p); else await p;
+    return json({ status: "started" });
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : "Unknown error" }, 500);
   }
