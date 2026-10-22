@@ -15,7 +15,8 @@ export async function earCheckPlaylists(userId: string, playlists: PlaylistDraft
     const result = await checkFinalPlaylist(p.tracks, `${p.moment ?? ""}: ${p.description}`, { runId: crypto.randomUUID() });
     listened += result.report.checked; reports.push(result.report);
     rejected.push(...result.rejected); pending.push(...result.pending);
-    if (result.tracks.length >= 8) final.push({ ...p, tracks: result.tracks });
+    if (result.report.errors.length) throw new Error(`La escucha de ${p.name} no terminó: ${result.report.errors[0]}. Se conserva el set anterior.`);
+    if (result.tracks.length >= 8) final.push({ ...p, tracks: result.tracks, quality: result.report });
     else rejected.push(...result.tracks);
     onProgress?.(++done, playlists.length);
   }

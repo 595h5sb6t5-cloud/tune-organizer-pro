@@ -576,7 +576,7 @@ export async function buildVibePlaylist(
     timings.total = Math.round(performance.now() - t0);
     console.info(`[vibe] timings (ms) ${JSON.stringify(timings)}`);
     console.info(`[vibe] funnel ${JSON.stringify((r as VibeResult).funnel ?? null)} approved=${(r as VibeResult).approved} tracks=${r.tracks.length}`);
-    supabase.from("vibe_timings").insert({ user_id: userId, vibe, steps: timings as any, total_ms: timings.total, tracks: r.tracks.length }).then(() => {});
+    supabase.from("vibe_timings").insert({ user_id: userId, vibe, steps: { ...timings, quality: r.quality, funnel: r.funnel, spec: r.spec, songs: r.tracks.map((t) => ({ id: t.id, name: t.name, artists: t.artists, why: r.reasons?.[t.id] })) } as any, total_ms: timings.total, tracks: r.tracks.length }).then(() => {});
     return { ...r, timings };
   };
 

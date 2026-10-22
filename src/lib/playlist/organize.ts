@@ -21,6 +21,7 @@ export interface PlaylistDraft {
   moment?: string | null; // the life moment this playlist soundtracks
   cohesion: number; // 0–1, average compatibility inside the playlist
   tracks: TrackProfile[];
+  quality?: import("./quality").QualityReport;
 }
 
 export interface OrganizeOptions {

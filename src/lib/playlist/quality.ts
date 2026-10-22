@@ -53,7 +53,7 @@ export async function checkFinalPlaylist(tracks: TrackProfile[], context: string
     }
     current = ordered;
   };
-  order();
+  // Callers already supply sequence()'s final order; do not silently reorder it before listening.
   // Initial complete-listen audit; repeat exactly once if removal changes the list.
   for (let pass = 1; pass <= 2 && current.length; pass++) {
     const anchors = pickAnchors(current).map((t) => t.id);
@@ -107,6 +107,7 @@ export async function checkFinalPlaylist(tracks: TrackProfile[], context: string
     }
     current = snapshots.filter((t) => !drop.has(t.id) && !unheard.has(t.id));
     if (!drop.size && !unheard.size) break;
+    // Preserve the already-audited relative order unless removal creates a strong boundary jump.
     order();
   }
   return { tracks: current, rejected: uniqueSongs(rejected), pending: uniqueSongs(pending), report };
